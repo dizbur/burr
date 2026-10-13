@@ -25,6 +25,7 @@ tests/                  the test bench: Burrpad run against real copies of pump.
 tests-standin/          a stand-in for pump.fun that misbehaves on purpose; tests only, never deployed
 scripts/ground/         read-only checks against the main network (they send nothing)
 scripts/check.sh        format, lint, advisories, build, tests
+scripts/deploy/         deploy, set up, check and upgrade the program, with the deployer's own keys
 scripts/protections.py  removes each protection in turn, in a throwaway copy, to prove a test notices
 ```
 
@@ -78,7 +79,31 @@ python3 scripts/protections.py
 
 ## Deploying
 
-Not yet, and not by this repository. Before any deployment: a program address chosen at deployment (the one in `declare_id!` is a local test address with no key kept), and a two-of-three wallet as upgrade key and administrator.
+Not done by this repository: whoever deploys runs the scripts in `scripts/deploy/` themselves, with their own keys, given as paths to key files. No script has a default network. The network's address is taken from the environment variable `BURRPAD_RPC_URL` and is never printed, and the main network needs `--mainnet yes` on every command. Every transaction is simulated first and is not sent if the simulation fails.
+
+```
+scripts/deploy/set-program-id.sh     writes the program's real address into the code (the one in declare_id! is a local test address)
+scripts/deploy/build.sh              a reproducible build in Docker (needs solana-verify); --plain for an ordinary one
+scripts/deploy/deploy.sh             puts the program on a network; checks the wallet holds enough first
+scripts/deploy/initialize.mjs        calls initialize, in the same sitting
+scripts/deploy/address-table.mjs     makes and freezes the address table a launch needs
+scripts/deploy/verify.mjs            reads everything back and prints PASS or FAIL per item; sends nothing
+scripts/deploy/first-coin.mjs        takes one small coin through everything on the live network: launch with a first buy,
+                                     buy, sell, collect, split, pay out, and thirty minutes later burn and the holders' release
+scripts/deploy/upgrade.sh            replaces the deployed code and reads it back; or uploads it and offers it to a multi-signature wallet
+scripts/deploy/admin.mjs             the administrator's switches and hand-overs; for a multi-signature wallet it prints the transaction to approve
+scripts/deploy/hand-over-upgrade.mjs passes the upgrade key to the multi-signature wallet, once that wallet is the administrator
+scripts/deploy/coin.mjs, lib.mjs     builders for every instruction a coin needs, from the interface file; a worked example for a site
+scripts/deploy/rehearsal/            rehearses all of the above on a local validator running pump.fun's real programs
+```
+
+The order: set the address, build, deploy, initialize, address table, verify, first coin. One wallet can hold the upgrade key and the administrator role while testing. Before the public is invited both go to a multi-signature wallet: the administrator role is proposed by the deployer and accepted by the wallet, and only then can the upgrade key be handed over.
+
+A program this size (about 663 KB) locks about 4.62 SOL on the network for good, and each upgrade needs the same amount again as a float, which is returned when the upgrade lands.
+
+The rehearsal (`scripts/deploy/rehearsal/rehearse.sh <name>`) starts from a clean copy of the code and throwaway keys and runs every step above, including an upgrade, both pause switches and the hand-over. It takes about 40 minutes, most of it waiting for the first holder release to be allowed. A local validator switches on every planned network rule; the rehearsal switches one off (SIMD-0500, which refuses to deploy programs in this format and is not in force on the main network at the time of writing), and `deploy.sh` and `upgrade.sh` stop with a clear message if a network has it in force.
+
+Two switches stop things: `admin.mjs pause-launches` (no new coins) and `admin.mjs pause-holder-releases` (no holder pot can leave). Nothing stops trading, collecting, the fixed payouts or buy back and burn.
 
 ## Licence
 
