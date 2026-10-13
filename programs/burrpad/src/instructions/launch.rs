@@ -198,6 +198,22 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     );
     pump::check_plain_coin_mint(&a.mint.to_account_info(), &a.token_2022_program.key())?;
 
+    // pump.fun pays the rent of the mint it makes. At one length of name,
+    // ticker and link together (37 bytes, found on the bench against its
+    // real program) it leaves the mint a little short, and the network then
+    // refuses the whole transaction. The launcher makes up any shortfall.
+    let mint_info = a.mint.to_account_info();
+    let short = Rent::get()?.minimum_balance(mint_info.data_len()).saturating_sub(mint_info.lamports());
+    if short > 0 {
+        anchor_lang::system_program::transfer(
+            CpiContext::new(
+                a.system_program.key(),
+                anchor_lang::system_program::Transfer { from: a.payer.to_account_info(), to: mint_info },
+            ),
+            short,
+        )?;
+    }
+
     // 4. Write the record. Nothing writes to it again.
     let clock = Clock::get()?;
     let now = clock.unix_timestamp;

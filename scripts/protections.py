@@ -239,6 +239,9 @@ MANUAL = [
       "    if amount == 0 {\n        return Ok(());\n    }\n    if p.destination.data_is_empty()", "    if p.destination.data_is_empty()",
       "an_empty_pot_pays_nothing_and_makes_no_account"),
 
+    M("L40", "Launch makes up the rent pump.fun leaves a new mint short of", LAUNCH,
+      "    if short > 0 {", "    if false {", "a_launch_works_at_every_text_length"),
+
     # ---- recover ----
     M("R20", "Recovered ZEC is split, not left unaccounted", COLLECT,
       "    ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount)?;\n    emit!(Recovered", "    emit!(Recovered",
