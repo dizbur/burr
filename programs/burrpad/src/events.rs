@@ -11,6 +11,13 @@ pub struct ConfigChanged {
     pub launches_paused: bool,
 }
 
+/// The administrator named a successor, who has not yet accepted.
+#[event]
+pub struct AdminProposed {
+    pub admin: Pubkey,
+    pub pending_admin: Pubkey,
+}
+
 #[event]
 pub struct Launched {
     pub mint: Pubkey,

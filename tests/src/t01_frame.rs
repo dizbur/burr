@@ -174,8 +174,22 @@ fn the_admin_role_moves_in_two_steps() {
     let mut w = World::new();
     let next = w.b.wallet();
     let other = w.b.wallet();
-    assert!(w.as_admin(burrpad::instruction::ProposeAdmin { new_admin: next.pubkey() }).is_ok());
+    let r = w.as_admin(burrpad::instruction::ProposeAdmin { new_admin: next.pubkey() });
+    assert!(r.is_ok());
     assert_eq!(w.config().admin, w.admin.pubkey(), "nothing changes until accepted");
+    // The proposal is announced, naming who was proposed, so it can be watched for.
+    let announced = r.unwrap().logs.iter().any(|l| {
+        use base64::Engine;
+        l.strip_prefix("Program data: ")
+            .and_then(|d| base64::engine::general_purpose::STANDARD.decode(d).ok())
+            .is_some_and(|d| {
+                d.len() == 72
+                    && d[..8] == <burrpad::events::AdminProposed as anchor_lang::Discriminator>::DISCRIMINATOR[..]
+                    && d[8..40] == w.admin.pubkey().to_bytes()
+                    && d[40..72] == next.pubkey().to_bytes()
+            })
+    });
+    assert!(announced, "no event for the proposal");
 
     let accept = |who: &solana_pubkey::Pubkey| {
         kit::raw(

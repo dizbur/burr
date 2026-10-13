@@ -3,7 +3,7 @@
 
 use crate::constants::*;
 use crate::error::BurrpadError;
-use crate::events::ConfigChanged;
+use crate::events::{AdminProposed, ConfigChanged};
 use crate::state::Config;
 use anchor_lang::prelude::*;
 
@@ -92,6 +92,7 @@ pub fn handle_set_launches_paused(ctx: Context<AdminOnly>, paused: bool) -> Resu
 /// First step of handing the role over. Proposing the empty address cancels.
 pub fn handle_propose_admin(ctx: Context<AdminOnly>, new_admin: Pubkey) -> Result<()> {
     ctx.accounts.config.pending_admin = new_admin;
+    emit!(AdminProposed { admin: ctx.accounts.config.admin, pending_admin: new_admin });
     Ok(())
 }
 
