@@ -1,0 +1,17 @@
+# private notes: never committed
+docs/
+notes/
+# secrets
+.env
+.env.*
+secrets/
+*.pem
+*-keypair.json
+id.json
+# build output
+target/
+.anchor/
+node_modules/
+test-ledger/
+tmp/
+.DS_Store
