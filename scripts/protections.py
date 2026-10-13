@@ -137,9 +137,11 @@ MANUAL = [
       " && cfg.platform_receiver == args.platform_receiver", "",
       "a_launch_is_stopped_if_the_platforms_terms_changed_on_the_way", "another receiver"),
     M("L22", "A receiver cannot be the coin's own authority", LAUNCH,
-      "r != authority_key && r != burner_key", "r != burner_key", "a_coins_own_addresses_cannot_be_named_as_receivers"),
+      "r != authority_key && ", "", "a_coins_own_addresses_cannot_be_named_as_receivers"),
     M("L23", "A receiver cannot be the coin's own burner", LAUNCH,
-      "r != authority_key && r != burner_key", "r != authority_key", "a_coins_own_addresses_cannot_be_named_as_receivers"),
+      "r != burner_key && ", "", "a_coins_own_addresses_cannot_be_named_as_receivers"),
+    M("L26", "A receiver cannot be the address that holds placed coins", LAUNCH,
+      " && r != stake_authority_key", "", "a_coins_own_addresses_cannot_be_named_as_receivers"),
 
     M("L24", "The platform's receiver cannot be the coin's own address", LAUNCH,
       "for r in [args.creator_receiver, args.give_receiver, cfg.platform_receiver] {",
@@ -603,6 +605,8 @@ def second_line(entry_id):
     if field == "authority":
         return ("signing uses this coin's own seeds, so another coin's authority cannot sign; "
                 "the same check is held alone in split")
+    if field == "stake_authority":
+        return "signing uses this coin's own seeds, so another coin's stake authority cannot sign"
     if field in ("vault", "stake_vault", "owner_coin"):
         return "the token program refuses: the signer does not own that account"
     if field in ("pump_global", "amm_global_config"):

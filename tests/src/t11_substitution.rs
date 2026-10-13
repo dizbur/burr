@@ -45,12 +45,12 @@ fn stage() -> Stage {
         // accounts that exist.
         let mint = kit::mint_with_plain_bumps();
         let m = mint.pubkey();
-        let (auth, bn) = (kit::authority(&m), kit::burner(&m));
+        let (auth, bn, sa) = (kit::authority(&m), kit::burner(&m), kit::stake_authority(&m));
         assert!(w.b.send(&[pump::create_ata(&payer, &auth, &ZEC, &TOKEN)], &[]).is_ok());
         let r = w.launch_with_mint(&mint, &plan);
         assert!(r.is_ok(), "{}", logs(&r));
         let made = [
-            pump::create_ata(&payer, &auth, &m, &TOKEN_2022),
+            pump::create_ata(&payer, &sa, &m, &TOKEN_2022),
             pump::create_ata(&payer, &bn, &ZEC, &TOKEN),
             pump::create_ata(&payer, &bn, &m, &TOKEN_2022),
         ];
@@ -434,8 +434,8 @@ fn stake() {
         sw("mint", |x: &mut A| x.mint = b),
         sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
         sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
-        sw("authority", |x: &mut A| {
-            x.authority = kit::authority(&b);
+        sw("stake_authority", |x: &mut A| {
+            x.stake_authority = kit::stake_authority(&b);
             x.stake_vault = kit::stake_vault(&b);
         }),
         sw("stake", |x: &mut A| x.stake = kit::stake(&a, &thief_key)),
@@ -468,6 +468,9 @@ fn unstake() {
         sw("authority", |x: &mut A| {
             x.authority = kit::authority(&b);
             x.vault = kit::vault(&b);
+        }),
+        sw("stake_authority", |x: &mut A| {
+            x.stake_authority = kit::stake_authority(&b);
             x.stake_vault = kit::stake_vault(&b);
         }),
         sw("stake", |x: &mut A| x.stake = kit::stake(&a, &thief_key)),

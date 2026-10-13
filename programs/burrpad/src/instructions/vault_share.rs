@@ -35,9 +35,9 @@ pub struct StakeCoins<'info> {
     pub coin: Box<Account<'info, Coin>>,
     #[account(mut, seeds = [SEED_LEDGER, mint.key().as_ref()], bump = ledger.bump)]
     pub ledger: Box<Account<'info, Ledger>>,
-    /// CHECK: the coin's authority, a derived address
-    #[account(seeds = [SEED_AUTHORITY, mint.key().as_ref()], bump = coin.authority_bump)]
-    pub authority: UncheckedAccount<'info>,
+    /// CHECK: the address that holds placed coins, a derived address of its own
+    #[account(seeds = [SEED_STAKE_AUTHORITY, mint.key().as_ref()], bump = coin.stake_authority_bump)]
+    pub stake_authority: UncheckedAccount<'info>,
     #[account(
         init_if_needed,
         payer = owner,
@@ -46,12 +46,12 @@ pub struct StakeCoins<'info> {
         bump
     )]
     pub stake: Box<Account<'info, Stake>>,
-    /// Where placed coins are kept: the authority's own account for this coin.
+    /// Where placed coins are kept: the stake authority's account for this coin.
     #[account(
         init_if_needed,
         payer = owner,
         associated_token::mint = mint,
-        associated_token::authority = authority,
+        associated_token::authority = stake_authority,
         associated_token::token_program = token_2022_program
     )]
     pub stake_vault: Box<InterfaceAccount<'info, TokenAccount>>,
@@ -129,10 +129,13 @@ pub struct UnstakeCoins<'info> {
         has_one = mint
     )]
     pub stake: Box<Account<'info, Stake>>,
+    /// CHECK: the address that holds placed coins, a derived address of its own
+    #[account(seeds = [SEED_STAKE_AUTHORITY, mint.key().as_ref()], bump = coin.stake_authority_bump)]
+    pub stake_authority: UncheckedAccount<'info>,
     #[account(
         mut,
         associated_token::mint = mint,
-        associated_token::authority = authority,
+        associated_token::authority = stake_authority,
         associated_token::token_program = token_2022_program
     )]
     pub stake_vault: Box<InterfaceAccount<'info, TokenAccount>>,
@@ -186,7 +189,7 @@ pub fn handle_unstake(ctx: Context<UnstakeCoins>, amount: u64) -> Result<()> {
     let total_staked = ledger.vault_share.total_staked;
 
     let a = &ctx.accounts;
-    let seeds: &[&[u8]] = &[SEED_AUTHORITY, mint_key.as_ref(), &[a.coin.authority_bump]];
+    let seeds: &[&[u8]] = &[SEED_STAKE_AUTHORITY, mint_key.as_ref(), &[a.coin.stake_authority_bump]];
     if amount > 0 {
         token_interface::transfer_checked(
             CpiContext::new_with_signer(
@@ -195,7 +198,7 @@ pub fn handle_unstake(ctx: Context<UnstakeCoins>, amount: u64) -> Result<()> {
                     from: a.stake_vault.to_account_info(),
                     mint: a.mint.to_account_info(),
                     to: a.owner_coin.to_account_info(),
-                    authority: a.authority.to_account_info(),
+                    authority: a.stake_authority.to_account_info(),
                 },
                 &[seeds],
             ),

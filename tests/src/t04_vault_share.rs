@@ -264,6 +264,7 @@ fn vault_share_refuses_another_coins_accounts() {
         ("stake_vault", |a, o, _| a.stake_vault = kit::stake_vault(o)),
         ("stake", |a, o, me| a.stake = kit::stake(o, me)),
         ("authority", |a, o, _| a.authority = kit::authority(o)),
+        ("stake_authority", |a, o, _| a.stake_authority = kit::stake_authority(o)),
     ];
     for (name, mix) in mixes {
         let mut acc = w.unstake_accounts(&h[0].pubkey(), &mint);
@@ -279,7 +280,7 @@ fn coins_sent_straight_to_the_stake_vault_give_nobody_a_claim() {
     let (mut w, mint, h) = setup(2);
     assert!(w.stake(&h[0], &mint, 1_000).is_ok());
     let sv = kit::stake_vault(&mint);
-    let auth = kit::authority(&mint);
+    let auth = kit::stake_authority(&mint);
     w.b.write_token_account(sv, &mint, &auth, 1_000 + 999_999, &TOKEN_2022);
     assert_eq!(w.ledger(&mint).vault_share.total_staked, 1_000);
     // Nobody can take the extra out.
@@ -424,4 +425,20 @@ fn an_empty_stake_record_can_be_closed_by_its_owner_only() {
     assert_eq!(w.stake_of(&mint, &h[0].pubkey()).unwrap().amount, 10);
     assert!(w.unstake(&h[0], &mint, 10).is_ok());
     w.assert_sound(&mint);
+}
+
+#[test]
+fn placed_coins_are_not_held_by_the_coins_creator() {
+    // The coin's creator on pump.fun is the coin's authority. Placed coins
+    // sit under a different address, so nobody reading the chain takes them
+    // for the creator's own holdings.
+    let (mut w, mint, h) = setup(1);
+    assert!(w.stake(&h[0], &mint, 1_000).is_ok());
+    let creator = w.b.curve(&mint).creator;
+    assert_eq!(creator, kit::authority(&mint));
+    assert_ne!(kit::stake_authority(&mint), creator);
+    assert_eq!(w.b.token_balance(&kit::stake_vault(&mint)), 1_000);
+    assert_eq!(w.coins_of(&creator, &mint), 0, "the creator's own coin account holds nothing");
+    let holder = w.b.account(&kit::stake_vault(&mint)).unwrap().data[32..64].to_vec();
+    assert_eq!(holder, kit::stake_authority(&mint).as_ref());
 }

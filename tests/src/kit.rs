@@ -35,8 +35,11 @@ pub fn stake(mint: &Pubkey, owner: &Pubkey) -> Pubkey {
 pub fn vault(mint: &Pubkey) -> Pubkey {
     ata(&authority(mint), &ZEC, &TOKEN)
 }
+pub fn stake_authority(mint: &Pubkey) -> Pubkey {
+    pda(&[b"stake-authority", mint.as_ref()], &BURRPAD)
+}
 pub fn stake_vault(mint: &Pubkey) -> Pubkey {
-    ata(&authority(mint), mint, &TOKEN_2022)
+    ata(&stake_authority(mint), mint, &TOKEN_2022)
 }
 pub fn program_data() -> Pubkey {
     pda(&[BURRPAD.as_ref()], &LOADER)
@@ -535,7 +538,7 @@ impl World {
             mint: *mint,
             coin: coin(mint),
             ledger: ledger(mint),
-            authority: authority(mint),
+            stake_authority: stake_authority(mint),
             stake: stake(mint, owner),
             stake_vault: stake_vault(mint),
             owner_coin: ata(owner, mint, &TOKEN_2022),
@@ -559,6 +562,7 @@ impl World {
             coin: coin(mint),
             ledger: ledger(mint),
             authority: authority(mint),
+            stake_authority: stake_authority(mint),
             stake: stake(mint, owner),
             stake_vault: stake_vault(mint),
             owner_coin: ata(owner, mint, &TOKEN_2022),
@@ -605,7 +609,7 @@ pub fn give_token_account_away(account: &Pubkey, owner: &Pubkey, new_owner: &Pub
     }
 }
 
-/// A new mint key whose coin's four derived addresses all have the same
+/// A new mint key whose coin's five derived addresses all have the same
 /// (highest) bump. Coins made from such keys differ only in their addresses,
 /// so a test that swaps one coin's account for another's is stopped by the
 /// address check alone and by nothing incidental.
@@ -613,7 +617,7 @@ pub fn mint_with_plain_bumps() -> Keypair {
     loop {
         let k = Keypair::new();
         let m = k.pubkey();
-        let all_top = [&b"coin"[..], b"ledger", b"authority", b"burner"]
+        let all_top = [&b"coin"[..], b"ledger", b"authority", b"burner", b"stake-authority"]
             .iter()
             .all(|seed| Pubkey::find_program_address(&[seed, m.as_ref()], &BURRPAD).1 == 255);
         if all_top {

@@ -11,6 +11,10 @@ pub const SEED_LEDGER: &[u8] = b"ledger";
 pub const SEED_AUTHORITY: &[u8] = b"authority";
 pub const SEED_BURNER: &[u8] = b"burner";
 pub const SEED_STAKE: &[u8] = b"stake";
+/// Holds the coins people place for the vault share. Kept apart from the
+/// coin's authority, which is the coin's creator on pump.fun, so that placed
+/// coins never look like the creator's own holdings.
+pub const SEED_STAKE_AUTHORITY: &[u8] = b"stake-authority";
 
 /// One whole, in hundredths of a percent.
 pub const BPS: u16 = 10_000;

@@ -326,9 +326,10 @@ fn a_receiver_cannot_make_their_pot_unpayable() {
 #[test]
 fn a_coins_own_addresses_cannot_be_named_as_receivers() {
     let mut w = World::new();
-    for which in 0..4 {
+    for which in 0..6 {
         let mint = solana_keypair::Keypair::new();
-        let own = if which < 2 { kit::authority(&mint.pubkey()) } else { kit::burner(&mint.pubkey()) };
+        let own = [kit::authority(&mint.pubkey()), kit::burner(&mint.pubkey()), kit::stake_authority(&mint.pubkey())]
+            [which / 2];
         let mut plan = LaunchPlan::default();
         if which % 2 == 0 {
             plan.creator_receiver = own;

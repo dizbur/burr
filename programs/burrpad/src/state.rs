@@ -29,6 +29,7 @@ pub struct Coin {
     pub bump: u8,
     pub authority_bump: u8,
     pub burner_bump: u8,
+    pub stake_authority_bump: u8,
     pub ledger_bump: u8,
     /// The coin's fee, as set on pump.fun.
     pub fee_bps: u16,

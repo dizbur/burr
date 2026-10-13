@@ -148,8 +148,10 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     let (burner_key, burner_bump) = Pubkey::find_program_address(&[SEED_BURNER, mint_key.as_ref()], ctx.program_id);
     // A receiver may not be one of this coin's own program-controlled
     // addresses: a payout to the authority would land back in the vault.
+    let (stake_authority_key, stake_authority_bump) =
+        Pubkey::find_program_address(&[SEED_STAKE_AUTHORITY, mint_key.as_ref()], ctx.program_id);
     for r in [args.creator_receiver, args.give_receiver, cfg.platform_receiver] {
-        require!(r != authority_key && r != burner_key, BurrpadError::ReceiverNotAllowed);
+        require!(r != authority_key && r != burner_key && r != stake_authority_key, BurrpadError::ReceiverNotAllowed);
     }
 
     // 2. Create the coin on pump.fun, with our authority as its creator.
@@ -207,6 +209,7 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     coin.bump = ctx.bumps.coin;
     coin.authority_bump = ctx.bumps.authority;
     coin.burner_bump = burner_bump;
+    coin.stake_authority_bump = stake_authority_bump;
     coin.ledger_bump = ctx.bumps.ledger;
     coin.fee_bps = args.fee_bps;
     coin.platform_fraction_bps = platform_fraction_bps;
