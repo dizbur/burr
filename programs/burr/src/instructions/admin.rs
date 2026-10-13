@@ -108,7 +108,6 @@ pub struct AcceptAdmin<'info> {
 
 pub fn handle_accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
     let c = &mut ctx.accounts.config;
-    require!(c.pending_admin != Pubkey::default(), BurrError::NotPendingAdmin);
     c.admin = c.pending_admin;
     c.pending_admin = Pubkey::default();
     announce(c);

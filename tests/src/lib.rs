@@ -23,3 +23,7 @@ mod t06_graduated;
 mod t07_math;
 #[cfg(test)]
 mod t08_readers;
+#[cfg(test)]
+mod t09_misbehaving_pump;
+#[cfg(test)]
+mod t10_whole_life;

@@ -162,6 +162,42 @@ impl Bench {
         self.svm.get_account(addr).filter(|a| a.lamports > 0)
     }
 
+    /// Replaces the program at `address` with the misbehaving stand-in, and
+    /// tells it how to misbehave by one byte in that program's settings account.
+    pub fn use_standin(&mut self, address: &Pubkey, settings: &Pubkey, mode: u8) {
+        let so = std::fs::read(root().join("target/deploy/pump_standin.so"))
+            .expect("build the stand-in first: cargo build-sbf --manifest-path tests-standin/Cargo.toml");
+        let loader: Pubkey = "BPFLoaderUpgradeab1e11111111111111111111111".parse().unwrap();
+        let program_data = Pubkey::find_program_address(&[address.as_ref()], &loader).0;
+        let mut data = vec![3, 0, 0, 0];
+        data.extend_from_slice(&0u64.to_le_bytes());
+        data.push(0);
+        data.extend_from_slice(&[0u8; 32]);
+        data.extend_from_slice(&so);
+        let rent = self.svm.minimum_balance_for_rent_exemption(data.len());
+        self.svm
+            .set_account(
+                program_data,
+                Account { lamports: rent, data, owner: loader, executable: false, rent_epoch: u64::MAX },
+            )
+            .unwrap();
+        let mut p = vec![2, 0, 0, 0];
+        p.extend_from_slice(program_data.as_ref());
+        self.svm
+            .set_account(
+                *address,
+                Account { lamports: 1_000_000_000, data: p, owner: loader, executable: true, rent_epoch: u64::MAX },
+            )
+            .unwrap();
+        self.set_standin_mode(settings, mode);
+    }
+
+    pub fn set_standin_mode(&mut self, settings: &Pubkey, mode: u8) {
+        let mut s = self.svm.get_account(settings).expect("settings account");
+        s.data[8] = mode;
+        self.svm.set_account(*settings, s).unwrap();
+    }
+
     pub fn curve(&self, mint: &Pubkey) -> pump::Curve {
         pump::Curve::read(&self.svm.get_account(&pump::curve(mint)).expect("curve").data)
     }

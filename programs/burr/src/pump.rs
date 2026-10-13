@@ -113,9 +113,11 @@ pub struct PoolView {
     pub pool_quote_token_account: Pubkey,
     /// Added to the pool's ZEC balance to get the reserve prices are worked from.
     pub virtual_quote_reserves: i128,
+    /// The creator fee the pool charges now.
+    pub creator_fee_bps: u64,
 }
 
-const POOL_MIN_LEN: usize = 261;
+const POOL_MIN_LEN: usize = 269;
 
 /// Reads a pool account. It must be owned by PumpSwap and carry the pool's code.
 pub fn read_pool(ai: &AccountInfo) -> Result<PoolView> {
@@ -131,6 +133,7 @@ pub fn read_pool(ai: &AccountInfo) -> Result<PoolView> {
         pool_base_token_account: key_at(&d, 139),
         pool_quote_token_account: key_at(&d, 171),
         virtual_quote_reserves: i128::from_le_bytes(v),
+        creator_fee_bps: u64_at(&d, 261),
     })
 }
 

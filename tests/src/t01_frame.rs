@@ -311,3 +311,35 @@ fn a_vault_made_early_by_someone_else_is_still_ours() {
     assert_eq!(w.ledger(&mint.pubkey()).accounted, 1_000);
     w.assert_sound(&mint.pubkey());
 }
+
+#[test]
+fn initialise_cannot_be_passed_another_programs_upgrade_record() {
+    let mut w = World::bare();
+    // The attacker really is the upgrade key of some other program, and
+    // passes that program's record in place of Burr's.
+    let attacker = w.b.wallet();
+    let loader = kit::LOADER;
+    let other_program = solana_pubkey::Pubkey::new_unique();
+    let other_data = solana_pubkey::Pubkey::find_program_address(&[other_program.as_ref()], &loader).0;
+    let mut data = vec![3, 0, 0, 0];
+    data.extend_from_slice(&0u64.to_le_bytes());
+    data.push(1);
+    data.extend_from_slice(attacker.pubkey().as_ref());
+    w.b.svm
+        .set_account(
+            other_data,
+            solana_account::Account {
+                lamports: 10_000_000,
+                data,
+                owner: loader,
+                executable: false,
+                rent_epoch: u64::MAX,
+            },
+        )
+        .unwrap();
+    let mut i = w.initialize_ix(&attacker.pubkey(), attacker.pubkey(), attacker.pubkey());
+    i.accounts[3].pubkey = other_data;
+    let r = w.b.send_as(Some(&attacker), &[i], &[]);
+    assert_eq!(custom_code(&r), Some(err(E::NotUpgradeAuthority)), "{}", logs(&r));
+    assert!(w.b.account(&kit::config()).is_none());
+}

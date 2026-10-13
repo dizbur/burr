@@ -21,25 +21,39 @@ use anchor_spl::token_interface::{self, Burn, Mint, TokenAccount, TransferChecke
 
 /// Decides whether to buy now, and how much. `None` means the price check
 /// refused: the new price and time are recorded and nothing is bought.
-fn plan(coin: &Coin, ledger: &mut Ledger, reserves: Reserves, now: i64) -> Result<Option<(u64, u64)>> {
+///
+/// `venue_fee_bps` is the creator fee the curve or pool charges right now,
+/// read from pump.fun's own account. The spend limit uses the lower of that
+/// and the coin's recorded fee, because the limit's safety rests on traders
+/// really paying that fee. The least-coins-out allows for what is charged.
+fn plan(
+    coin: &Coin,
+    ledger: &mut Ledger,
+    reserves: Reserves,
+    venue_fee_bps: u64,
+    now: i64,
+) -> Result<Option<(u64, u64)>> {
     require!(coin.share_of(SINK_BURN) > 0, BurrError::HookNotChosen);
     let b = &mut ledger.burn;
-    let first = b.reference.base == 0;
-    if !first {
-        let ready = b.last_time.checked_add(coin.burn_cooldown_secs as i64).ok_or(BurrError::Overflow)?;
-        require!(now >= ready, BurrError::BurnTooSoon);
-        if reserves.above(&b.reference, coin.burn_price_band_bps).ok_or(BurrError::Overflow)? {
-            b.reference = reserves;
-            b.last_time = now;
-            emit!(BurnSkipped { mint: coin.mint });
-            return Ok(None);
-        }
+    let ready = b.last_time.checked_add(coin.burn_cooldown_secs as i64).ok_or(BurrError::Overflow)?;
+    require!(now >= ready, BurrError::BurnTooSoon);
+    if reserves.above(&b.reference, coin.burn_price_band_bps).ok_or(BurrError::Overflow)? {
+        b.reference = reserves;
+        b.last_time = now;
+        emit!(BurnSkipped { mint: coin.mint });
+        return Ok(None);
     }
-    let spend = math::burn_spend_limit(ledger.pots[SINK_BURN], reserves.quote, coin.fee_bps, coin.burn_spend_divisor)
-        .ok_or(BurrError::Overflow)?;
+    let charged = u16::try_from(venue_fee_bps).map_err(|_| BurrError::Overflow)?;
+    let spend = math::burn_spend_limit(
+        ledger.pots[SINK_BURN],
+        reserves.quote,
+        coin.fee_bps.min(charged),
+        coin.burn_spend_divisor,
+    )
+    .ok_or(BurrError::Overflow)?;
     require!(spend > 0, BurrError::NothingToBurn);
     let min_out =
-        math::burn_min_out(&reserves, spend, coin.fee_bps, coin.burn_fee_allowance_bps).ok_or(BurrError::Overflow)?;
+        math::burn_min_out(&reserves, spend, charged, coin.burn_fee_allowance_bps).ok_or(BurrError::Overflow)?;
     require!(min_out > 0, BurrError::NothingToBurn);
     Ok(Some((spend, min_out)))
 }
@@ -126,7 +140,9 @@ pub fn handle_burn_curve(ctx: Context<BurnCurve>) -> Result<()> {
     let curve = pump::read_curve(&ctx.accounts.bonding_curve.to_account_info())?;
     require!(!curve.complete && curve.quote_mint == ZEC_MINT, BurrError::WrongVenue);
     let reserves = Reserves { quote: curve.virtual_quote_reserves, base: curve.virtual_token_reserves };
-    let Some((spend, min_out)) = plan(&ctx.accounts.coin, &mut ctx.accounts.ledger, reserves, now)? else {
+    let Some((spend, min_out)) =
+        plan(&ctx.accounts.coin, &mut ctx.accounts.ledger, reserves, curve.creator_fee_bps, now)?
+    else {
         return Ok(());
     };
 
@@ -320,23 +336,30 @@ pub struct BurnPool<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// The pool's price figures, from its own accounts.
-pub fn pool_reserves(pool: &AccountInfo, mint: &Pubkey, base_amount: u64, quote_amount: u64) -> Result<Reserves> {
+/// The pool's price figures and the creator fee it charges, from its own accounts.
+pub fn pool_reserves(
+    pool: &AccountInfo,
+    mint: &Pubkey,
+    base_amount: u64,
+    quote_amount: u64,
+) -> Result<(Reserves, u64)> {
     let p = pump::read_pool(pool)?;
     require!(p.base_mint == *mint && p.quote_mint == ZEC_MINT, BurrError::WrongPumpAccount);
-    Ok(Reserves { quote: pump::effective_quote_reserves(quote_amount, p.virtual_quote_reserves)?, base: base_amount })
+    let quote = pump::effective_quote_reserves(quote_amount, p.virtual_quote_reserves)?;
+    Ok((Reserves { quote, base: base_amount }, p.creator_fee_bps))
 }
 
 pub fn handle_burn_pool(ctx: Context<BurnPool>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let mint_key = ctx.accounts.mint.key();
-    let reserves = pool_reserves(
+    let (reserves, venue_fee_bps) = pool_reserves(
         &ctx.accounts.pool.to_account_info(),
         &mint_key,
         ctx.accounts.pool_base_token_account.amount,
         ctx.accounts.pool_quote_token_account.amount,
     )?;
-    let Some((spend, min_out)) = plan(&ctx.accounts.coin, &mut ctx.accounts.ledger, reserves, now)? else {
+    let Some((spend, min_out)) = plan(&ctx.accounts.coin, &mut ctx.accounts.ledger, reserves, venue_fee_bps, now)?
+    else {
         return Ok(());
     };
 
@@ -429,7 +452,7 @@ pub fn handle_burn_pool(ctx: Context<BurnPool>) -> Result<()> {
 
     ctx.accounts.pool_base_token_account.reload()?;
     ctx.accounts.pool_quote_token_account.reload()?;
-    let after = pool_reserves(
+    let (after, _) = pool_reserves(
         &ctx.accounts.pool.to_account_info(),
         &mint_key,
         ctx.accounts.pool_base_token_account.amount,

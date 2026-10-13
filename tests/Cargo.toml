@@ -24,3 +24,4 @@ sha2 = "0.10"
 burr = { path = "../programs/burr", features = ["no-entrypoint"] }
 anchor-lang = "=1.2.1"
 proptest = "=1.11.0"
+pump-standin = { path = "../tests-standin", features = ["no-entrypoint"] }

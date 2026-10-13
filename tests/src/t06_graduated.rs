@@ -109,6 +109,14 @@ fn graduated_with_burn_pot(fee_bps: u16, pot: u64) -> (World, Pubkey) {
     let (mut w, mint) = graduated(&burn_plan(fee_bps));
     w.b.give_zec(&kit::authority(&mint), pot * 8 / 7 + 8);
     assert!(w.split(&mint).is_ok());
+    // The price at graduation is far above the launch price, so the first
+    // call records it and buys nothing. Burns proper start one wait later.
+    w.b.wait(60);
+    let before = w.ledger(&mint).pots[3];
+    let r = w.burn_pool(&mint);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert_eq!(w.ledger(&mint).pots[3], before);
+    w.b.wait(60);
     (w, mint)
 }
 
@@ -158,6 +166,7 @@ fn each_burn_instruction_only_works_on_its_own_venue() {
     assert!(w.burn_pool(&mint).is_err());
     // After graduation the curve is closed for trading.
     w.graduate(&mint);
+    w.b.wait(60);
     let r = w.burn_curve(&mint);
     assert_eq!(custom_code(&r), Some(err(E::WrongVenue)), "{}", logs(&r));
     assert!(w.burn_pool(&mint).is_ok());
@@ -169,7 +178,9 @@ fn a_burn_started_on_the_curve_carries_on_from_the_pool() {
     let mint = w.launch(&burn_plan(200));
     w.b.give_zec(&kit::authority(&mint), 50 * ZEC1);
     assert!(w.split(&mint).is_ok());
+    w.b.wait(60);
     assert!(w.burn_curve(&mint).is_ok());
+    assert!(w.ledger(&mint).burn.total_spent > 0);
     w.graduate(&mint);
     w.b.wait(60);
     // The price recorded on the curve is the reference for the first pool burn.
@@ -396,4 +407,19 @@ fn collect_pool_refuses_substituted_accounts() {
     // Coin B's fee is untouched by collecting coin A's.
     assert!(w.pool(&other).creator_fees > 0);
     assert_eq!(w.vault_balance(&other), 0);
+}
+
+#[test]
+fn the_pool_burn_limit_follows_the_fee_the_pool_really_charges() {
+    let (mut w, mint) = graduated_with_burn_pot(200, 50 * ZEC1);
+    // pump.fun's administrators lower this pool's creator fee to 0.50%.
+    let key = pump::pool(&mint);
+    let mut a = w.b.account(&key).unwrap();
+    a.data[261..269].copy_from_slice(&50u64.to_le_bytes());
+    w.b.svm.set_account(key, a).unwrap();
+    let (reserve, _) = w.pool_reserves(&mint);
+    let before = w.ledger(&mint).pots[3];
+    let r = w.burn_pool(&mint);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert_eq!(before - w.ledger(&mint).pots[3], reserve * 50 / 40_000);
 }

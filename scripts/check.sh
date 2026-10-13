@@ -17,8 +17,9 @@ echo "== lint (warnings are errors)"
 cargo clippy --workspace --all-targets -- -D warnings
 echo "== advisories"
 cargo audit
-echo "== build the program"
+echo "== build the program, and the misbehaving stand-in the tests use"
 cargo build-sbf --manifest-path programs/burr/Cargo.toml
+cargo build-sbf --manifest-path tests-standin/Cargo.toml
 echo "== tests"
 cargo test --workspace
 echo "== all passed"

@@ -20,6 +20,8 @@ fn coin_with_burn_pot(w: &mut World, fee_bps: u16, pot: u64) -> Pubkey {
     w.b.give_zec(&kit::authority(&mint), pot * 8 / 7 + 8);
     assert!(w.split(&mint).is_ok());
     assert!(w.ledger(&mint).pots[3] >= pot);
+    // The first burn may come one waiting time after launch.
+    w.b.wait(60);
     mint
 }
 
@@ -126,6 +128,9 @@ fn a_price_that_fell_is_bought_at_once() {
     let mint = coin_with_burn_pot(&mut w, 200, 10 * ZEC1);
     let t = w.trader(100 * ZEC1);
     assert!(w.buy(&t, &mint, ZEC1).is_ok());
+    // The first call sees a price well above launch: it records and skips.
+    assert!(w.burn_curve(&mint).is_ok());
+    w.b.wait(60);
     assert!(w.burn_curve(&mint).is_ok());
     let have = w.coins_of(&t.pubkey(), &mint);
     assert!(w.sell(&t, &mint, have).is_ok());
@@ -143,14 +148,18 @@ fn sandwich(fee_bps: u16, attack_zec: u64) -> i128 {
     // Some ordinary trading first, so the pool is not at its starting point.
     let other = w.trader(100 * ZEC1);
     assert!(w.buy(&other, &mint, 2 * ZEC1).is_ok());
+    assert!(w.burn_curve(&mint).is_ok()); // records the new price
+    w.b.wait(60);
     assert!(w.burn_curve(&mint).is_ok());
     w.b.wait(60);
 
     let attacker = w.trader(1_000 * ZEC1);
     let start = w.zec_of(&attacker.pubkey());
     assert!(w.buy(&attacker, &mint, attack_zec).is_ok());
+    let pot = w.ledger(&mint).pots[3];
     let r = w.burn_curve(&mint);
     assert!(r.is_ok(), "{}", logs(&r));
+    assert!(w.ledger(&mint).pots[3] < pot, "the burn must really have bought for this to be the attack");
     let coins = w.coins_of(&attacker.pubkey(), &mint);
     assert!(w.sell(&attacker, &mint, coins).is_ok());
     w.zec_of(&attacker.pubkey()) as i128 - start as i128
@@ -266,4 +275,59 @@ fn gifts_to_the_burner_do_not_confuse_it() {
     assert_eq!(w.b.token_balance(&ata(&bn, &mint, &TOKEN_2022)), 0);
     assert!(w.split(&mint).is_ok());
     w.assert_sound(&mint);
+}
+
+#[test]
+fn the_first_burn_is_checked_against_the_launch_price() {
+    let mut w = World::new();
+    let mint = w.launch(&burn_plan(200));
+    w.b.give_zec(&kit::authority(&mint), 50 * ZEC1);
+    assert!(w.split(&mint).is_ok());
+    // Not in the first minute.
+    let r = w.burn_curve(&mint);
+    assert_eq!(custom_code(&r), Some(err(E::BurnTooSoon)));
+    // Someone pushes the price far up before the first burn ever runs.
+    let pusher = w.trader(100 * ZEC1);
+    assert!(w.buy(&pusher, &mint, 3 * ZEC1).is_ok());
+    w.b.wait(60);
+    let pot = w.ledger(&mint).pots[3];
+    assert!(w.burn_curve(&mint).is_ok());
+    assert_eq!(w.ledger(&mint).pots[3], pot, "the first burn did not buy at the pushed price");
+}
+
+/// Rewrites the creator fee stored in pump.fun's curve account, as pump.fun's
+/// own administrators can.
+fn set_curve_fee(w: &mut World, mint: &Pubkey, bps: u64) {
+    let key = pump::curve(mint);
+    let mut a = w.b.account(&key).unwrap();
+    a.data[115..123].copy_from_slice(&bps.to_le_bytes());
+    w.b.svm.set_account(key, a).unwrap();
+}
+
+#[test]
+fn the_limit_follows_the_fee_pump_fun_really_charges() {
+    // The limit is safe because traders pay the coin's fee. If pump.fun lowers
+    // the fee it charges on a coin, the limit comes down with it.
+    let mut w = World::new();
+    let mint = coin_with_burn_pot(&mut w, 200, 10 * ZEC1);
+    set_curve_fee(&mut w, &mint, 50);
+    let reserve = w.b.curve(&mint).virtual_quote_reserves;
+    let before = w.ledger(&mint).pots[3];
+    let r = w.burn_curve(&mint);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert_eq!(before - w.ledger(&mint).pots[3], reserve * 50 / 40_000);
+
+    // If pump.fun raises it, the limit stays at the coin's recorded fee.
+    let mint = coin_with_burn_pot(&mut w, 100, 10 * ZEC1);
+    set_curve_fee(&mut w, &mint, 300);
+    let reserve = w.b.curve(&mint).virtual_quote_reserves;
+    let before = w.ledger(&mint).pots[3];
+    assert!(w.burn_curve(&mint).is_ok());
+    assert_eq!(before - w.ledger(&mint).pots[3], reserve * 100 / 40_000);
+
+    // With no fee charged at all, nothing is spent: the pot waits.
+    let mint = coin_with_burn_pot(&mut w, 200, 10 * ZEC1);
+    set_curve_fee(&mut w, &mint, 0);
+    let r = w.burn_curve(&mint);
+    assert_eq!(custom_code(&r), Some(err(E::NothingToBurn)));
 }

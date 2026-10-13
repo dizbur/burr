@@ -214,6 +214,10 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     ledger.mint = mint_key;
     ledger.bump = ctx.bumps.ledger;
     ledger.vault_share.last_update = now;
+    // The price at launch is the first reference for buy back and burn, so
+    // even the first buy is checked against a price nobody could have pushed.
+    ledger.burn.reference = math::Reserves { quote: curve.virtual_quote_reserves, base: curve.virtual_token_reserves };
+    ledger.burn.last_time = now;
 
     emit!(Launched {
         mint: mint_key,

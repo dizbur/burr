@@ -81,7 +81,7 @@ pub struct Ledger {
 #[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]
 pub struct BurnState {
     pub last_time: i64,
-    /// The pool's figures as recorded at the last call. Zero base means none yet.
+    /// The pool's figures as recorded at the last call; at first, those at launch.
     pub reference: Reserves,
     pub total_spent: u64,
     pub total_burned: u64,
