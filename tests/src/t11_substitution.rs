@@ -444,7 +444,7 @@ fn release_holder_rewards() {
     let pot = w.ledger(&a).pots[4];
     assert!(pot > 0);
     let slot = w.slot();
-    let data = burrpad::instruction::ReleaseHolderRewards { snapshot_slot: slot, snapshot_hash: [5; 32] };
+    let data = burrpad::instruction::ReleaseHolderRewards { amount: pot, snapshot_slot: slot, snapshot_hash: [5; 32] };
     let r = each_refused(&mut w, &wallet, &[], good, data, swaps);
     assert!(r.is_ok(), "{}", logs(&r));
     assert_eq!(w.zec_of(&wallet.pubkey()), pot);

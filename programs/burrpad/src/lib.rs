@@ -111,12 +111,13 @@ pub mod burrpad {
 
     // ---- holders ----
 
-    /// Hands a coin's holder pot to the rewards wallet for one payout run.
+    /// Hands part or all of a coin's holder pot to the rewards wallet for one payout run.
     pub fn release_holder_rewards(
         ctx: Context<ReleaseHolderRewards>,
+        amount: u64,
         snapshot_slot: u64,
         snapshot_hash: [u8; 32],
     ) -> Result<()> {
-        instructions::holders::handle_release_holder_rewards(ctx, snapshot_slot, snapshot_hash)
+        instructions::holders::handle_release_holder_rewards(ctx, amount, snapshot_slot, snapshot_hash)
     }
 }

@@ -35,7 +35,11 @@ fn fee(w: &mut World, mint: &Pubkey, amount: u64) {
 fn release_ix(w: &World, wallet: &Pubkey, mint: &Pubkey, slot: u64, hash: [u8; 32]) -> solana_instruction::Instruction {
     kit::raw(
         w.release_accounts(wallet, mint),
-        burrpad::instruction::ReleaseHolderRewards { snapshot_slot: slot, snapshot_hash: hash },
+        burrpad::instruction::ReleaseHolderRewards {
+            amount: w.ledger(mint).pots[4],
+            snapshot_slot: slot,
+            snapshot_hash: hash,
+        },
     )
 }
 
@@ -132,7 +136,10 @@ fn only_the_rewards_wallet_can_take_the_pot() {
     // The right wallet signs, but the destination is someone else's ZEC account.
     let mut acc = w.release_accounts(&real, &mint);
     acc.rewards_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
-    let i = kit::raw(acc, burrpad::instruction::ReleaseHolderRewards { snapshot_slot: slot, snapshot_hash: [7; 32] });
+    let i = kit::raw(
+        acc,
+        burrpad::instruction::ReleaseHolderRewards { amount: pot, snapshot_slot: slot, snapshot_hash: [7; 32] },
+    );
     let wallet = w.rewards_wallet.insecure_clone();
     let r = w.b.send_as(Some(&wallet), &[i], &[]);
     assert_eq!(custom_code(&r), Some(err(E::WrongReceiver)));
@@ -167,6 +174,43 @@ fn a_release_must_name_a_real_snapshot() {
     }
     let i = release_ix(&w, &wallet.pubkey(), &mint, slot + 1, [8; 32]);
     assert!(w.b.send_as(Some(&wallet), &[i], &[]).is_ok());
+}
+
+#[test]
+fn a_release_takes_the_amount_it_states_and_the_rest_stays() {
+    // A run is worked out for the pot as it was at the snapshot. Anyone can
+    // split more fee into the pot before the release lands; that extra must
+    // wait for the next run.
+    let (mut w, mint) = setup();
+    let planned = w.ledger(&mint).pots[4];
+    fee(&mut w, &mint, 3 * ZEC1);
+    let pot = w.ledger(&mint).pots[4];
+    assert!(pot > planned, "the pot grew between planning and landing");
+
+    let r = w.release_holders_amount(&mint, 0);
+    assert_eq!(custom_code(&r), Some(err(E::NothingToRelease)), "a release of nothing");
+    let r = w.release_holders_amount(&mint, pot + 1);
+    assert_eq!(custom_code(&r), Some(err(E::ReleaseAboveThePot)), "more than the pot: {}", logs(&r));
+    assert_eq!(w.ledger(&mint).holders.runs, 0);
+
+    let vault = w.vault_balance(&mint);
+    let r = w.release_holders_amount(&mint, planned);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert_eq!(w.zec_of(&w.rewards_wallet.pubkey()), planned, "exactly what the run was worked out for");
+    let l = w.ledger(&mint);
+    assert_eq!((l.pots[4], l.holders.total_released), (pot - planned, planned));
+    assert_eq!(w.vault_balance(&mint), vault - planned);
+    let said = events::<burrpad::events::HolderRewardsReleased>(&r);
+    assert_eq!(said[0][64..72], planned.to_le_bytes());
+    w.assert_sound(&mint);
+
+    // The rest is there for the next run, half an hour on, and not before.
+    let r = w.release_holders_amount(&mint, pot - planned);
+    assert_eq!(custom_code(&r), Some(err(E::HolderReleaseTooSoon)));
+    w.b.wait(HALF_HOUR);
+    assert!(w.release_holders_amount(&mint, pot - planned).is_ok());
+    assert_eq!(w.ledger(&mint).pots[4], 0);
+    w.assert_sound(&mint);
 }
 
 #[test]
@@ -214,7 +258,10 @@ fn the_rewards_wallet_reaches_only_holder_pots() {
     let mut acc = w.release_accounts(&wallet.pubkey(), &a);
     acc.vault = kit::vault(&b);
     let slot = w.slot();
-    let i = kit::raw(acc, burrpad::instruction::ReleaseHolderRewards { snapshot_slot: slot, snapshot_hash: [9; 32] });
+    let i = kit::raw(
+        acc,
+        burrpad::instruction::ReleaseHolderRewards { amount: 1, snapshot_slot: slot, snapshot_hash: [9; 32] },
+    );
     assert!(w.b.send_as(Some(&wallet), &[i], &[]).is_err());
 }
 

@@ -543,13 +543,18 @@ impl World {
         self.b.svm.get_sysvar::<solana_clock::Clock>().slot
     }
 
-    /// Releases a coin's holder pot to the rewards wallet, naming a snapshot
-    /// taken at the current slot with a made-up fingerprint.
+    /// Releases a coin's whole holder pot to the rewards wallet, naming a
+    /// snapshot taken at the current slot with a made-up fingerprint.
     pub fn release_holders(&mut self, mint: &Pubkey) -> TxResult {
+        let amount = self.ledger(mint).pots[4];
+        self.release_holders_amount(mint, amount)
+    }
+
+    pub fn release_holders_amount(&mut self, mint: &Pubkey, amount: u64) -> TxResult {
         let wallet = self.rewards_wallet.insecure_clone();
         let i = ix(
             self.release_accounts(&wallet.pubkey(), mint),
-            burrpad::instruction::ReleaseHolderRewards { snapshot_slot: self.slot(), snapshot_hash: [7u8; 32] },
+            burrpad::instruction::ReleaseHolderRewards { amount, snapshot_slot: self.slot(), snapshot_hash: [7u8; 32] },
         );
         self.b.send_as(Some(&wallet), &[i], &[])
     }

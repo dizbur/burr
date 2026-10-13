@@ -9,6 +9,7 @@
 //! What the program enforces:
 //! - the pot can go only to the rewards wallet named in the settings, to its
 //!   standard ZEC account, and that wallet must sign;
+//! - a release takes the amount it states, never more than the pot holds;
 //! - at most one release per coin per interval (30 minutes);
 //! - none at all while the administrator has releases switched off;
 //! - each release records the slot and a 32-byte fingerprint of the snapshot
@@ -62,9 +63,13 @@ pub struct ReleaseHolderRewards<'info> {
     pub system_program: Program<'info, System>,
 }
 
-/// Hands the coin's whole holder pot to the rewards wallet for one payout run.
+/// Hands `amount` of the coin's holder pot to the rewards wallet for one
+/// payout run. The amount is stated, not "whatever is there", because fees
+/// can be split into the pot between working a run out and its release
+/// landing. What is not taken stays in the pot for the next run.
 pub fn handle_release_holder_rewards(
     ctx: Context<ReleaseHolderRewards>,
+    amount: u64,
     snapshot_slot: u64,
     snapshot_hash: [u8; 32],
 ) -> Result<()> {
@@ -81,8 +86,8 @@ pub fn handle_release_holder_rewards(
         .ok_or(BurrpadError::Overflow)?;
     require!(clock.unix_timestamp >= ready, BurrpadError::HolderReleaseTooSoon);
 
-    let amount = ledger.pots[SINK_HOLDERS];
     require!(amount > 0, BurrpadError::NothingToRelease);
+    require!(amount <= ledger.pots[SINK_HOLDERS], BurrpadError::ReleaseAboveThePot);
 
     // The snapshot must be named: a real fingerprint, of a slot that has
     // happened and is later than the last run's.

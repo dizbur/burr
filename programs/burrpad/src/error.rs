@@ -54,7 +54,7 @@ pub enum BurrpadError {
     NotRewardsWallet,
     #[msg("Too soon since this coin's last holder release")]
     HolderReleaseTooSoon,
-    #[msg("Nothing in the holder pot")]
+    #[msg("A holder release must take more than nothing")]
     NothingToRelease,
     #[msg("The snapshot's slot or fingerprint is not acceptable")]
     BadSnapshot,
@@ -68,4 +68,6 @@ pub enum BurrpadError {
     RewardsWalletWaitNotOver,
     #[msg("Holder releases are switched off")]
     HolderReleasesPaused,
+    #[msg("The holder pot holds less than the amount asked for")]
+    ReleaseAboveThePot,
 }
