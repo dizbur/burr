@@ -216,9 +216,9 @@ MANUAL = [
 
     # ---- collect and split ----
     M("C1", "The vault is read again after pump.fun's collect, on the curve side", COLLECT,
-      "ctx.accounts.vault.reload()?;", "", "collect_brings_the_fee_in_and_splits_it_exactly", nth=0),
+      "ctx.accounts.vault.reload()?;", "", "collect_brings_the_fee_in_and_splits_it_exactly", nth=1),
     M("C2", "The vault is read again after pump.fun's collect, on the pool side", COLLECT,
-      "ctx.accounts.vault.reload()?;", "", "fees_from_both_the_curve_and_the_pool_reach_the_vault", nth=1),
+      "ctx.accounts.vault.reload()?;", "", "fees_from_both_the_curve_and_the_pool_reach_the_vault", nth=2),
     M("C3", "Collecting from a pool that does not exist yet is refused clearly", COLLECT,
       "require!(!a.pool.data_is_empty(), BurrpadError::WrongVenue);", "", "collect_pool_before_graduation_is_refused"),
     M("C4", "A vault holding less than the ledger says stops the split", "ops.rs",
@@ -496,10 +496,14 @@ def auto_entries():
                     new_attr = f"#[account({', '.join(keep)})]" if keep else ""
                 old_attr = body[am.start():attr_end]
                 a, b = body_start + am.start(), body_start + attr_end
+                # A few are held by a sharper test than the general substitution one.
+                test_for = {
+                    ("PayOut", "vault"): "t15_random_sequences::no_substituted_account_moves_money_wrongly",
+                }.get((struct, field), test)
                 out.append(dict(
                     id=f"X.{struct}.{field}", what=f"{struct}: `{field}` must be the right account",
-                    file=rel, span=(a, b), old=old_attr, repl=new_attr, test=test,
-                    msg=rf"swapping {field}( \(|\s+was)"))
+                    file=rel, span=(a, b), old=old_attr, repl=new_attr, test=test_for,
+                    msg=rf"swapping {field}( \(|\s+was)" if test_for == test else None))
             # program types
             for pm in re.finditer(r"pub (\w+): Program<'info, \w+>,", body):
                 field = pm.group(1)
@@ -645,6 +649,9 @@ def second_line(entry_id):
     if field == "authority":
         return ("signing uses this coin's own seeds, so another coin's authority cannot sign; "
                 "the same check is held alone in split")
+    if struct == "Recover" and field == "stray":
+        return ("the token program refuses a transfer out of any account the coin's authority does not own, or of another "
+                "mint, and the framework refuses the vault passed twice")
     if field == "vault":
         return "the token program refuses: the signer does not own that account"
     if field in ("pump_global", "amm_global_config"):

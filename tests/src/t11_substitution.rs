@@ -440,6 +440,8 @@ fn recover() {
             x.vault = kit::vault(&d);
         }),
         sw("vault", |x: &mut A| x.vault = thief_zec),
+        // Another coin's vault as the destination: richer than this coin's, so only the address check stops it.
+        sw("vault", |x: &mut A| x.vault = kit::vault(&d)),
         sw("zec_mint", |x: &mut A| x.zec_mint = c),
         sw("stray", |x: &mut A| x.stray = other_side),
         sw("stray", |x: &mut A| x.stray = thief_zec),
