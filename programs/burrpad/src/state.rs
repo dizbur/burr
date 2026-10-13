@@ -110,8 +110,12 @@ pub struct BurnState {
 pub struct HoldersState {
     /// When this coin's holder pot was last released; at first, its launch.
     pub last_release: i64,
-    /// The slot of the snapshot used for the last release.
+    /// The slot in which that release landed; at first, the launch's slot.
+    /// The next snapshot must be later than this.
+    pub last_release_slot: u64,
+    /// The slot and fingerprint of the snapshot the last release was for.
     pub last_snapshot_slot: u64,
+    pub last_snapshot_hash: [u8; 32],
     pub runs: u64,
     pub total_released: u64,
 }

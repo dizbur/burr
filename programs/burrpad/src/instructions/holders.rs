@@ -12,8 +12,10 @@
 //! - a release takes the amount it states, never more than the pot holds;
 //! - at most one release per coin per interval (30 minutes);
 //! - none at all while the administrator has releases switched off;
-//! - each release records the slot and a 32-byte fingerprint of the snapshot
-//!   it is for, so the published snapshot can be checked against the chain.
+//! - each release names the slot and a 32-byte fingerprint of the snapshot
+//!   it is for, and both are kept in the ledger and announced, so the
+//!   published snapshot can be checked against the chain;
+//! - a snapshot must be taken after the release before it landed.
 //!
 //! What it does not enforce: that holders are then paid, or paid rightly.
 //! Whoever controls the rewards wallet controls every coin's holder pot, and
@@ -90,9 +92,11 @@ pub fn handle_release_holder_rewards(
     require!(amount <= ledger.pots[SINK_HOLDERS], BurrpadError::ReleaseAboveThePot);
 
     // The snapshot must be named: a real fingerprint, of a slot that has
-    // happened and is later than the last run's.
+    // happened and is later than the last release (at first, the launch).
+    // So no run can be worked out from holdings as they stood before the
+    // run before it, or before the coin existed.
     require!(
-        snapshot_hash != [0u8; 32] && snapshot_slot <= clock.slot && snapshot_slot > ledger.holders.last_snapshot_slot,
+        snapshot_hash != [0u8; 32] && snapshot_slot <= clock.slot && snapshot_slot > ledger.holders.last_release_slot,
         BurrpadError::BadSnapshot
     );
 
@@ -100,7 +104,9 @@ pub fn handle_release_holder_rewards(
     ops::debit(ledger, SINK_HOLDERS, amount)?;
     let h = &mut ledger.holders;
     h.last_release = clock.unix_timestamp;
+    h.last_release_slot = clock.slot;
     h.last_snapshot_slot = snapshot_slot;
+    h.last_snapshot_hash = snapshot_hash;
     h.runs = h.runs.checked_add(1).ok_or(BurrpadError::Overflow)?;
     h.total_released = h.total_released.checked_add(amount).ok_or(BurrpadError::Overflow)?;
     let run = h.runs;

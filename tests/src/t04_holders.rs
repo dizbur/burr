@@ -177,6 +177,53 @@ fn a_release_must_name_a_real_snapshot() {
 }
 
 #[test]
+fn a_snapshot_must_be_later_than_the_release_before_it() {
+    let mut w = World::new();
+    let wallet = w.rewards_wallet.insecure_clone();
+    let mint = w.launch(&holders_plan());
+    let born = w.slot();
+    fee(&mut w, &mint, ZEC1);
+    assert_eq!(w.ledger(&mint).holders.last_release_slot, born);
+    w.b.wait(HALF_HOUR);
+
+    // Not from before the coin existed, nor from the slot it was made in.
+    assert!(born > 1);
+    for early in [0, born - 1, born] {
+        let i = release_ix(&w, &wallet.pubkey(), &mint, early, [7; 32]);
+        let r = w.b.send_as(Some(&wallet), &[i], &[]);
+        assert_eq!(custom_code(&r), Some(err(E::BadSnapshot)), "a snapshot from before the coin: slot {early}");
+    }
+
+    // A snapshot is taken, and its release lands some slots later.
+    let first = born + 1;
+    w.b.wait(60);
+    let landed = w.slot();
+    assert!(landed > first + 1);
+    let i = release_ix(&w, &wallet.pubkey(), &mint, first, [7; 32]);
+    assert!(w.b.send_as(Some(&wallet), &[i], &[]).is_ok());
+    let h = w.ledger(&mint).holders;
+    assert_eq!(
+        (h.last_release_slot, h.last_snapshot_slot, h.last_snapshot_hash),
+        (landed, first, [7; 32]),
+        "the slot and fingerprint of the last run are kept"
+    );
+
+    // The next snapshot must be later than that landing, not merely later
+    // than the last snapshot: holdings from before the last run was paid
+    // cannot be used again.
+    fee(&mut w, &mint, ZEC1);
+    w.b.wait(HALF_HOUR);
+    for stale in [first + 1, landed] {
+        let i = release_ix(&w, &wallet.pubkey(), &mint, stale, [8; 32]);
+        let r = w.b.send_as(Some(&wallet), &[i], &[]);
+        assert_eq!(custom_code(&r), Some(err(E::BadSnapshot)), "a snapshot older than the last release: slot {stale}");
+    }
+    let i = release_ix(&w, &wallet.pubkey(), &mint, landed + 1, [8; 32]);
+    assert!(w.b.send_as(Some(&wallet), &[i], &[]).is_ok());
+    assert_eq!(w.ledger(&mint).holders.last_snapshot_hash, [8; 32]);
+}
+
+#[test]
 fn a_release_takes_the_amount_it_states_and_the_rest_stays() {
     // A run is worked out for the pot as it was at the snapshot. Anyone can
     // split more fee into the pot before the release lands; that extra must

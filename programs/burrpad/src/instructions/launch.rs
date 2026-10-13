@@ -199,7 +199,8 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     pump::check_plain_coin_mint(&a.mint.to_account_info(), &a.token_2022_program.key())?;
 
     // 4. Write the record. Nothing writes to it again.
-    let now = Clock::get()?.unix_timestamp;
+    let clock = Clock::get()?;
+    let now = clock.unix_timestamp;
     let platform_fraction_bps = cfg.platform_fraction_bps;
     let platform_receiver = cfg.platform_receiver;
     let coin = &mut ctx.accounts.coin;
@@ -232,6 +233,8 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     ledger.burn.last_time = now;
     // The first holder release may come one interval after launch.
     ledger.holders.last_release = now;
+    // and its snapshot must be of a slot after this one.
+    ledger.holders.last_release_slot = clock.slot;
 
     emit!(Launched {
         mint: mint_key,
