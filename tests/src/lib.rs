@@ -19,3 +19,7 @@ mod t04_vault_share;
 mod t05_king;
 #[cfg(test)]
 mod t06_graduated;
+#[cfg(test)]
+mod t07_math;
+#[cfg(test)]
+mod t08_readers;
