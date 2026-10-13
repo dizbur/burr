@@ -59,7 +59,7 @@ cd ../..
 ./scripts/check.sh
 ```
 
-`check.sh` builds the program with `cargo build-sbf` and runs the whole suite. The tests load `target/deploy/burr.so`, so the build must come first.
+`check.sh` builds the program with `cargo build-sbf` and runs the whole suite. `anchor build` works too and also writes the interface file a site needs, `target/idl/burr.json`. The tests load `target/deploy/burr.so`, so the build must come first.
 
 The tests do not use a validator. They run the program, and pump.fun's real programs, inside an in-process Solana runtime, which lets them move the clock.
 
