@@ -15,7 +15,7 @@ The first three hooks pay by rule alone; no key decides. The holders hook is dif
 
 Before the hooks, a part of each coin's fee goes to the platform. It starts at one half and can never be set above one half; the figure in force at launch is written into the coin's record and cannot be changed for that coin. The program sends that part to the platform's receiver and enforces nothing about what happens to it next. The platform's stated use of it (buying and burning the platform's own coin with four fifths, keeping one fifth) is done by a server outside this program. There is no launch fee.
 
-**Status: not deployed.** What checking it has had: the test suite here, run against copies of pump.fun's real programs; mutation tests that remove each protection in turn; and several independent read-throughs of the code. No outside security firm has examined it. Use it at your own risk.
+**Status: deployed to Solana's main network on 13 Oct 2026, at `42w1jV45WeSmfM96vr6GrqSWRcyF5rVbPWjmQ89bvdhg`, from commit `e8f67d7` (an ordinary build, not yet a reproducible one). Not yet open to the public.** What checking it has had: the test suite here, run against copies of pump.fun's real programs; mutation tests that remove each protection in turn; and several independent read-throughs of the code. No outside security firm has examined it. Use it at your own risk.
 
 ## What is here
 
