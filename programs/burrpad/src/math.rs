@@ -106,12 +106,23 @@ impl VaultShare {
     }
 
     /// New fee for this pot. Call `update` first.
+    ///
+    /// The new amount is due over the full release time; what is already
+    /// queued keeps the time it had left. The queue has one end time, so it
+    /// is set to the average of the two, weighted by amount. A small credit
+    /// therefore moves the end by very little: it cannot be used to hold back
+    /// a large queue, and a busy coin is not slowed by its own trading.
     pub fn credit(&mut self, amount: u64, now: i64, release_secs: u32) -> Option<()> {
         if amount == 0 {
             return Some(());
         }
+        let left = if self.queued == 0 { 0 } else { self.release_end.checked_sub(now)?.max(0) as u128 };
+        let old = self.queued as u128;
+        let new = amount as u128;
+        let window =
+            old.checked_mul(left)?.checked_add(new.checked_mul(release_secs as u128)?)? / old.checked_add(new)?;
         self.queued = self.queued.checked_add(amount)?;
-        self.release_end = now.checked_add(release_secs as i64)?;
+        self.release_end = now.checked_add(i64::try_from(window).ok()?)?;
         Some(())
     }
 

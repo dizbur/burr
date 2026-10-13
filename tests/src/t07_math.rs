@@ -323,3 +323,71 @@ proptest! {
         prop_assert!(v.acc <= (fee as u128) * ACC_SCALE);
     }
 }
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: 2_000, ..ProptestConfig::default() })]
+
+    /// A credit moves the end of the release to the amount-weighted average
+    /// of the time the queue had left and the full release time. So: a tiny
+    /// credit moves it by a tiny amount, in either direction; the end is
+    /// never later than a full release time from now; and never earlier than
+    /// the sooner of the two.
+    #[test]
+    fn a_credit_moves_the_release_end_only_in_proportion(
+        queued in 1u64..=1_000_000_000_000_000, left in 1i64..=86_400, amount in 1u64..=1_000_000_000_000_000, now in 0i64..=2_000_000_000,
+    ) {
+        const D: i64 = 86_400;
+        let mut v = VaultShare { total_staked: 1, queued, last_update: now, release_end: now + left, ..Default::default() };
+        v.credit(amount, now, D as u32).unwrap();
+        let window = v.release_end - now;
+        prop_assert_eq!(v.queued, queued + amount);
+        prop_assert!(window <= D);
+        prop_assert!(window >= left.min(D));
+        // The shift is at most the credit's own proportion of a full release time.
+        let shift = (window - left) as i128;
+        let bound = (amount as i128 * D as i128) / (queued as i128 + amount as i128) + 1;
+        prop_assert!(shift <= bound, "end moved {} for a credit of {} onto {}", shift, amount, queued);
+    }
+
+    /// Dust credited every second cannot hold a queue back: after the time
+    /// the queue had left, plus a sliver, nearly all of it is out.
+    #[test]
+    fn dust_cannot_delay_a_queue(queued in 1_000_000u64..=1_000_000_000_000, left in 60i64..=86_400) {
+        const D: u32 = 86_400;
+        let mut v = VaultShare { total_staked: 1_000, queued, last_update: 0, release_end: left, ..Default::default() };
+        let mut dust = 0u64;
+        // One unit of dust every second for the whole time the queue had left.
+        let step = (left / 200).max(1);
+        let mut now = 0;
+        while now < left {
+            now += step;
+            v.update(now, D).unwrap();
+            v.credit(1, now, D).unwrap();
+            dust += 1;
+        }
+        // By one tenth of a percent of a day past its time, with dust still
+        // arriving, all but the dust's own share is released.
+        v.update(left + 90, D).unwrap();
+        prop_assert!(v.queued <= dust + queued / 100, "still queued: {} of {}", v.queued, queued);
+    }
+}
+
+#[test]
+fn a_busy_coin_releases_each_credit_over_about_a_day_not_longer() {
+    // Equal fee every hour for ten days. Under the old rule (every credit
+    // restarts the day for the whole queue) the queue never drains below
+    // about a day's worth. Here, what is queued settles at half a day's fee.
+    const D: u32 = 86_400;
+    let mut v = VaultShare { total_staked: 1, ..Default::default() };
+    let mut now = 0i64;
+    for _ in 0..240 {
+        now += 3_600;
+        v.update(now, D).unwrap();
+        v.credit(1_000_000, now, D).unwrap();
+    }
+    let per_day = 24 * 1_000_000u64;
+    assert!(v.queued > per_day * 4 / 10 && v.queued < per_day * 6 / 10, "queued {} against {per_day} a day", v.queued);
+    // And when fee stops, the rest is out within a day.
+    v.update(now + D as i64, D).unwrap();
+    assert_eq!(v.queued, 0);
+}
