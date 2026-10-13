@@ -15,7 +15,7 @@ The first three hooks pay by rule alone; no key decides. The holders hook is dif
 
 Before the hooks, a part of each coin's fee goes to the platform. It starts at one half and can never be set above one half; the figure in force at launch is written into the coin's record and cannot be changed for that coin. The program sends that part to the platform's receiver and enforces nothing about what happens to it next. The platform's stated use of it (buying and burning the platform's own coin with four fifths, keeping one fifth) is done by a server outside this program. There is no launch fee.
 
-**Status: not audited. Not deployed. Do not use with real funds.**
+**Status: not deployed.** What checking it has had: the test suite here, run against copies of pump.fun's real programs; mutation tests that remove each protection in turn; and several independent read-throughs of the code. No outside security firm has examined it. Use it at your own risk.
 
 ## What is here
 
@@ -78,7 +78,7 @@ python3 scripts/protections.py
 
 ## Deploying
 
-Not yet, and not by this repository. Before any deployment: an outside audit, a program address chosen at deployment (the one in `declare_id!` is a local test address with no key kept), and a two-of-three wallet as upgrade key and administrator.
+Not yet, and not by this repository. Before any deployment: a program address chosen at deployment (the one in `declare_id!` is a local test address with no key kept), and a two-of-three wallet as upgrade key and administrator.
 
 ## Licence
 
