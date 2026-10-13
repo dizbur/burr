@@ -111,6 +111,9 @@ impl Reserves {
 /// Most a single buy back may spend: `reserve * fee_bps / (10_000 * divisor)`,
 /// and never more than the pot.
 pub fn burn_spend_limit(pot: u64, quote_reserve: u64, fee_bps: u16, divisor: u16) -> Option<u64> {
+    if divisor == 0 {
+        return None;
+    }
     let cap = (quote_reserve as u128).checked_mul(fee_bps as u128)? / (BPS as u128).checked_mul(divisor as u128)?;
     Some(pot.min(u64::try_from(cap).ok()?))
 }

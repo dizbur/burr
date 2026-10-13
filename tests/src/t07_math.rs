@@ -33,6 +33,7 @@ fn the_examples_in_the_brief_come_out_right() {
 fn the_burn_limit_and_floor() {
     assert_eq!(math::burn_spend_limit(u64::MAX, 1_000_000, 200, 4), Some(5_000));
     assert_eq!(math::burn_spend_limit(100, 1_000_000, 200, 4), Some(100));
+    assert_eq!(math::burn_spend_limit(1, 1, 1, 0), None, "a divisor of nothing is refused, not a crash");
     assert_eq!(math::burn_spend_limit(u64::MAX, u64::MAX, 500, 4), Some((u64::MAX as u128 * 500 / 40_000) as u64));
     let r = Reserves { quote: 1_000_000, base: 2_000_000 };
     assert_eq!(r.ideal_out(1_000), Some(1_998));

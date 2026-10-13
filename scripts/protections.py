@@ -246,6 +246,9 @@ MANUAL = [
     M("L40", "Launch makes up the rent pump.fun leaves a new mint short of", LAUNCH,
       "    if short > 0 {", "    if false {", "a_launch_works_at_every_text_length"),
 
+    M("M20", "A burn limit worked out with a divisor of zero is refused, not a crash", "math.rs",
+      "    if divisor == 0 {\n        return None;\n    }\n", "", "the_burn_limit_and_floor"),
+
     # ---- recover ----
     M("R20", "Recovered ZEC is split, not left unaccounted", COLLECT,
       "    ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount)?;\n    emit!(Recovered", "    emit!(Recovered",
