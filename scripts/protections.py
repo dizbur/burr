@@ -110,6 +110,8 @@ MANUAL = [
     M("L12", "After the call: the coin's fee is the one asked for", LAUNCH,
       "&& curve.creator_fee_bps == args.fee_bps as u64", "", "a_launch_is_refused_if_the_coin_made_is_not",
       "another fee rate"),
+    M("L25", "After the call: the coin's fee is not marked editable", LAUNCH,
+      "&& !curve.can_edit_creator_fee", "", "a_launch_is_refused_if_the_coin_made_is_not", "marked editable"),
     M("L13", "After the call: the coin is not a holder-rewards coin", LAUNCH,
       "&& !curve.is_holder_reward", "", "a_launch_is_refused_if_the_coin_made_is_not", "holder-rewards"),
     M("L14", "After the call: the coin is not a cashback coin", LAUNCH,

@@ -80,6 +80,9 @@ pub struct CurveView {
     pub is_cashback_coin: bool,
     pub quote_mint: Pubkey,
     pub creator_fee_bps: u64,
+    /// pump.fun's flag for a fee that can be edited later. Documented as
+    /// reserved and always false.
+    pub can_edit_creator_fee: bool,
     pub is_holder_reward: bool,
 }
 
@@ -100,6 +103,7 @@ pub fn read_curve(ai: &AccountInfo) -> Result<CurveView> {
         is_cashback_coin: d[82] != 0,
         quote_mint: key_at(&d, 83),
         creator_fee_bps: u64_at(&d, 115),
+        can_edit_creator_fee: d[123] != 0,
         is_holder_reward: d[124] != 0,
     })
 }

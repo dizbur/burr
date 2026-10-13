@@ -26,6 +26,7 @@ pub const CREATE_CASHBACK: u8 = 15;
 pub const CREATE_MAYHEM: u8 = 16;
 pub const CREATE_COMPLETE: u8 = 17;
 pub const CREATE_NOTHING: u8 = 18;
+pub const CREATE_EDITABLE_FEE: u8 = 19;
 
 // What a buy does.
 pub const BUY_TAKES_GIVES_NOTHING: u8 = 20;
@@ -147,6 +148,7 @@ fn create(program_id: &Pubkey, accounts: &[AccountInfo], data: &[u8]) -> Program
     }
     let fee = if mode == CREATE_WRONG_FEE { fee + 1 } else { fee };
     c[115..123].copy_from_slice(&fee.to_le_bytes());
+    c[123] = (mode == CREATE_EDITABLE_FEE) as u8;
     c[124] = (mode == CREATE_HOLDER_REWARDS) as u8;
     Ok(())
 }

@@ -189,6 +189,7 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
         curve.creator == authority_key
             && curve.quote_mint == ZEC_MINT
             && curve.creator_fee_bps == args.fee_bps as u64
+            && !curve.can_edit_creator_fee
             && !curve.is_holder_reward
             && !curve.is_cashback_coin
             && !curve.is_mayhem_mode

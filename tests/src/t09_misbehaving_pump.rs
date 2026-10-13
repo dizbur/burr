@@ -20,6 +20,7 @@ fn a_launch_is_refused_if_the_coin_made_is_not_the_coin_asked_for() {
         (s::CREATE_WRONG_CREATOR, E::CurveMismatch, "another creator"),
         (s::CREATE_WRONG_QUOTE, E::CurveMismatch, "another quote coin"),
         (s::CREATE_WRONG_FEE, E::CurveMismatch, "another fee rate"),
+        (s::CREATE_EDITABLE_FEE, E::CurveMismatch, "a coin whose fee is marked editable"),
         (s::CREATE_HOLDER_REWARDS, E::CurveMismatch, "a holder-rewards coin"),
         (s::CREATE_CASHBACK, E::CurveMismatch, "a cashback coin"),
         (s::CREATE_MAYHEM, E::CurveMismatch, "a mayhem coin"),
