@@ -544,6 +544,8 @@ def second_line(entry_id):
         return "the token program refuses: the signer does not own that account"
     if field in ("pump_global", "amm_global_config"):
         return "the buy-back check reads this account and requires pump.fun's owner and its settings code"
+    if struct == "BurnPool" and field in ("pool_base_token_account", "pool_quote_token_account"):
+        return "the pool's own record names its two token accounts, and the burn compares them (held as B29 and B30)"
     if field == "pool_authority":
         return "the pool's own address is derived from it and checked"
     if field == "pool" and struct == "BurnPool":

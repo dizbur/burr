@@ -2,14 +2,13 @@
 
 Fee hooks for ZEC-priced pump.fun coins, as one Solana program.
 
-A coin launched through Burrpad is a real pump.fun coin, priced in ZEC, whose creator is an address only this program can sign for. Its creator fee can therefore only arrive in a vault the program controls. What happens to it is chosen once, at launch, from four hooks, and can never be changed.
+A coin launched through Burrpad is a real pump.fun coin, priced in ZEC, whose creator is an address only this program can sign for. Its creator fee can therefore only arrive in a vault the program controls. What happens to it is chosen once, at launch, from three hooks, and can never be changed.
 
 | Hook | What it does with its share of the fee |
 |---|---|
 | Creator's share | Paid to an address named at launch. |
 | Give | Paid to a second address named at launch. |
 | Buy back and burn | Buys the coin and destroys what it bought. |
-| Vault share | Shared among people who place their coins in the coin's vault, by amount and by time. |
 
 **Status: not audited. Not deployed. Do not use with real funds.**
 
