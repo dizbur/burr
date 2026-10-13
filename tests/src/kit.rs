@@ -40,11 +40,11 @@ fn ix(accounts: impl ToAccountMetas, data: impl InstructionData) -> Instruction 
     Instruction { program_id: BURRPAD, accounts: accounts.to_account_metas(None), data: data.data() }
 }
 
-/// What a launch asks for. Shares in order: creator, give, burn.
+/// What a launch asks for. Shares in order: creator, give, burn, holders.
 #[derive(Clone)]
 pub struct LaunchPlan {
     pub fee_bps: u16,
-    pub shares: [u16; 3],
+    pub shares: [u16; 4],
     pub creator_receiver: Pubkey,
     pub give_receiver: Pubkey,
     pub name: String,
@@ -59,7 +59,7 @@ impl Default for LaunchPlan {
     fn default() -> Self {
         Self {
             fee_bps: 200,
-            shares: [3_334, 3_333, 3_333],
+            shares: [2_500, 2_500, 2_500, 2_500],
             creator_receiver: Pubkey::new_unique(),
             give_receiver: Pubkey::new_unique(),
             name: "Test".into(),
@@ -76,6 +76,8 @@ pub struct World {
     pub upgrade_key: Keypair,
     pub admin: Keypair,
     pub platform_receiver: Pubkey,
+    /// The wallet that receives holder pots; the server's in real use.
+    pub rewards_wallet: Keypair,
 }
 
 impl Default for World {
@@ -114,7 +116,8 @@ impl World {
                 Account { lamports: 1_000_000_000, data: p, owner: LOADER, executable: true, rent_epoch: u64::MAX },
             )
             .unwrap();
-        Self { b, upgrade_key, admin, platform_receiver: Pubkey::new_unique() }
+        let rewards_wallet = b.wallet();
+        Self { b, upgrade_key, admin, platform_receiver: Pubkey::new_unique(), rewards_wallet }
     }
 
     pub fn new() -> Self {
@@ -133,7 +136,11 @@ impl World {
                 program_data: program_data(),
                 system_program: SYSTEM,
             },
-            burrpad::instruction::Initialize { admin, platform_receiver: receiver },
+            burrpad::instruction::Initialize {
+                admin,
+                platform_receiver: receiver,
+                rewards_wallet: self.rewards_wallet.pubkey(),
+            },
         )
     }
 
@@ -257,9 +264,9 @@ impl World {
         let pots: u128 = l.pots.iter().map(|p| *p as u128).sum();
         assert!(self.vault_balance(mint) >= l.accounted, "vault below accounted");
         assert!(pots <= l.accounted as u128, "pots above accounted");
-        assert!(l.accounted as u128 - pots < 4, "carry too large");
+        assert!(l.accounted as u128 - pots < 5, "carry too large");
         let credited: u128 = l.credited.iter().sum();
-        assert!(credited <= l.total_split && l.total_split - credited < 4, "credited does not match total");
+        assert!(credited <= l.total_split && l.total_split - credited < 5, "credited does not match total");
     }
 
     // ---- trades made straight on pump.fun, as an ordinary trader would ----
@@ -510,6 +517,41 @@ impl World {
             self.b.wait(60);
         }
         panic!("the burn never bought");
+    }
+
+    // ---- holders ----
+
+    pub fn release_accounts(&self, wallet: &Pubkey, mint: &Pubkey) -> burrpad::accounts::ReleaseHolderRewards {
+        burrpad::accounts::ReleaseHolderRewards {
+            rewards_wallet: *wallet,
+            config: config(),
+            mint: *mint,
+            coin: coin(mint),
+            ledger: ledger(mint),
+            authority: authority(mint),
+            vault: vault(mint),
+            zec_mint: ZEC,
+            rewards_zec: ata(wallet, &ZEC, &TOKEN),
+            token_program: TOKEN,
+            associated_token_program: ATA_PROGRAM,
+            system_program: SYSTEM,
+        }
+    }
+
+    /// The slot the bench's clock shows now.
+    pub fn slot(&self) -> u64 {
+        self.b.svm.get_sysvar::<solana_clock::Clock>().slot
+    }
+
+    /// Releases a coin's holder pot to the rewards wallet, naming a snapshot
+    /// taken at the current slot with a made-up fingerprint.
+    pub fn release_holders(&mut self, mint: &Pubkey) -> TxResult {
+        let wallet = self.rewards_wallet.insecure_clone();
+        let i = ix(
+            self.release_accounts(&wallet.pubkey(), mint),
+            burrpad::instruction::ReleaseHolderRewards { snapshot_slot: self.slot(), snapshot_hash: [7u8; 32] },
+        );
+        self.b.send_as(Some(&wallet), &[i], &[])
     }
 }
 

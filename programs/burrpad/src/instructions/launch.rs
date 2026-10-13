@@ -20,7 +20,7 @@ pub struct LaunchArgs {
     pub uri: String,
     /// The coin's fee, in hundredths of a percent.
     pub fee_bps: u16,
-    /// Shares in order: creator, give, burn. They add to 10,000.
+    /// Shares in order: creator, give, burn, holders. They add to 10,000.
     pub shares: [u16; HOOKS],
     pub creator_receiver: Pubkey,
     pub give_receiver: Pubkey,
@@ -218,6 +218,7 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     coin.burn_price_band_bps = BURN_PRICE_BAND_BPS;
     coin.burn_fee_allowance_bps = BURN_FEE_ALLOWANCE_BPS;
     coin.burn_spend_divisor = BURN_SPEND_DIVISOR;
+    coin.holders_release_interval_secs = HOLDERS_RELEASE_INTERVAL_SECS;
     coin.launched_at = now;
     coin.launcher = ctx.accounts.payer.key();
 
@@ -229,6 +230,8 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     // even the first buy is checked against a price nobody could have pushed.
     ledger.burn.reference = math::Reserves { quote: curve.virtual_quote_reserves, base: curve.virtual_token_reserves };
     ledger.burn.last_time = now;
+    // The first holder release may come one interval after launch.
+    ledger.holders.last_release = now;
 
     emit!(Launched {
         mint: mint_key,

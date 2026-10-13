@@ -14,6 +14,8 @@ mod t02_collect_split;
 #[cfg(test)]
 mod t03_burn;
 #[cfg(test)]
+mod t04_holders;
+#[cfg(test)]
 mod t06_graduated;
 #[cfg(test)]
 mod t07_math;

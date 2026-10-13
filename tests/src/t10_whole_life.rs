@@ -44,6 +44,11 @@ fn a_coins_whole_life_and_its_record_never_changes() {
         assert!(w.pay_out(&mint, p).is_ok());
     }
     check(&w, "payouts");
+    w.b.wait(1_800);
+    let r = w.release_holders(&mint);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert!(w.zec_of(&w.rewards_wallet.pubkey()) > 0);
+    check(&w, "holder release");
     assert!(w.zec_of(&plan.creator_receiver) > 0 && w.zec_of(&plan.give_receiver) > 0);
     assert!(w.zec_of(&w.platform_receiver) > 0, "the platform's part went where the record says");
     assert_eq!(w.zec_of(&w.admin.pubkey()), 0, "not to the receiver set afterwards");
@@ -72,7 +77,9 @@ fn a_coins_whole_life_and_its_record_never_changes() {
     check(&w, "the end");
 
     // What is left in the vault is only what the ledger says is still owed.
+    w.b.wait(1_800);
+    assert!(w.release_holders(&mint).is_ok());
     let l = w.ledger(&mint);
-    assert_eq!(l.pots[0] + l.pots[1] + l.pots[2], 0);
+    assert_eq!(l.pots[0] + l.pots[1] + l.pots[2] + l.pots[4], 0);
     assert_eq!(w.vault_balance(&mint), l.accounted);
 }

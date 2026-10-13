@@ -13,6 +13,10 @@ pub struct Config {
     pub pending_admin: Pubkey,
     /// Where the platform's share of future launches is paid.
     pub platform_receiver: Pubkey,
+    /// The wallet that receives every coin's holder pot and pays holders
+    /// from it. It is read at each release, so the administrator can replace
+    /// it, for every coin at once, if its key is ever lost or stolen.
+    pub rewards_wallet: Pubkey,
     /// The platform's part of a coin's fee, for future launches.
     pub platform_fraction_bps: u16,
     pub min_fee_bps: u16,
@@ -40,7 +44,7 @@ pub struct Coin {
     /// The platform's part of the fee, copied from `Config` at launch.
     pub platform_fraction_bps: u16,
     pub platform_receiver: Pubkey,
-    /// Shares of the rest, in order: creator, give, burn.
+    /// Shares of the rest, in order: creator, give, burn, holders.
     pub shares: [u16; HOOKS],
     pub creator_receiver: Pubkey,
     pub give_receiver: Pubkey,
@@ -48,6 +52,7 @@ pub struct Coin {
     pub burn_price_band_bps: u16,
     pub burn_fee_allowance_bps: u16,
     pub burn_spend_divisor: u16,
+    pub holders_release_interval_secs: u32,
     pub launched_at: i64,
     pub launcher: Pubkey,
     /// Unused. Room for fields a later version may add without moving the account.
@@ -81,6 +86,7 @@ pub struct Ledger {
     /// What each pot holds now.
     pub pots: [u64; SINKS],
     pub burn: BurnState,
+    pub holders: HoldersState,
     /// Unused. Room for fields a later version may add without moving the account.
     pub reserved: [u8; 128],
 }
@@ -92,6 +98,16 @@ pub struct BurnState {
     pub reference: Reserves,
     pub total_spent: u64,
     pub total_burned: u64,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]
+pub struct HoldersState {
+    /// When this coin's holder pot was last released; at first, its launch.
+    pub last_release: i64,
+    /// The slot of the snapshot used for the last release.
+    pub last_snapshot_slot: u64,
+    pub runs: u64,
+    pub total_released: u64,
 }
 
 /// The pots that are simply paid out to a fixed receiver.

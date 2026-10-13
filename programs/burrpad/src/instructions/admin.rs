@@ -1,5 +1,7 @@
-//! The administrator. It can set four things for future launches and switch
-//! new launches off and on. It cannot touch any coin or any money.
+//! The administrator. It can set four things for future launches, switch new
+//! launches off and on, and name the wallet that receives holder pots. That
+//! last power reaches existing coins: see `holders.rs`. It can touch no other
+//! pot and no coin's record.
 
 use crate::constants::*;
 use crate::error::BurrpadError;
@@ -27,13 +29,20 @@ pub struct Initialize<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handle_initialize(ctx: Context<Initialize>, admin: Pubkey, platform_receiver: Pubkey) -> Result<()> {
+pub fn handle_initialize(
+    ctx: Context<Initialize>,
+    admin: Pubkey,
+    platform_receiver: Pubkey,
+    rewards_wallet: Pubkey,
+) -> Result<()> {
     require!(admin != Pubkey::default() && platform_receiver != Pubkey::default(), BurrpadError::EmptyAddress);
+    require!(rewards_wallet != Pubkey::default(), BurrpadError::EmptyAddress);
     let c = &mut ctx.accounts.config;
     c.version = LAYOUT_VERSION;
     c.admin = admin;
     c.pending_admin = Pubkey::default();
     c.platform_receiver = platform_receiver;
+    c.rewards_wallet = rewards_wallet;
     c.platform_fraction_bps = START_PLATFORM_FRACTION_BPS;
     c.min_fee_bps = START_MIN_FEE_BPS;
     c.max_fee_bps = START_MAX_FEE_BPS;
@@ -83,6 +92,14 @@ pub fn handle_set_platform_receiver(ctx: Context<AdminOnly>, receiver: Pubkey) -
     Ok(())
 }
 
+/// Replaces the wallet that receives holder pots, for every coin, from now on.
+pub fn handle_set_rewards_wallet(ctx: Context<AdminOnly>, wallet: Pubkey) -> Result<()> {
+    require!(wallet != Pubkey::default(), BurrpadError::EmptyAddress);
+    ctx.accounts.config.rewards_wallet = wallet;
+    announce(&ctx.accounts.config);
+    Ok(())
+}
+
 pub fn handle_set_launches_paused(ctx: Context<AdminOnly>, paused: bool) -> Result<()> {
     ctx.accounts.config.launches_paused = paused;
     announce(&ctx.accounts.config);
@@ -120,6 +137,7 @@ fn announce(c: &Config) {
     emit!(ConfigChanged {
         admin: c.admin,
         platform_receiver: c.platform_receiver,
+        rewards_wallet: c.rewards_wallet,
         platform_fraction_bps: c.platform_fraction_bps,
         min_fee_bps: c.min_fee_bps,
         max_fee_bps: c.max_fee_bps,

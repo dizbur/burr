@@ -40,7 +40,7 @@ fn a_launch_is_refused_if_the_coin_made_is_not_the_coin_asked_for() {
 
 fn burn_coin() -> (World, Pubkey) {
     let mut w = World::new();
-    let mint = w.launch(&LaunchPlan { shares: [0, 0, 10_000], ..Default::default() });
+    let mint = w.launch(&LaunchPlan { shares: [0, 0, 10_000, 0], ..Default::default() });
     w.b.give_zec(&kit::authority(&mint), 50 * ZEC1);
     assert!(w.split(&mint).is_ok());
     w.b.wait(60);
@@ -107,7 +107,7 @@ fn collect_credits_only_what_really_arrived() {
     let r = w.collect_curve(&mint);
     assert!(r.is_ok(), "{}", logs(&r));
     let l = w.ledger(&mint);
-    assert_eq!((l.accounted, l.pots), (0, [0; 4]), "nothing arrived, so nothing was credited");
+    assert_eq!((l.accounted, l.pots), (0, [0; 5]), "nothing arrived, so nothing was credited");
 }
 
 // ---- the same on the pool ----

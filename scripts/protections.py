@@ -41,6 +41,7 @@ LAUNCH = "instructions/launch.rs"
 COLLECT = "instructions/collect.rs"
 PAY = "instructions/pay_out.rs"
 BURN = "instructions/burn.rs"
+HOLD = "instructions/holders.rs"
 
 MANUAL = [
     # ---- the administrator ----
@@ -238,6 +239,43 @@ MANUAL = [
       "    if amount == 0 {\n        return Ok(());\n    }\n    if p.destination.data_is_empty()", "    if p.destination.data_is_empty()",
       "an_empty_pot_pays_nothing_and_makes_no_account"),
 
+    # ---- holders ----
+    M("H1", "Only the rewards wallet named in the settings can take a holder pot", HOLD,
+      "#[account(mut, address = config.rewards_wallet @ BurrpadError::NotRewardsWallet)]", "#[account(mut)]",
+      "only_the_rewards_wallet_can_take_the_pot"),
+    M("H2", "The rewards wallet must sign", HOLD,
+      "pub rewards_wallet: Signer<'info>,", "pub rewards_wallet: UncheckedAccount<'info>,",
+      "only_the_rewards_wallet_can_take_the_pot"),
+    M("H3", "Holder releases are at least half an hour apart", HOLD,
+      "require!(clock.unix_timestamp >= ready, BurrpadError::HolderReleaseTooSoon);", "",
+      "releases_are_at_least_half_an_hour_apart"),
+    M("H4", "An empty holder pot releases nothing and does not use up the interval", HOLD,
+      "require!(amount > 0, BurrpadError::NothingToRelease);", "",
+      "an_empty_pot_and_a_coin_without_the_hook_release_nothing"),
+    M("H5", "A release must carry a snapshot fingerprint", HOLD,
+      "snapshot_hash != [0u8; 32] && ", "", "a_release_must_name_a_real_snapshot", "no fingerprint"),
+    M("H6", "A release cannot name a slot that has not happened", HOLD,
+      "snapshot_slot <= clock.slot && ", "", "a_release_must_name_a_real_snapshot", "a future slot"),
+    M("H7", "A release cannot reuse an earlier snapshot's slot", HOLD,
+      " && snapshot_slot > ledger.holders.last_snapshot_slot", "", "a_release_must_name_a_real_snapshot", "an old slot"),
+    M("H8", "A coin without the holders hook releases nothing", HOLD,
+      "require!(coin.share_of(SINK_HOLDERS) > 0, BurrpadError::HookNotChosen);", "",
+      "an_empty_pot_and_a_coin_without_the_hook_release_nothing"),
+    M("H9", "The holder pot is emptied in the ledger when released", HOLD,
+      "ops::debit(ledger, SINK_HOLDERS, amount)?;", "", "the_whole_pot_goes_to_the_rewards_wallet_and_nowhere_else"),
+    M("H10", "The time of a release is recorded", HOLD,
+      "    h.last_release = clock.unix_timestamp;\n", "", "releases_are_at_least_half_an_hour_apart"),
+    M("H11", "The snapshot's slot is recorded", HOLD,
+      "    h.last_snapshot_slot = snapshot_slot;\n", "", "a_release_must_name_a_real_snapshot"),
+    M("H12", "The first holder release cannot come in the first half hour", LAUNCH,
+      "    ledger.holders.last_release = now;\n", "", "releases_are_at_least_half_an_hour_apart"),
+    M("H13", "The rewards wallet cannot be set to the empty address", ADMIN,
+      "require!(wallet != Pubkey::default(), BurrpadError::EmptyAddress);", "",
+      "the_administrator_can_replace_the_rewards_wallet_for_every_coin"),
+    M("H14", "The rewards wallet cannot be the empty address at initialisation", ADMIN,
+      "require!(rewards_wallet != Pubkey::default(), BurrpadError::EmptyAddress);", "",
+      "initialise_refuses_empty_addresses", "empty rewards wallet"),
+
     # ---- buy back and burn ----
     M("B1", "A coin without the burn hook cannot burn", BURN,
       "require!(coin.share_of(SINK_BURN) > 0, BurrpadError::HookNotChosen);", "", "a_coin_without_the_hook_cannot_burn"),
@@ -331,6 +369,7 @@ MANUAL = [
 STRUCT_TEST = {
     "Launch": "launch", "SplitOnly": "split", "CollectCurve": "collect_curve", "CollectPool": "collect_pool",
     "PayOut": "pay_out", "BurnCurve": "burn_curve", "BurnPool": "burn_pool",
+    "ReleaseHolderRewards": "release_holder_rewards",
 }
 CONSTRAINT_KEYS = ("seeds", "bump", "address", "associated_token::", "token::", "mint::", "has_one", "constraint")
 
@@ -381,6 +420,8 @@ def auto_entries():
                 keep = [p for p in parts if not p.startswith(CONSTRAINT_KEYS)]
                 if len(keep) == len(parts):
                     continue
+                if (struct, field) == ("ReleaseHolderRewards", "rewards_wallet"):
+                    continue  # held by hand as H1 and H2
                 if "init" in parts or (struct, field) == ("Launch", "authority"):
                     continue  # the address is fixed by creation itself; see the list's notes
                 if "init_if_needed" in parts:
@@ -550,7 +591,7 @@ def second_line(entry_id):
         return "the pool's own address is derived from it and checked"
     if field == "pool" and struct == "BurnPool":
         return "the pool's own record is read and must name this coin and ZEC"
-    if (struct, field) == ("Launch", "config"):
+    if field == "config":
         return "only `initialize` can make a Config, at one address; anything else fails to load as one"
     return None
 
@@ -560,7 +601,7 @@ SECOND_LINE = {}
 GROUPS = [
     ("Z", "Pairs of checks that cover the same thing, removed together"),
     ("A", "The administrator"), ("L", "Launch"), ("N", "The coin's mint"), ("R", "Reading pump.fun's accounts"),
-    ("C", "Collect and split"), ("P", "Payouts"), ("B", "Buy back and burn"), ("X", "Every account is the one it should be"), ("Y", "Every program is the real one"),
+    ("C", "Collect and split"), ("P", "Payouts"), ("H", "Holders"), ("B", "Buy back and burn"), ("X", "Every account is the one it should be"), ("Y", "Every program is the real one"),
 ]
 
 

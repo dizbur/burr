@@ -28,8 +28,17 @@ pub mod burrpad {
 
     // ---- the administrator ----
 
-    pub fn initialize(ctx: Context<Initialize>, admin: Pubkey, platform_receiver: Pubkey) -> Result<()> {
-        instructions::admin::handle_initialize(ctx, admin, platform_receiver)
+    pub fn initialize(
+        ctx: Context<Initialize>,
+        admin: Pubkey,
+        platform_receiver: Pubkey,
+        rewards_wallet: Pubkey,
+    ) -> Result<()> {
+        instructions::admin::handle_initialize(ctx, admin, platform_receiver, rewards_wallet)
+    }
+
+    pub fn set_rewards_wallet(ctx: Context<AdminOnly>, wallet: Pubkey) -> Result<()> {
+        instructions::admin::handle_set_rewards_wallet(ctx, wallet)
     }
 
     pub fn set_platform_fraction(ctx: Context<AdminOnly>, fraction_bps: u16) -> Result<()> {
@@ -86,5 +95,16 @@ pub mod burrpad {
 
     pub fn burn_pool(ctx: Context<BurnPool>) -> Result<()> {
         instructions::burn::handle_burn_pool(ctx)
+    }
+
+    // ---- holders ----
+
+    /// Hands a coin's holder pot to the rewards wallet for one payout run.
+    pub fn release_holder_rewards(
+        ctx: Context<ReleaseHolderRewards>,
+        snapshot_slot: u64,
+        snapshot_hash: [u8; 32],
+    ) -> Result<()> {
+        instructions::holders::handle_release_holder_rewards(ctx, snapshot_slot, snapshot_hash)
     }
 }

@@ -50,6 +50,14 @@ pub enum BurrpadError {
     BurnOverspent,
     #[msg("The coin has not graduated to a pool, or has already left the curve")]
     WrongVenue,
+    #[msg("Only the rewards wallet in the settings may take a holder pot")]
+    NotRewardsWallet,
+    #[msg("Too soon since this coin's last holder release")]
+    HolderReleaseTooSoon,
+    #[msg("Nothing in the holder pot")]
+    NothingToRelease,
+    #[msg("The snapshot's slot or fingerprint is not acceptable")]
+    BadSnapshot,
     #[msg("A receiver cannot be one of the coin's own program-controlled addresses")]
     ReceiverNotAllowed,
     #[msg("The platform's terms changed since this launch was prepared")]

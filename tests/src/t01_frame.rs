@@ -78,6 +78,11 @@ fn initialise_refuses_empty_addresses() {
     let i = w.initialize_ix(&k.pubkey(), w.admin.pubkey(), solana_pubkey::Pubkey::default());
     let r = w.b.send_as(Some(&k), &[i], &[]);
     assert_eq!(custom_code(&r), Some(err(E::EmptyAddress)), "empty platform receiver");
+    let mut i = w.initialize_ix(&k.pubkey(), w.admin.pubkey(), w.platform_receiver);
+    let n = i.data.len();
+    i.data[n - 32..].fill(0);
+    let r = w.b.send_as(Some(&k), &[i], &[]);
+    assert_eq!(custom_code(&r), Some(err(E::EmptyAddress)), "empty rewards wallet");
 }
 
 #[test]
@@ -119,6 +124,7 @@ fn a_stranger_cannot_use_any_admin_instruction() {
         w.admin_ix(&s.pubkey(), burrpad::instruction::SetFeeRange { min_bps: 50, max_bps: 300, default_bps: 200 }),
         w.admin_ix(&s.pubkey(), burrpad::instruction::SetPlatformReceiver { receiver: s.pubkey() }),
         w.admin_ix(&s.pubkey(), burrpad::instruction::SetLaunchesPaused { paused: true }),
+        w.admin_ix(&s.pubkey(), burrpad::instruction::SetRewardsWallet { wallet: s.pubkey() }),
         w.admin_ix(&s.pubkey(), burrpad::instruction::ProposeAdmin { new_admin: s.pubkey() }),
     ];
     for i in tries {
@@ -217,10 +223,10 @@ fn launch_refuses_bad_plans() {
     let cases: Vec<(LaunchPlan, E)> = vec![
         (LaunchPlan { fee_bps: 49, ..d.clone() }, E::FeeOutOfRange),
         (LaunchPlan { fee_bps: 301, ..d.clone() }, E::FeeOutOfRange),
-        (LaunchPlan { shares: [3_334, 3_333, 3_332], ..d.clone() }, E::SharesDoNotAddUp),
-        (LaunchPlan { shares: [3_334, 3_333, 3_334], ..d.clone() }, E::SharesDoNotAddUp),
-        (LaunchPlan { shares: [0; 3], ..d.clone() }, E::SharesDoNotAddUp),
-        (LaunchPlan { shares: [u16::MAX, u16::MAX, u16::MAX], ..d.clone() }, E::SharesDoNotAddUp),
+        (LaunchPlan { shares: [3_334, 3_333, 3_332, 0], ..d.clone() }, E::SharesDoNotAddUp),
+        (LaunchPlan { shares: [3_334, 3_333, 3_334, 0], ..d.clone() }, E::SharesDoNotAddUp),
+        (LaunchPlan { shares: [0; 4], ..d.clone() }, E::SharesDoNotAddUp),
+        (LaunchPlan { shares: [u16::MAX, u16::MAX, u16::MAX, 0], ..d.clone() }, E::SharesDoNotAddUp),
         (LaunchPlan { creator_receiver: empty, ..d.clone() }, E::MissingReceiver),
         (LaunchPlan { give_receiver: empty, ..d.clone() }, E::MissingReceiver),
         (LaunchPlan { name: "x".repeat(33), ..d.clone() }, E::TextTooLong),
@@ -246,7 +252,7 @@ fn launch_accepts_the_edges_and_unused_settings() {
     w.launch(&LaunchPlan { fee_bps: 300, ..Default::default() });
     // A hook that is not chosen needs no setting.
     w.launch(&LaunchPlan {
-        shares: [0, 0, 10_000],
+        shares: [0, 0, 10_000, 0],
         creator_receiver: empty,
         give_receiver: empty,
         ..Default::default()

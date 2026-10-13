@@ -100,7 +100,7 @@ fn payouts_work_the_same_after_graduation() {
 // ---- buy back and burn on the pool ----
 
 fn burn_plan(fee_bps: u16) -> LaunchPlan {
-    LaunchPlan { fee_bps, shares: [0, 0, 10_000], ..Default::default() }
+    LaunchPlan { fee_bps, shares: [0, 0, 10_000, 0], ..Default::default() }
 }
 
 fn graduated_with_burn_pot(fee_bps: u16, pot: u64) -> (World, Pubkey) {

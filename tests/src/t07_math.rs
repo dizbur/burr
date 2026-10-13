@@ -9,19 +9,19 @@ use proptest::prelude::*;
 
 #[test]
 fn weights_always_add_to_the_whole() {
-    let w = math::weights(1_250, &[2_500, 2_500, 5_000]).unwrap();
+    let w = math::weights(1_250, &[2_500, 2_500, 2_500, 2_500]).unwrap();
     assert_eq!(w.iter().sum::<u128>(), WEIGHT_TOTAL);
     assert_eq!(w[0], 12_500_000);
     assert_eq!(w[1], 21_875_000);
-    assert!(math::weights(1_250, &[2_500, 2_500, 4_999]).is_none());
-    assert!(math::weights(10_001, &[10_000, 0, 0]).is_none());
-    assert!(math::weights(0, &[u16::MAX; 3]).is_none());
+    assert!(math::weights(1_250, &[2_500, 2_500, 2_500, 2_499]).is_none());
+    assert!(math::weights(10_001, &[10_000, 0, 0, 0]).is_none());
+    assert!(math::weights(0, &[u16::MAX; 4]).is_none());
 }
 
 #[test]
 fn the_examples_in_the_brief_come_out_right() {
     // One eighth of the fee: on a 2.00% coin, 0.25% to the platform and 1.75% to the hooks.
-    let w = math::weights(1_250, &[10_000, 0, 0]).unwrap();
+    let w = math::weights(1_250, &[10_000, 0, 0, 0]).unwrap();
     let (mut total, mut credited) = (0u128, [0u128; SINKS]);
     // 2.00% of a 1,000,000-unit trade is 20,000 units of fee.
     let c = math::split(&mut total, &mut credited, &w, 20_000).unwrap();
@@ -104,12 +104,12 @@ fn account_codes_and_positions_match_the_real_accounts() {
 
 // ---- random inputs ----
 
-fn shares() -> impl Strategy<Value = [u16; 3]> {
-    // Three shares that add to 10,000, some possibly zero.
-    proptest::collection::vec(0u32..=10_000, 2).prop_map(|mut cuts| {
+fn shares() -> impl Strategy<Value = [u16; 4]> {
+    // Four shares that add to 10,000, some possibly zero.
+    proptest::collection::vec(0u32..=10_000, 3).prop_map(|mut cuts| {
         cuts.sort();
-        let p = [0, cuts[0], cuts[1], 10_000];
-        [(p[1] - p[0]) as u16, (p[2] - p[1]) as u16, (p[3] - p[2]) as u16]
+        let p = [0, cuts[0], cuts[1], cuts[2], 10_000];
+        [(p[1] - p[0]) as u16, (p[2] - p[1]) as u16, (p[3] - p[2]) as u16, (p[4] - p[3]) as u16]
     })
 }
 
@@ -117,7 +117,7 @@ proptest! {
     #![proptest_config(ProptestConfig { cases: 2_000, ..ProptestConfig::default() })]
 
     /// However the same money is cut into calls, every pot ends the same,
-    /// nothing is invented, and under four units are ever left over.
+    /// nothing is invented, and under five units are ever left over.
     #[test]
     fn the_split_does_not_depend_on_how_it_is_called(
         fraction in 0u16..=5_000,
@@ -156,7 +156,7 @@ proptest! {
             prop_assert_eq!(pots[i], money_in * w[i] / WEIGHT_TOTAL);
         }
         // A hook with no share gets nothing.
-        for i in 0..3 {
+        for i in 0..4 {
             if sh[i] == 0 { prop_assert_eq!(pots[i + 1], 0); }
         }
     }

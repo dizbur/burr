@@ -417,3 +417,36 @@ fn burn_pool() {
     assert!(r.is_ok(), "{}", logs(&r));
     assert!(w.ledger(&c).pots[3] < pot, "with the right accounts the burn buys");
 }
+
+#[test]
+fn release_holder_rewards() {
+    let Stage { mut w, a, b, thief, nothing, fake, .. } = stage();
+    w.b.wait(1_800);
+    let wallet = w.rewards_wallet.insecure_clone();
+    let good = w.release_accounts(&wallet.pubkey(), &a);
+    let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
+    type A = burrpad::accounts::ReleaseHolderRewards;
+    let swaps: Vec<Swap<A>> = vec![
+        sw("config", |x: &mut A| x.config = fake),
+        sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
+        sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
+        sw("authority", |x: &mut A| {
+            x.authority = kit::authority(&b);
+            x.vault = kit::vault(&b);
+        }),
+        sw("vault", |x: &mut A| x.vault = kit::vault(&b)),
+        sw("zec_mint", |x: &mut A| x.zec_mint = a),
+        sw("rewards_zec", |x: &mut A| x.rewards_zec = thief_zec),
+        sw("token_program", |x: &mut A| x.token_program = nothing),
+        sw("associated_token_program", |x: &mut A| x.associated_token_program = nothing),
+        sw("system_program", |x: &mut A| x.system_program = nothing),
+    ];
+    let pot = w.ledger(&a).pots[4];
+    assert!(pot > 0);
+    let slot = w.slot();
+    let data = burrpad::instruction::ReleaseHolderRewards { snapshot_slot: slot, snapshot_hash: [5; 32] };
+    let r = each_refused(&mut w, &wallet, &[], good, data, swaps);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert_eq!(w.zec_of(&wallet.pubkey()), pot);
+    assert_eq!(w.b.token_balance(&thief_zec), ZEC1 - ZEC1 / 100 * 4);
+}

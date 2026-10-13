@@ -45,6 +45,9 @@ pub const BURN_FEE_ALLOWANCE_BPS: u16 = 200;
 /// Buy back and burn: spend per call is at most `reserve * fee_bps / (BPS * this)`.
 pub const BURN_SPEND_DIVISOR: u16 = 4;
 
+/// Holders: seconds that must pass between two releases of a coin's holder pot.
+pub const HOLDERS_RELEASE_INTERVAL_SECS: u32 = 1_800;
+
 // pump.fun's limits on text, checked here so a launch fails early and clearly.
 pub const MAX_NAME_LEN: usize = 32;
 pub const MAX_SYMBOL_LEN: usize = 13;
@@ -53,11 +56,12 @@ pub const MAX_SYMBOL_LEN: usize = 13;
 pub const MAX_URI_LEN: usize = 100;
 
 /// How many hooks a coin can choose from.
-pub const HOOKS: usize = 3;
+pub const HOOKS: usize = 4;
 
 /// The pots of a coin, in ledger order: the platform's, then one per hook.
-pub const SINKS: usize = 4;
+pub const SINKS: usize = 5;
 pub const SINK_PLATFORM: usize = 0;
 pub const SINK_CREATOR: usize = 1;
 pub const SINK_GIVE: usize = 2;
 pub const SINK_BURN: usize = 3;
+pub const SINK_HOLDERS: usize = 4;
