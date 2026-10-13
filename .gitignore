@@ -17,3 +17,5 @@ tmp/
 .DS_Store
 # copies of pump.fun's programs and accounts, fetched by scripts/ground/07-fetch-fixtures.mjs (not ours to publish)
 fixtures/
+# addresses left behind by the deploy kit (no keys, but particular to one deployment)
+scripts/deploy/out/
