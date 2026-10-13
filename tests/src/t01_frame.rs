@@ -21,7 +21,7 @@ fn launch_creates_the_coin_and_its_record_together() {
     let c = w.coin(&mint);
     assert_eq!(c.mint, mint);
     assert_eq!(c.fee_bps, 200);
-    assert_eq!(c.platform_fraction_bps, 1_250);
+    assert_eq!(c.platform_fraction_bps, 5_000);
     assert_eq!(c.platform_receiver, w.platform_receiver);
     assert_eq!(c.shares, plan.shares);
     assert_eq!(c.creator_receiver, plan.creator_receiver);
@@ -62,7 +62,7 @@ fn only_the_upgrade_key_can_initialise_and_only_once() {
     let c = w.config();
     assert_eq!(c.admin, w.admin.pubkey());
     assert_eq!((c.min_fee_bps, c.max_fee_bps, c.default_fee_bps), (50, 300, 200));
-    assert_eq!(c.platform_fraction_bps, 1_250);
+    assert_eq!(c.platform_fraction_bps, 5_000);
     assert!(!c.launches_paused);
     // A second time fails: the account exists.
     assert!(w.initialize().is_err());
@@ -163,7 +163,7 @@ fn admin_changes_touch_only_later_launches() {
     let second = w.launch(&LaunchPlan::default());
 
     let a = w.coin(&first);
-    assert_eq!((a.platform_fraction_bps, a.platform_receiver), (1_250, w.platform_receiver));
+    assert_eq!((a.platform_fraction_bps, a.platform_receiver), (5_000, w.platform_receiver));
     let b = w.coin(&second);
     assert_eq!((b.platform_fraction_bps, b.platform_receiver), (2_500, new_receiver));
 }
@@ -402,11 +402,12 @@ fn initialise_cannot_be_passed_another_programs_upgrade_record() {
 
 #[test]
 fn a_launch_is_stopped_if_the_platforms_terms_changed_on_the_way() {
-    // The launcher prepared the launch seeing one eighth to the platform's
+    // The launcher prepared the launch seeing four tenths to the platform's
     // receiver. Before it lands, the administrator changes the terms.
     let mut w = World::new();
+    assert!(w.as_admin(burrpad::instruction::SetPlatformFraction { fraction_bps: 4_000 }).is_ok());
     let agreed = LaunchPlan {
-        max_platform_fraction_bps: Some(1_250),
+        max_platform_fraction_bps: Some(4_000),
         platform_receiver: Some(w.platform_receiver),
         ..Default::default()
     };

@@ -13,6 +13,8 @@ A coin launched through Burrpad is a real pump.fun coin, priced in ZEC, whose cr
 
 The first three hooks pay by rule alone; no key decides. The holders hook is different: whoever holds the rewards wallet's key receives every coin's holder pot and is trusted to pay it on. The program limits that to the holder pot, to a stated amount no larger than the pot, at most once every 30 minutes per coin, and requires each release to name its snapshot by slot and fingerprint. The administrator can switch releases off at once, and can replace the rewards wallet only by a proposal made in the open that waits 24 hours.
 
+Before the hooks, a part of each coin's fee goes to the platform. It starts at one half and can never be set above one half; the figure in force at launch is written into the coin's record and cannot be changed for that coin. The program sends that part to the platform's receiver and enforces nothing about what happens to it next. The platform's stated use of it (buying and burning the platform's own coin with four fifths, keeping one fifth) is done by a server outside this program. There is no launch fee.
+
 **Status: not audited. Not deployed. Do not use with real funds.**
 
 ## What is here

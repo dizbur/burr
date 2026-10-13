@@ -300,7 +300,7 @@ MANUAL = [
     M("H20", "Applying a proposal uses it up", ADMIN,
       "    c.rewards_wallet = c.pending_rewards_wallet;\n    c.pending_rewards_wallet = Pubkey::default();\n",
       "    c.rewards_wallet = c.pending_rewards_wallet;\n",
-      "a_new_rewards_wallet_is_proposed_in_the_open_and_waits_a_day", "applied twice"),
+      "a_new_rewards_wallet_is_proposed_in_the_open_and_waits_a_day"),
     M("H21", "No holder pot can be released while releases are switched off", HOLD,
       "require!(!ctx.accounts.config.holder_releases_paused, BurrpadError::HolderReleasesPaused);", "",
       "the_pause_stops_every_coins_release_at_once_and_nothing_else", "released while paused"),

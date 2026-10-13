@@ -16,8 +16,8 @@ fn burn_plan(fee_bps: u16) -> LaunchPlan {
 /// A coin whose whole fee goes to buy back and burn, with `pot` units ready.
 fn coin_with_burn_pot(w: &mut World, fee_bps: u16, pot: u64) -> Pubkey {
     let mint = w.launch(&burn_plan(fee_bps));
-    // Fee arriving in the vault; the platform takes its eighth, the rest is the burn pot.
-    w.b.give_zec(&kit::authority(&mint), pot * 8 / 7 + 8);
+    // Fee arriving in the vault; the platform takes its half, the rest is the burn pot.
+    w.b.give_zec(&kit::authority(&mint), pot * 2 + 8);
     assert!(w.split(&mint).is_ok());
     assert!(w.ledger(&mint).pots[3] >= pot);
     // The first burn may come one waiting time after launch.

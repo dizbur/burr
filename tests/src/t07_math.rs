@@ -20,13 +20,13 @@ fn weights_always_add_to_the_whole() {
 
 #[test]
 fn the_examples_in_the_brief_come_out_right() {
-    // One eighth of the fee: on a 2.00% coin, 0.25% to the platform and 1.75% to the hooks.
-    let w = math::weights(1_250, &[10_000, 0, 0, 0]).unwrap();
+    // One half of the fee: on a 2.00% coin, 1.00% to the platform and 1.00% to the hooks.
+    let w = math::weights(START_PLATFORM_FRACTION_BPS, &[10_000, 0, 0, 0]).unwrap();
     let (mut total, mut credited) = (0u128, [0u128; SINKS]);
     // 2.00% of a 1,000,000-unit trade is 20,000 units of fee.
     let c = math::split(&mut total, &mut credited, &w, 20_000).unwrap();
-    assert_eq!(c[SINK_PLATFORM], 2_500);
-    assert_eq!(c[SINK_CREATOR], 17_500);
+    assert_eq!(c[SINK_PLATFORM], 10_000);
+    assert_eq!(c[SINK_CREATOR], 10_000);
 }
 
 #[test]

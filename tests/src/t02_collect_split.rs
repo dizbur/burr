@@ -33,11 +33,11 @@ fn collect_brings_the_fee_in_and_splits_it_exactly() {
     let l = w.ledger(&mint);
     assert_eq!(l.accounted, fee);
     assert_eq!(l.total_split, fee as u128);
-    // One eighth to the platform, the rest in four equal parts, all rounded down.
-    let platform = fee as u128 * 1_250 / 10_000;
+    // One half to the platform, the rest in four equal parts, all rounded down.
+    let platform = fee as u128 * 5_000 / 10_000;
     assert_eq!(l.pots[0] as u128, platform);
     for i in 1..5 {
-        assert_eq!(l.pots[i] as u128, fee as u128 * (8_750 * 2_500) / 100_000_000);
+        assert_eq!(l.pots[i] as u128, fee as u128 * (5_000 * 2_500) / 100_000_000);
     }
     let pots: u64 = l.pots.iter().sum();
     assert!(fee - pots < 5, "in = credited + a carry of under 5 units");
@@ -268,7 +268,7 @@ fn the_platforms_part_scales_with_the_fee() {
     for fee_bps in [100u16, 200, 300] {
         let (mint, fee) = coin_with_fee(&mut w, &LaunchPlan { fee_bps, ..Default::default() });
         assert!(w.collect_curve(&mint).is_ok());
-        assert_eq!(w.ledger(&mint).pots[0] as u128, fee as u128 / 8);
+        assert_eq!(w.ledger(&mint).pots[0] as u128, fee as u128 / 2);
     }
 }
 

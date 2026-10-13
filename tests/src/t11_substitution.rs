@@ -121,7 +121,7 @@ fn launch() {
             shares: plan.shares,
             creator_receiver: plan.creator_receiver,
             give_receiver: plan.give_receiver,
-            max_platform_fraction_bps: 1_250,
+            max_platform_fraction_bps: 5_000,
             platform_receiver: w.platform_receiver,
         },
     };

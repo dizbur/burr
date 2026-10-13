@@ -27,7 +27,8 @@ pub const HARD_MAX_PLATFORM_FRACTION_BPS: u16 = 5_000;
 pub const START_MIN_FEE_BPS: u16 = 50;
 pub const START_MAX_FEE_BPS: u16 = 300;
 pub const START_DEFAULT_FEE_BPS: u16 = 200;
-pub const START_PLATFORM_FRACTION_BPS: u16 = 1_250;
+/// The platform's part of each coin's fee: one half. The rest goes to the coin's hooks.
+pub const START_PLATFORM_FRACTION_BPS: u16 = 5_000;
 
 /// A coin on pump.fun has 6 decimals and these two Token-2022 extensions only.
 pub const COIN_DECIMALS: u8 = 6;
