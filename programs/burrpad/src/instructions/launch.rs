@@ -205,6 +205,7 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     let platform_fraction_bps = cfg.platform_fraction_bps;
     let platform_receiver = cfg.platform_receiver;
     let coin = &mut ctx.accounts.coin;
+    coin.version = LAYOUT_VERSION;
     coin.mint = mint_key;
     coin.bump = ctx.bumps.coin;
     coin.authority_bump = ctx.bumps.authority;
@@ -226,6 +227,7 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     coin.launcher = ctx.accounts.payer.key();
 
     let ledger = &mut ctx.accounts.ledger;
+    ledger.version = LAYOUT_VERSION;
     ledger.mint = mint_key;
     ledger.bump = ctx.bumps.ledger;
     ledger.vault_share.last_update = now;

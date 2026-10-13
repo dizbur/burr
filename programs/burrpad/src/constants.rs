@@ -16,6 +16,10 @@ pub const SEED_STAKE: &[u8] = b"stake";
 /// coins never look like the creator's own holdings.
 pub const SEED_STAKE_AUTHORITY: &[u8] = b"stake-authority";
 
+/// The layout version written into every account this program makes. A
+/// later version that needs a different layout can tell old accounts apart.
+pub const LAYOUT_VERSION: u8 = 1;
+
 /// One whole, in hundredths of a percent.
 pub const BPS: u16 = 10_000;
 

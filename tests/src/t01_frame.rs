@@ -397,3 +397,20 @@ fn a_launch_is_stopped_if_the_platforms_terms_changed_on_the_way() {
     let (_, r) = w.try_launch(&agreed);
     assert_eq!(custom_code(&r), Some(err(E::PlatformTermsChanged)), "another receiver\n{}", logs(&r));
 }
+
+#[test]
+fn every_account_carries_a_layout_version_and_spare_room() {
+    let mut w = World::new();
+    let mint = w.launch(&LaunchPlan { shares: [0, 0, 0, 10_000], ..Default::default() });
+    let t = w.trader(1_000_000_000);
+    assert!(w.buy(&t, &mint, 10_000_000).is_ok());
+    assert!(w.stake(&t, &mint, 1).is_ok());
+    let stake = w.stake_of(&mint, &t.pubkey()).unwrap();
+    let (cfg, coin, ledger) = (w.config(), w.coin(&mint), w.ledger(&mint));
+    assert_eq!((cfg.version, coin.version, ledger.version, stake.version), (1, 1, 1, 1));
+    assert_eq!(
+        (cfg.reserved.len(), coin.reserved.len(), ledger.reserved.len(), stake.reserved.len()),
+        (64, 64, 128, 32)
+    );
+    assert!(cfg.reserved.iter().chain(&coin.reserved).chain(&ledger.reserved).chain(&stake.reserved).all(|b| *b == 0));
+}

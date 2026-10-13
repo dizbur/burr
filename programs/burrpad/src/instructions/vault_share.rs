@@ -70,6 +70,7 @@ pub fn handle_stake(ctx: Context<StakeCoins>, amount: u64) -> Result<()> {
 
     let stake = &mut ctx.accounts.stake;
     if stake.owner == Pubkey::default() {
+        stake.version = LAYOUT_VERSION;
         stake.mint = mint_key;
         stake.owner = ctx.accounts.owner.key();
         stake.bump = ctx.bumps.stake;

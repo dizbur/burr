@@ -30,6 +30,7 @@ pub struct Initialize<'info> {
 pub fn handle_initialize(ctx: Context<Initialize>, admin: Pubkey, platform_receiver: Pubkey) -> Result<()> {
     require!(admin != Pubkey::default() && platform_receiver != Pubkey::default(), BurrpadError::EmptyAddress);
     let c = &mut ctx.accounts.config;
+    c.version = LAYOUT_VERSION;
     c.admin = admin;
     c.pending_admin = Pubkey::default();
     c.platform_receiver = platform_receiver;

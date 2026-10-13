@@ -6,6 +6,8 @@ use anchor_lang::prelude::*;
 #[account]
 #[derive(InitSpace)]
 pub struct Config {
+    /// Layout version of this account.
+    pub version: u8,
     pub admin: Pubkey,
     /// Set by `propose_admin`; becomes `admin` when it accepts.
     pub pending_admin: Pubkey,
@@ -19,12 +21,16 @@ pub struct Config {
     pub default_fee_bps: u16,
     pub launches_paused: bool,
     pub bump: u8,
+    /// Unused. Room for fields a later version may add without moving the account.
+    pub reserved: [u8; 64],
 }
 
 /// A coin's record. Written once by `launch`. No instruction changes it.
 #[account]
 #[derive(InitSpace)]
 pub struct Coin {
+    /// Layout version of this account.
+    pub version: u8,
     pub mint: Pubkey,
     pub bump: u8,
     pub authority_bump: u8,
@@ -47,6 +53,8 @@ pub struct Coin {
     pub vault_release_secs: u32,
     pub launched_at: i64,
     pub launcher: Pubkey,
+    /// Unused. Room for fields a later version may add without moving the account.
+    pub reserved: [u8; 64],
 }
 
 impl Coin {
@@ -63,6 +71,8 @@ impl Coin {
 #[account]
 #[derive(InitSpace)]
 pub struct Ledger {
+    /// Layout version of this account.
+    pub version: u8,
     pub mint: Pubkey,
     pub bump: u8,
     /// ZEC in the vault that has been through the split: the pots plus the carry.
@@ -75,6 +85,8 @@ pub struct Ledger {
     pub pots: [u64; SINKS],
     pub burn: BurnState,
     pub vault_share: VaultShare,
+    /// Unused. Room for fields a later version may add without moving the account.
+    pub reserved: [u8; 128],
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]
@@ -90,6 +102,8 @@ pub struct BurnState {
 #[account]
 #[derive(InitSpace)]
 pub struct Stake {
+    /// Layout version of this account.
+    pub version: u8,
     pub mint: Pubkey,
     pub owner: Pubkey,
     pub amount: u64,
@@ -98,6 +112,8 @@ pub struct Stake {
     /// Earned and not yet paid.
     pub owed: u64,
     pub bump: u8,
+    /// Unused. Room for fields a later version may add without moving the account.
+    pub reserved: [u8; 32],
 }
 
 /// The pots that are simply paid out to a fixed receiver.

@@ -84,6 +84,13 @@ MANUAL = [
       "pub new_admin: Signer<'info>,", "/// CHECK: switched off\n    pub new_admin: UncheckedAccount<'info>,",
       "naming_a_key_is_not_signing_with_it", "proposed administrator"),
 
+    M("A15", "Config records its layout version", ADMIN, "    c.version = LAYOUT_VERSION;\n", "",
+      "every_account_carries_a_layout_version_and_spare_room"),
+    M("L27", "A coin's record carries its layout version", LAUNCH, "    coin.version = LAYOUT_VERSION;\n", "",
+      "every_account_carries_a_layout_version_and_spare_room"),
+    M("L28", "A coin's ledger carries its layout version", LAUNCH, "    ledger.version = LAYOUT_VERSION;\n", "",
+      "every_account_carries_a_layout_version_and_spare_room"),
+
     # ---- launch ----
     M("L1", "No launch while launches are switched off", LAUNCH,
       "require!(!cfg.launches_paused, BurrpadError::LaunchesPaused);", "", "pausing_stops_new_launches_only"),
@@ -335,6 +342,8 @@ MANUAL = [
       "a_burn_is_undone_if_the_buy_did_not_deliver", "a crumb"),
 
     # ---- vault share ----
+    M("V17", "A stake record carries its layout version", VS, "        stake.version = LAYOUT_VERSION;\n", "",
+      "every_account_carries_a_layout_version_and_spare_room"),
     M("V1", "Staking nothing is refused", VS, "require!(amount > 0, BurrpadError::ZeroAmount);", "",
       "staking_needs_the_hook_and_a_real_amount"),
     M("V2", "A coin without the vault share hook takes no stakes", VS,
