@@ -255,3 +255,122 @@ impl Curve {
         }
     }
 }
+
+// ---- graduation and trades on the pool ----
+
+pub const RENT: Pubkey = pubkey!("SysvarRent111111111111111111111111111111111");
+/// `Global.withdraw_authority`, which the migration instruction names.
+pub const WITHDRAW_AUTHORITY: Pubkey = pubkey!("39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg");
+
+/// pump.fun's `migrate_v2`: moves a completed curve to its PumpSwap pool. Open to anyone.
+pub fn migrate_v2(mint: &Pubkey, user: &Pubkey) -> Instruction {
+    let c = curve(mint);
+    let pa = pool_authority(mint);
+    let p = pool(mint);
+    let lp_mint = pda(&[b"pool_lp_mint", p.as_ref()], &PUMP_AMM);
+    let boost_vault = pda(&[b"boost_vault", p.as_ref()], &PUMP_AMM);
+    Instruction {
+        program_id: PUMP,
+        accounts: vec![
+            ro(global()),
+            rw(WITHDRAW_AUTHORITY),
+            ro(*mint),
+            ro(ZEC),
+            rw(c),
+            rw(ata(&c, mint, &TOKEN_2022)),
+            rw(ata(&c, &ZEC, &TOKEN)),
+            rws(*user),
+            ro(SYSTEM),
+            ro(PUMP_AMM),
+            rw(p),
+            rw(pa),
+            rw(ata(&pa, mint, &TOKEN_2022)),
+            rw(ata(&pa, &ZEC, &TOKEN)),
+            ro(amm_global_config()),
+            rw(lp_mint),
+            rw(ata(&pa, &lp_mint, &TOKEN_2022)),
+            rw(ata(&p, mint, &TOKEN_2022)),
+            rw(ata(&p, &ZEC, &TOKEN)),
+            ro(TOKEN_2022),
+            ro(TOKEN),
+            ro(TOKEN_2022),
+            ro(ATA_PROGRAM),
+            ro(amm_event_authority()),
+            ro(RENT),
+            ro(event_authority()),
+            ro(PUMP),
+            // Two extra accounts that the interface file does not list, learned
+            // from a real graduation: PumpSwap's "boost vault" for the pool
+            // and its ZEC account.
+            rw(boost_vault),
+            rw(ata(&boost_vault, &ZEC, &TOKEN)),
+        ],
+        data: disc("migrate_v2").to_vec(),
+    }
+}
+
+/// The 17 accounts of PumpSwap's v2 trades.
+pub fn pool_trade_accounts(mint: &Pubkey, user: &Pubkey) -> Vec<AccountMeta> {
+    let p = pool(mint);
+    vec![
+        rw(p),
+        rws(*user),
+        ro(amm_global_config()),
+        ro(*mint),
+        ro(ZEC),
+        rw(ata(user, mint, &TOKEN_2022)),
+        rw(ata(user, &ZEC, &TOKEN)),
+        rw(ata(&p, mint, &TOKEN_2022)),
+        rw(ata(&p, &ZEC, &TOKEN)),
+        ro(TOKEN_2022),
+        ro(TOKEN),
+        ro(SYSTEM),
+        rw(pda(&[b"user_volume_accumulator", user.as_ref()], &PUMP_AMM)),
+        ro(pda(&[b"fee_config", PUMP_AMM.as_ref()], &PUMP_FEES)),
+        rw(ata(&BUYBACK, &ZEC, &TOKEN)),
+        ro(amm_event_authority()),
+        ro(PUMP_AMM),
+    ]
+}
+
+pub fn pool_buy_exact_quote_in(mint: &Pubkey, user: &Pubkey, quote_in: u64, min_out: u64) -> Instruction {
+    let mut data = disc("buy_exact_quote_in_v2").to_vec();
+    data.extend_from_slice(&quote_in.to_le_bytes());
+    data.extend_from_slice(&min_out.to_le_bytes());
+    Instruction { program_id: PUMP_AMM, accounts: pool_trade_accounts(mint, user), data }
+}
+
+pub fn pool_sell(mint: &Pubkey, user: &Pubkey, base_in: u64, min_out: u64) -> Instruction {
+    let mut data = disc("sell_v2").to_vec();
+    data.extend_from_slice(&base_in.to_le_bytes());
+    data.extend_from_slice(&min_out.to_le_bytes());
+    Instruction { program_id: PUMP_AMM, accounts: pool_trade_accounts(mint, user), data }
+}
+
+/// The fields of a PumpSwap pool that the tests read.
+#[derive(Debug, Clone)]
+pub struct Pool {
+    pub creator: Pubkey,
+    pub base_mint: Pubkey,
+    pub quote_mint: Pubkey,
+    pub coin_creator: Pubkey,
+    pub virtual_quote_reserves: i128,
+    pub creator_fee_bps: u64,
+    pub creator_fees: u64,
+}
+
+impl Pool {
+    pub fn read(d: &[u8]) -> Self {
+        let u = |o: usize| u64::from_le_bytes(d[o..o + 8].try_into().unwrap());
+        let k = |o: usize| Pubkey::new_from_array(d[o..o + 32].try_into().unwrap());
+        Self {
+            creator: k(11),
+            base_mint: k(43),
+            quote_mint: k(75),
+            coin_creator: k(211),
+            virtual_quote_reserves: i128::from_le_bytes(d[245..261].try_into().unwrap()),
+            creator_fee_bps: u(261),
+            creator_fees: u(279),
+        }
+    }
+}

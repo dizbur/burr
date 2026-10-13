@@ -279,6 +279,46 @@ impl World {
         self.b.send_as(Some(trader), &[i], &[])
     }
 
+    // ---- graduation, and trades on the pool ----
+
+    /// Buys out the rest of the curve and moves the coin to its PumpSwap pool,
+    /// with pump.fun's own instructions, as anyone can.
+    pub fn graduate(&mut self, mint: &Pubkey) {
+        let whale = self.trader(10_000 * 100_000_000);
+        let r = self.buy(&whale, mint, 20 * 100_000_000);
+        assert!(r.is_ok(), "{}", crate::bench::logs(&r));
+        assert!(self.b.curve(mint).complete, "the curve should be complete");
+        self.b.svm.airdrop(&pump::WITHDRAW_AUTHORITY, 1_000_000_000).unwrap();
+        let i = pump::migrate_v2(mint, &whale.pubkey());
+        let r = self.b.send_as(Some(&whale), &[i], &[]);
+        assert!(r.is_ok(), "{}", crate::bench::logs(&r));
+        assert!(self.b.account(&pump::pool(mint)).is_some(), "the pool should exist");
+    }
+
+    pub fn pool(&self, mint: &Pubkey) -> pump::Pool {
+        pump::Pool::read(&self.b.account(&pump::pool(mint)).expect("pool").data)
+    }
+
+    /// The pool's price figures: (ZEC reserve prices are worked from, coins).
+    pub fn pool_reserves(&self, mint: &Pubkey) -> (u64, u64) {
+        let p = pump::pool(mint);
+        let q = self.b.token_balance(&ata(&p, &ZEC, &TOKEN)) as i128 + self.pool(mint).virtual_quote_reserves;
+        (q as u64, self.b.token_balance(&ata(&p, mint, &TOKEN_2022)))
+    }
+
+    pub fn pool_buy(&mut self, trader: &Keypair, mint: &Pubkey, zec: u64) -> TxResult {
+        let ixs = [
+            pump::create_ata(&trader.pubkey(), &trader.pubkey(), mint, &TOKEN_2022),
+            pump::pool_buy_exact_quote_in(mint, &trader.pubkey(), zec, 1),
+        ];
+        self.b.send_as(Some(trader), &ixs, &[])
+    }
+
+    pub fn pool_sell(&mut self, trader: &Keypair, mint: &Pubkey, coins: u64) -> TxResult {
+        let i = pump::pool_sell(mint, &trader.pubkey(), coins, 0);
+        self.b.send_as(Some(trader), &[i], &[])
+    }
+
     // ---- collect, split, pay ----
 
     pub fn split_ix(&self, mint: &Pubkey) -> Instruction {
