@@ -165,6 +165,19 @@ impl Bench {
     /// Replaces the program at `address` with the misbehaving stand-in, and
     /// tells it how to misbehave by one byte in that program's settings account.
     pub fn use_standin(&mut self, address: &Pubkey, settings: &Pubkey, mode: u8) {
+        self.load_standin_at(address);
+        self.set_standin_mode(settings, mode);
+    }
+
+    /// A program at a fresh address that accepts any call and does nothing.
+    /// For passing in place of a real program.
+    pub fn do_nothing_program(&mut self) -> Pubkey {
+        let k = Pubkey::new_unique();
+        self.load_standin_at(&k);
+        k
+    }
+
+    fn load_standin_at(&mut self, address: &Pubkey) {
         let so = std::fs::read(root().join("target/deploy/pump_standin.so"))
             .expect("build the stand-in first: cargo build-sbf --manifest-path tests-standin/Cargo.toml");
         let loader: Pubkey = "BPFLoaderUpgradeab1e11111111111111111111111".parse().unwrap();
@@ -189,7 +202,6 @@ impl Bench {
                 Account { lamports: 1_000_000_000, data: p, owner: loader, executable: true, rent_epoch: u64::MAX },
             )
             .unwrap();
-        self.set_standin_mode(settings, mode);
     }
 
     pub fn set_standin_mode(&mut self, settings: &Pubkey, mode: u8) {
@@ -220,5 +232,17 @@ pub fn logs(r: &TxResult) -> String {
     match r {
         Ok(m) => m.logs.join("\n"),
         Err(f) => format!("{:?}\n{}", f.err, f.meta.logs.join("\n")),
+    }
+}
+
+/// True if a transaction failed without pump.fun's programs ever being
+/// called: that is, Burr itself refused it.
+pub fn refused_by_burr(r: &TxResult) -> bool {
+    match r {
+        Ok(_) => false,
+        Err(f) => !f.meta.logs.iter().any(|l| {
+            l.starts_with(&format!("Program {} invoke", pump::PUMP))
+                || l.starts_with(&format!("Program {} invoke", pump::PUMP_AMM))
+        }),
     }
 }

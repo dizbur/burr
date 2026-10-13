@@ -271,3 +271,36 @@ fn the_platforms_part_scales_with_the_fee() {
         assert_eq!(w.ledger(&mint).pots[0] as u128, fee as u128 / 8);
     }
 }
+
+#[test]
+fn a_vault_holding_less_than_the_ledger_says_stops_the_split() {
+    // This cannot happen by any instruction; the vault is rewritten by hand.
+    // If it ever did, the program must stop rather than carry on with wrong sums.
+    let mut w = World::new();
+    let (mint, fee) = coin_with_fee(&mut w, &LaunchPlan::default());
+    assert!(w.collect_curve(&mint).is_ok());
+    let auth = kit::authority(&mint);
+    w.b.write_token_account(kit::vault(&mint), &ZEC, &auth, fee - 1, &TOKEN);
+    let r = w.split(&mint);
+    assert_eq!(custom_code(&r), Some(err(E::VaultShort)), "{}", logs(&r));
+}
+
+#[test]
+fn a_pot_cannot_be_debited_below_zero() {
+    let mut l = burr::state::Ledger {
+        mint: Pubkey::default(),
+        bump: 0,
+        accounted: 100,
+        total_split: 100,
+        credited: [0; 6],
+        pots: [10, 20, 30, 40, 0, 0],
+        burn: Default::default(),
+        vault_share: Default::default(),
+        king: Default::default(),
+    };
+    assert!(burr::ops::debit(&mut l, 1, 21).is_err(), "more than the pot holds");
+    assert!(burr::ops::debit(&mut l, 1, 20).is_ok());
+    assert_eq!((l.pots[1], l.accounted), (0, 80));
+    l.accounted = 5;
+    assert!(burr::ops::debit(&mut l, 2, 30).is_err(), "more than the ledger's total");
+}

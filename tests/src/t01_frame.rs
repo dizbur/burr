@@ -75,7 +75,38 @@ fn initialise_refuses_empty_addresses() {
     let k = w.upgrade_key.insecure_clone();
     let i = w.initialize_ix(&k.pubkey(), solana_pubkey::Pubkey::default(), w.platform_receiver);
     let r = w.b.send_as(Some(&k), &[i], &[]);
-    assert_eq!(custom_code(&r), Some(err(E::EmptyAddress)));
+    assert_eq!(custom_code(&r), Some(err(E::EmptyAddress)), "empty administrator");
+    let i = w.initialize_ix(&k.pubkey(), w.admin.pubkey(), solana_pubkey::Pubkey::default());
+    let r = w.b.send_as(Some(&k), &[i], &[]);
+    assert_eq!(custom_code(&r), Some(err(E::EmptyAddress)), "empty platform receiver");
+}
+
+#[test]
+fn naming_a_key_is_not_signing_with_it() {
+    // The right address is passed each time, but its owner has not signed.
+    let mut w = World::bare();
+    let s = w.b.wallet();
+    let mut i = w.initialize_ix(&w.upgrade_key.pubkey(), s.pubkey(), s.pubkey());
+    i.accounts[0].is_signer = false;
+    assert!(w.b.send_as(Some(&s), &[i], &[]).is_err(), "the upgrade key's address without its signature");
+    assert!(w.b.account(&kit::config()).is_none());
+
+    let mut w = World::new();
+    let s = w.b.wallet();
+    let mut i = w.admin_ix(&w.admin.pubkey(), burr::instruction::SetLaunchesPaused { paused: true });
+    i.accounts[0].is_signer = false;
+    assert!(w.b.send_as(Some(&s), &[i], &[]).is_err(), "the administrator's address without its signature");
+    assert!(!w.config().launches_paused);
+
+    let next = w.b.wallet();
+    assert!(w.as_admin(burr::instruction::ProposeAdmin { new_admin: next.pubkey() }).is_ok());
+    let mut i = kit::raw(
+        burr::accounts::AcceptAdmin { new_admin: next.pubkey(), config: kit::config() },
+        burr::instruction::AcceptAdmin {},
+    );
+    i.accounts[0].is_signer = false;
+    assert!(w.b.send_as(Some(&s), &[i], &[]).is_err(), "the proposed administrator's address without its signature");
+    assert_eq!(w.config().admin, w.admin.pubkey());
 }
 
 // ---- the administrator ----

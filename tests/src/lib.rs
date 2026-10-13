@@ -27,3 +27,5 @@ mod t08_readers;
 mod t09_misbehaving_pump;
 #[cfg(test)]
 mod t10_whole_life;
+#[cfg(test)]
+mod t11_substitution;
