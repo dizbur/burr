@@ -22,6 +22,11 @@ pub const BPS: u16 = 10_000;
 pub const HARD_MIN_FEE_BPS: u16 = 10;
 pub const HARD_MAX_FEE_BPS: u16 = 500;
 pub const HARD_MAX_PLATFORM_FRACTION_BPS: u16 = 5_000;
+/// The platform's part can never be set below a quarter. This is what keeps
+/// trading around a buy back a loss even for a coin's own creator: a creator
+/// gets back at most three quarters of the fee they pay, and the buy back's
+/// limit leaves a gain of at most a quarter of the fees paid.
+pub const HARD_MIN_PLATFORM_FRACTION_BPS: u16 = 2_500;
 
 // Starting settings.
 pub const START_MIN_FEE_BPS: u16 = 50;

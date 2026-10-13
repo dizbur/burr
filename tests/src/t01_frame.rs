@@ -142,6 +142,14 @@ fn admin_settings_stay_inside_the_hard_limits() {
     let r = w.as_admin(burrpad::instruction::SetPlatformFraction { fraction_bps: 5_001 });
     assert_eq!(custom_code(&r), Some(err(E::PlatformFractionTooHigh)));
     assert!(w.as_admin(burrpad::instruction::SetPlatformFraction { fraction_bps: 5_000 }).is_ok());
+    // Nor below a quarter: that is what keeps a creator from profiting by
+    // trading around their own coin's buy back.
+    for low in [0u16, 2_499] {
+        let r = w.as_admin(burrpad::instruction::SetPlatformFraction { fraction_bps: low });
+        assert_eq!(custom_code(&r), Some(err(E::PlatformFractionTooLow)), "platform fraction {low}");
+    }
+    assert!(w.as_admin(burrpad::instruction::SetPlatformFraction { fraction_bps: 2_500 }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::SetPlatformFraction { fraction_bps: 5_000 }).is_ok());
 
     for (min, max, def) in [(9, 300, 200), (50, 501, 200), (50, 300, 301), (50, 300, 49), (301, 300, 300)] {
         let r = w.as_admin(burrpad::instruction::SetFeeRange { min_bps: min, max_bps: max, default_bps: def });
@@ -418,9 +426,9 @@ fn a_launch_is_stopped_if_the_platforms_terms_changed_on_the_way() {
     assert_eq!(custom_code(&r), Some(err(E::PlatformTermsChanged)), "a higher fraction\n{}", logs(&r));
     assert!(w.b.account(&kit::coin(&mint)).is_none());
     // A lower fraction than agreed is fine.
-    assert!(w.as_admin(burrpad::instruction::SetPlatformFraction { fraction_bps: 1_000 }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::SetPlatformFraction { fraction_bps: 2_500 }).is_ok());
     let lower = w.launch(&agreed);
-    assert_eq!(w.coin(&lower).platform_fraction_bps, 1_000);
+    assert_eq!(w.coin(&lower).platform_fraction_bps, 2_500);
 
     let elsewhere = solana_pubkey::Pubkey::new_unique();
     assert!(w.as_admin(burrpad::instruction::SetPlatformReceiver { receiver: elsewhere }).is_ok());

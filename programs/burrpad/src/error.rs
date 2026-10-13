@@ -72,4 +72,6 @@ pub enum BurrpadError {
     ReleaseAboveThePot,
     #[msg("That account is the coin's vault, not a stray one")]
     NotAStrayAccount,
+    #[msg("Platform fraction below the hard limit")]
+    PlatformFractionTooLow,
 }

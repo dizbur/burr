@@ -71,6 +71,7 @@ pub struct AdminOnly<'info> {
 
 pub fn handle_set_platform_fraction(ctx: Context<AdminOnly>, fraction_bps: u16) -> Result<()> {
     require!(fraction_bps <= HARD_MAX_PLATFORM_FRACTION_BPS, BurrpadError::PlatformFractionTooHigh);
+    require!(fraction_bps >= HARD_MIN_PLATFORM_FRACTION_BPS, BurrpadError::PlatformFractionTooLow);
     ctx.accounts.config.platform_fraction_bps = fraction_bps;
     announce(&ctx.accounts.config);
     Ok(())
