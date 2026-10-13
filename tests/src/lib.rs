@@ -27,3 +27,5 @@ mod t09_misbehaving_pump;
 mod t10_whole_life;
 #[cfg(test)]
 mod t11_substitution;
+#[cfg(test)]
+mod t12_pump_facts;

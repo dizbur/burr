@@ -374,3 +374,66 @@ impl Pool {
         }
     }
 }
+
+// ---- liquidity on a pool, and one old administrative instruction ----
+
+pub fn lp_mint(mint: &Pubkey) -> Pubkey {
+    pda(&[b"pool_lp_mint", pool(mint).as_ref()], &PUMP_AMM)
+}
+
+fn liquidity_accounts(mint: &Pubkey, user: &Pubkey) -> Vec<AccountMeta> {
+    let p = pool(mint);
+    let lp = lp_mint(mint);
+    vec![
+        rw(p),
+        ro(amm_global_config()),
+        AccountMeta::new_readonly(*user, true),
+        ro(*mint),
+        ro(ZEC),
+        rw(lp),
+        rw(ata(user, mint, &TOKEN_2022)),
+        rw(ata(user, &ZEC, &TOKEN)),
+        rw(ata(user, &lp, &TOKEN_2022)),
+        rw(ata(&p, mint, &TOKEN_2022)),
+        rw(ata(&p, &ZEC, &TOKEN)),
+        ro(TOKEN),
+        ro(TOKEN_2022),
+        ro(amm_event_authority()),
+        ro(PUMP_AMM),
+    ]
+}
+
+/// PumpSwap `deposit`: add liquidity for exactly `lp_out` pool shares.
+pub fn pool_deposit(mint: &Pubkey, user: &Pubkey, lp_out: u64, max_base: u64, max_quote: u64) -> Instruction {
+    let mut data = disc("deposit").to_vec();
+    for v in [lp_out, max_base, max_quote] {
+        data.extend_from_slice(&v.to_le_bytes());
+    }
+    Instruction { program_id: PUMP_AMM, accounts: liquidity_accounts(mint, user), data }
+}
+
+/// PumpSwap `withdraw`: give back `lp_in` pool shares.
+pub fn pool_withdraw(mint: &Pubkey, user: &Pubkey, lp_in: u64) -> Instruction {
+    let mut data = disc("withdraw").to_vec();
+    for v in [lp_in, 0, 0] {
+        data.extend_from_slice(&v.to_le_bytes());
+    }
+    Instruction { program_id: PUMP_AMM, accounts: liquidity_accounts(mint, user), data }
+}
+
+pub const METAPLEX: Pubkey = pubkey!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+
+/// pump.fun `set_metaplex_creator`: takes no signer.
+pub fn set_metaplex_creator(mint: &Pubkey) -> Instruction {
+    Instruction {
+        program_id: PUMP,
+        accounts: vec![
+            ro(*mint),
+            ro(pda(&[b"metadata", METAPLEX.as_ref(), mint.as_ref()], &METAPLEX)),
+            rw(curve(mint)),
+            ro(event_authority()),
+            ro(PUMP),
+        ],
+        data: disc("set_metaplex_creator").to_vec(),
+    }
+}
