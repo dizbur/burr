@@ -337,3 +337,182 @@ proptest! {
         }
     }
 }
+
+// ---- the account sweep, widened ----
+//
+// Every instruction that touches a coin, every account in it, replaced in
+// turn by: each other account of the same instruction (the same account
+// passed twice); the matching account of another coin; an ordinary wallet;
+// someone else's ZEC account and coin account; the other token program and a
+// program that does nothing; and a look-alike: a copy of the real account,
+// same owner, with extra bytes, at another address. Whatever each attempt
+// does, the books must still close and nobody else's money may have moved.
+
+use anchor_lang::{InstructionData, ToAccountMetas};
+use solana_instruction::Instruction;
+
+fn built(accounts: impl ToAccountMetas, data: impl InstructionData) -> Instruction {
+    Instruction { program_id: kit::BURRPAD, accounts: accounts.to_account_metas(None), data: data.data() }
+}
+
+/// The instructions for one coin, each as (name, instruction, who signs).
+fn instructions_for(
+    b: &Books,
+    m: &Pubkey,
+    payer: &Keypair,
+    graduated: bool,
+) -> Vec<(&'static str, Instruction, Vec<Keypair>)> {
+    let w = &b.w;
+    let pk = payer.pubkey();
+    let me = || vec![payer.insecure_clone()];
+    let plan = &b.plans[b.coins.iter().position(|c| c == m).unwrap()];
+    let wallet = b.rewards[0].insecure_clone();
+    let pot = w.ledger(m).pots[4].max(1);
+    let mut v = vec![
+        ("split", w.split_ix(m), me()),
+        ("collect_curve", built(w.collect_curve_accounts(&pk, m), burrpad::instruction::CollectCurve {}), me()),
+        (
+            "pay_out creator",
+            built(
+                w.pay_out_accounts(&pk, m, &plan.creator_receiver),
+                burrpad::instruction::PayOut { payee: Payee::Creator },
+            ),
+            me(),
+        ),
+        (
+            "pay_out platform",
+            built(
+                w.pay_out_accounts(&pk, m, &w.platform_receiver),
+                burrpad::instruction::PayOut { payee: Payee::Platform },
+            ),
+            me(),
+        ),
+        (
+            "release_holder_rewards",
+            built(
+                w.release_accounts(&wallet.pubkey(), m),
+                burrpad::instruction::ReleaseHolderRewards {
+                    amount: pot,
+                    snapshot_slot: w.slot(),
+                    snapshot_hash: [4u8; 32],
+                },
+            ),
+            vec![wallet],
+        ),
+    ];
+    if graduated {
+        v.push(("collect_pool", built(w.collect_pool_accounts(&pk, m), burrpad::instruction::CollectPool {}), me()));
+        v.push(("burn_pool", built(w.burn_pool_accounts(&pk, m), burrpad::instruction::BurnPool {}), me()));
+        v.push(("recover", built(w.recover_accounts(m, &kit::vault(m)), burrpad::instruction::Recover {}), me()));
+    } else {
+        v.push(("burn_curve", built(w.burn_curve_accounts(&pk, m), burrpad::instruction::BurnCurve {}), me()));
+    }
+    v
+}
+
+#[test]
+fn no_substituted_account_moves_money_wrongly() {
+    let mut b = open();
+    let payer = b.w.b.payer.insecure_clone();
+    let other_wallet = b.w.b.wallet().pubkey();
+    let nothing = b.w.b.do_nothing_program();
+    let bystander = b.traders[0].insecure_clone();
+    let coins = b.coins.clone();
+    // Everyone trades a little so every pot and every fee vault has something in it.
+    for m in &coins {
+        let t = b.traders[1].insecure_clone();
+        let grad = b.graduated(m);
+        let r = if grad { b.w.pool_buy(&t, m, ZEC1) } else { b.w.buy(&t, m, ZEC1 / 20) };
+        assert!(r.is_ok());
+        let r = if grad { b.w.pool_buy(&bystander, m, ZEC1 / 10) } else { b.w.buy(&bystander, m, ZEC1 / 50) };
+        assert!(r.is_ok());
+        let _ = b.w.collect_curve(m);
+        let _ = b.w.collect_pool(m);
+    }
+    b.w.b.wait(2_000);
+    b.check("before the sweep");
+    let mut tried = 0u32;
+    let mut went_through = 0u32;
+
+    for (ci, m) in coins.iter().enumerate() {
+        let grad = b.graduated(m);
+        let other = coins[(ci + 1) % coins.len()];
+        let names: Vec<&'static str> = instructions_for(&b, m, &payer, grad).iter().map(|x| x.0).collect();
+        for (n, name) in names.iter().enumerate() {
+            let width = instructions_for(&b, m, &payer, grad)[n].1.accounts.len();
+            for i in 0..width {
+                // What position `i` can be replaced by.
+                let (_, good, _) = instructions_for(&b, m, &payer, grad).remove(n);
+                let mut subs: Vec<(String, Pubkey)> = (0..width)
+                    .filter(|j| *j != i)
+                    .map(|j| (format!("the same as account {j}"), good.accounts[j].pubkey))
+                    .collect();
+                // The matching account of another coin (if that coin has this instruction).
+                if let Some((_, theirs, _)) =
+                    instructions_for(&b, &other, &payer, b.graduated(&other)).into_iter().find(|x| x.0 == *name)
+                {
+                    subs.push(("another coin's".into(), theirs.accounts[i].pubkey));
+                }
+                subs.push(("an ordinary wallet".into(), other_wallet));
+                subs.push(("someone else's ZEC account".into(), ata(&bystander.pubkey(), &ZEC, &TOKEN)));
+                subs.push((
+                    "someone else's coin account".into(),
+                    ata(&bystander.pubkey(), m, &crate::pump::TOKEN_2022),
+                ));
+                subs.push(("the classic token program".into(), TOKEN));
+                subs.push(("the other token program".into(), crate::pump::TOKEN_2022));
+                subs.push(("a program that does nothing".into(), nothing));
+                // A look-alike: the real account's contents and owner, a few extra bytes, at an address of the attacker's choosing.
+                if let Some(mut real) = b.w.b.account(&good.accounts[i].pubkey) {
+                    if !real.executable {
+                        let fake = Pubkey::new_unique();
+                        real.data.extend_from_slice(&[0u8; 8]);
+                        real.lamports += 1_000_000_000;
+                        b.w.b.svm.set_account(fake, real).unwrap();
+                        subs.push(("a look-alike with extra data".into(), fake));
+                    }
+                }
+
+                for (what, sub) in subs {
+                    if sub == good.accounts[i].pubkey {
+                        continue;
+                    }
+                    // A fresh, valid instruction each time; fees arriving and time passing so it could really run.
+                    b.w.b.give_zec(&kit::authority(m), 1_000);
+                    b.w.b.wait(61);
+                    let (_, mut ix, signers) = instructions_for(&b, m, &payer, grad).remove(n);
+                    ix.accounts[i].pubkey = sub;
+                    // A signature can only come from a key we hold.
+                    if !signers.iter().any(|k| k.pubkey() == sub) {
+                        ix.accounts[i].is_signer = false;
+                    }
+                    let held: Vec<&Keypair> = signers
+                        .iter()
+                        .filter(|k| ix.accounts.iter().any(|a| a.is_signer && a.pubkey == k.pubkey()))
+                        .collect();
+                    let before = (
+                        b.w.zec_of(&bystander.pubkey()),
+                        b.w.coins_of(&bystander.pubkey(), m),
+                        b.w.zec_of(&other_wallet),
+                    );
+                    let r = b.w.b.send_as(Some(&payer), &[ix], &held);
+                    tried += 1;
+                    went_through += r.is_ok() as u32;
+                    let at = format!("coin {ci}, {name}, account {i} replaced by {what}");
+                    if r.is_ok() {
+                        println!("  went through: {at}");
+                    }
+                    b.check(&at);
+                    let after = (
+                        b.w.zec_of(&bystander.pubkey()),
+                        b.w.coins_of(&bystander.pubkey(), m),
+                        b.w.zec_of(&other_wallet),
+                    );
+                    assert_eq!(before, after, "{at}: someone else's balance moved");
+                }
+            }
+        }
+    }
+    println!("{tried} substitutions tried; {went_through} went through, all harmlessly");
+    assert!(tried > 2_000);
+}
