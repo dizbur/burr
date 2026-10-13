@@ -352,15 +352,36 @@ pub struct BurnPool<'info> {
     pub system_program: Program<'info, System>,
 }
 
+/// What a pool's own record must say for us to believe the figures read from it.
+pub struct PoolExpect<'a> {
+    pub mint: &'a Pubkey,
+    pub pool_authority: &'a Pubkey,
+    pub base_account: &'a Pubkey,
+    pub quote_account: &'a Pubkey,
+}
+
 /// The pool's price figures and the creator fee it charges, from its own accounts.
+///
+/// The figures sit at fixed positions in pump.fun's account. Before they are
+/// used, five other fields read the same way are compared with what we know
+/// they must be: both mints, both token accounts and the pool's maker. If
+/// pump.fun ever rearranges the account, these stop matching and the burn
+/// refuses, instead of acting on figures read from the wrong place.
 pub fn pool_reserves(
     pool: &AccountInfo,
-    mint: &Pubkey,
+    expect: &PoolExpect,
     base_amount: u64,
     quote_amount: u64,
 ) -> Result<(Reserves, u64)> {
     let p = pump::read_pool(pool)?;
-    require!(p.base_mint == *mint && p.quote_mint == ZEC_MINT, BurrpadError::WrongPumpAccount);
+    require!(
+        p.base_mint == *expect.mint
+            && p.quote_mint == ZEC_MINT
+            && p.pool_creator == *expect.pool_authority
+            && p.pool_base_token_account == *expect.base_account
+            && p.pool_quote_token_account == *expect.quote_account,
+        BurrpadError::WrongPumpAccount
+    );
     let quote = pump::effective_quote_reserves(quote_amount, p.virtual_quote_reserves)?;
     Ok((Reserves { quote, base: base_amount }, p.creator_fee_bps))
 }
@@ -368,9 +389,18 @@ pub fn pool_reserves(
 pub fn handle_burn_pool(ctx: Context<BurnPool>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let mint_key = ctx.accounts.mint.key();
+    let pool_authority_key = ctx.accounts.pool_authority.key();
+    let base_account_key = ctx.accounts.pool_base_token_account.key();
+    let quote_account_key = ctx.accounts.pool_quote_token_account.key();
+    let expect = PoolExpect {
+        mint: &mint_key,
+        pool_authority: &pool_authority_key,
+        base_account: &base_account_key,
+        quote_account: &quote_account_key,
+    };
     let (reserves, venue_fee_bps) = pool_reserves(
         &ctx.accounts.pool.to_account_info(),
-        &mint_key,
+        &expect,
         ctx.accounts.pool_base_token_account.amount,
         ctx.accounts.pool_quote_token_account.amount,
     )?;
@@ -470,7 +500,7 @@ pub fn handle_burn_pool(ctx: Context<BurnPool>) -> Result<()> {
     ctx.accounts.pool_quote_token_account.reload()?;
     let (after, _) = pool_reserves(
         &ctx.accounts.pool.to_account_info(),
-        &mint_key,
+        &expect,
         ctx.accounts.pool_base_token_account.amount,
         ctx.accounts.pool_quote_token_account.amount,
     )?;

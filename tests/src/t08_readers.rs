@@ -127,8 +127,14 @@ fn the_pool_reader_checks_owner_code_and_length() {
     w.graduate(&mint);
     let key = pump::pool(&mint);
     let data = w.b.account(&key).unwrap().data;
-    let good = with(key, PUMP_AMM, data.clone(), |ai| p::read_pool(ai).map(|x| (x.base_mint, x.quote_mint)));
-    assert_eq!(good.unwrap(), (mint, ZEC));
+    let good = with(key, PUMP_AMM, data.clone(), |ai| {
+        p::read_pool(ai)
+            .map(|x| (x.base_mint, x.quote_mint, x.pool_creator, x.pool_base_token_account, x.pool_quote_token_account))
+    });
+    assert_eq!(
+        good.unwrap(),
+        (mint, ZEC, pump::pool_authority(&mint), ata(&key, &mint, &TOKEN_2022), ata(&key, &ZEC, &TOKEN))
+    );
     assert!(with(key, PUMP, data.clone(), |ai| p::read_pool(ai).is_err()));
     let mut d = data.clone();
     d[0] ^= 1;

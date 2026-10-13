@@ -405,3 +405,23 @@ fn liquidity_added_at_the_end_of_a_climb_does_not_raise_the_pool_burns_limit() {
     }
     panic!("the burn never reached the price");
 }
+
+#[test]
+fn a_pool_record_that_does_not_read_as_expected_stops_the_burn() {
+    // If pump.fun rearranged its pool account, the fields we compare would
+    // stop matching. Each is changed in turn here, by hand.
+    for (what, offset) in
+        [("maker", 11usize), ("coin mint", 43), ("quote mint", 75), ("coin account", 139), ("ZEC account", 171)]
+    {
+        let (mut w, mint) = graduated_with_burn_pot(200, 50 * ZEC1);
+        let key = pump::pool(&mint);
+        let mut a = w.b.account(&key).unwrap();
+        a.data[offset] ^= 1;
+        w.b.svm.set_account(key, a).unwrap();
+        let pot = w.ledger(&mint).pots[3];
+        let r = w.burn_pool(&mint);
+        assert_eq!(custom_code(&r), Some(err(E::WrongPumpAccount)), "{what}\n{}", logs(&r));
+        assert!(crate::bench::refused_by_burrpad(&r), "{what}");
+        assert_eq!(w.ledger(&mint).pots[3], pot);
+    }
+}
