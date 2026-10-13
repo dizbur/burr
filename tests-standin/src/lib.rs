@@ -34,6 +34,7 @@ pub const BUY_DOES_NOTHING: u8 = 22;
 pub const BUY_TAKES_EVERYTHING: u8 = 23;
 pub const BUY_GIVES_FOR_FREE: u8 = 24;
 pub const BUY_HONEST: u8 = 25;
+pub const BUY_GIVES_A_CRUMB: u8 = 26;
 
 #[cfg(not(feature = "no-entrypoint"))]
 solana_program_entrypoint::entrypoint!(process);
@@ -175,6 +176,7 @@ fn trade<'a>(
         BUY_TAKES_EVERYTHING => (all, min_out),
         BUY_GIVES_FOR_FREE => (0, min_out.max(1_000)),
         BUY_HONEST => (quote_in, min_out),
+        BUY_GIVES_A_CRUMB => (quote_in, 1_000),
         _ => return Err(ProgramError::InvalidArgument),
     };
     token_transfer(quote_token_program, user_quote, venue_quote, user, take, &[])?;

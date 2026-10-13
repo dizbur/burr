@@ -46,6 +46,10 @@ fn a_burn_buys_the_coin_and_destroys_it() {
     let burned = supply - w.b.mint_supply(&mint);
     assert!(burned > 0);
     assert_eq!(l.burn.total_burned, burned);
+    // The pool's figures after our own buy are the next reference.
+    let c = w.b.curve(&mint);
+    assert_eq!((l.burn.reference.quote, l.burn.reference.base), (c.virtual_quote_reserves, c.virtual_token_reserves));
+    assert_eq!(l.burn.last_time, w.b.now());
     // The burner keeps nothing.
     let bn = kit::burner(&mint);
     assert_eq!(w.b.token_balance(&ata(&bn, &ZEC, &TOKEN)), 0);

@@ -212,6 +212,12 @@ impl World {
         )
     }
 
+    /// Launches with a mint key chosen beforehand.
+    pub fn launch_with_mint(&mut self, mint: &Keypair, plan: &LaunchPlan) -> TxResult {
+        let i = self.launch_ix(&self.b.payer.pubkey(), &mint.pubkey(), plan);
+        self.b.send(&[i], &[mint])
+    }
+
     pub fn try_launch(&mut self, plan: &LaunchPlan) -> (Pubkey, TxResult) {
         let mint = Keypair::new();
         let i = self.launch_ix(&self.b.payer.pubkey(), &mint.pubkey(), plan);
@@ -689,5 +695,22 @@ pub fn give_token_account_away(account: &Pubkey, owner: &Pubkey, new_owner: &Pub
             solana_instruction::AccountMeta::new_readonly(*owner, true),
         ],
         data,
+    }
+}
+
+/// A new mint key whose coin's four derived addresses all have the same
+/// (highest) bump. Coins made from such keys differ only in their addresses,
+/// so a test that swaps one coin's account for another's is stopped by the
+/// address check alone and by nothing incidental.
+pub fn mint_with_plain_bumps() -> Keypair {
+    loop {
+        let k = Keypair::new();
+        let m = k.pubkey();
+        let all_top = [&b"coin"[..], b"ledger", b"authority", b"burner"]
+            .iter()
+            .all(|seed| Pubkey::find_program_address(&[seed, m.as_ref()], &BURR).1 == 255);
+        if all_top {
+            return k;
+        }
     }
 }

@@ -133,6 +133,17 @@ MANUAL = [
     M("L19", "The first burn cannot come in the first minute", LAUNCH,
       "ledger.burn.last_time = now;", "", "the_first_burn_is_checked_against_the_launch_price"),
 
+    M("L20", "A launch stops if the platform's fraction is above what the launcher agreed", LAUNCH,
+      "cfg.platform_fraction_bps <= args.max_platform_fraction_bps && ", "",
+      "a_launch_is_stopped_if_the_platforms_terms_changed_on_the_way", "a higher fraction"),
+    M("L21", "A launch stops if the platform's receiver is not the one the launcher expected", LAUNCH,
+      " && cfg.platform_receiver == args.platform_receiver", "",
+      "a_launch_is_stopped_if_the_platforms_terms_changed_on_the_way", "another receiver"),
+    M("L22", "A receiver cannot be the coin's own authority", LAUNCH,
+      "r != authority_key && r != burner_key", "r != burner_key", "a_coins_own_addresses_cannot_be_named_as_receivers"),
+    M("L23", "A receiver cannot be the coin's own burner", LAUNCH,
+      "r != authority_key && r != burner_key", "r != authority_key", "a_coins_own_addresses_cannot_be_named_as_receivers"),
+
     # ---- the coin's mint ----
     M("N1", "A coin's mint must belong to Token-2022", "pump.rs",
       "require_keys_eq!(*mint.owner, *token_2022, BurrError::UnexpectedMint);", "",
@@ -228,6 +239,13 @@ MANUAL = [
     M("P1", "A payout pot is emptied in the ledger, so a second call pays nothing", PAY,
       "ops::debit(&mut ctx.accounts.ledger, sink, amount)?;", "", "each_payout_pot_goes_whole_to_its_fixed_receiver"),
 
+    M("P2", "A payout goes only to the receiver's standard ZEC account, fixed by its address", "ops.rs",
+      "require_keys_eq!(*p.destination.key, expected, BurrError::WrongReceiver);", "",
+      "t11_substitution", "swapping (receiver_zec|winner_zec|owner_zec)"),
+    M("P3", "An empty pot pays nothing and makes no account", "ops.rs",
+      "    if amount == 0 {\n        return Ok(());\n    }\n    if p.destination.data_is_empty()", "    if p.destination.data_is_empty()",
+      "an_empty_pot_pays_nothing_and_makes_no_account"),
+
     # ---- buy back and burn ----
     M("B1", "A coin without the burn hook cannot burn", BURN,
       "require!(coin.share_of(SINK_BURN) > 0, BurrError::HookNotChosen);", "", "a_coin_without_the_hook_cannot_burn"),
@@ -237,8 +255,11 @@ MANUAL = [
       "if reserves.above(&b.reference, coin.burn_price_band_bps).ok_or(BurrError::Overflow)? {",
       "if false && reserves.above(&b.reference, coin.burn_price_band_bps).ok_or(BurrError::Overflow)? {",
       "a_price_pushed_up_is_not_bought_at"),
-    M("B4", "When the price check refuses, the new price and time are recorded", BURN,
-      "        b.reference = reserves;\n        b.last_time = now;\n", "", "a_price_pushed_up_is_not_bought_at"),
+    M("B4", "When the price check refuses, the reference rises by one step, not to the price seen", BURN,
+      "b.reference = b.reference.raised_by(coin.burn_price_band_bps).ok_or(BurrError::Overflow)?;",
+      "b.reference = reserves;", "pushing_the_price_for_one_call_does_not_move_the_reference_to_it"),
+    M("B25", "When the price check refuses, the time is recorded, so it cannot be retried at once", BURN,
+      "        b.last_time = now;\n        emit!(BurnSkipped", "        emit!(BurnSkipped", "a_price_pushed_up_is_not_bought_at"),
     M("B5", "The spend limit follows the fee pump.fun really charges", BURN,
       "coin.fee_bps.min(charged),", "coin.fee_bps,", "the_limit_follows_the_fee_pump_fun_really_charges"),
     M("B6", "The spend limit never exceeds the coin's recorded fee", BURN,
@@ -248,8 +269,14 @@ MANUAL = [
     M("B8", "A burn never spends more than the pot", "math.rs",
       "Some(pot.min(u64::try_from(cap).ok()?))", "let _ = pot;\n    Some(u64::try_from(cap).ok()?)",
       "the_spend_never_passes_the_pot_or_the_limit"),
-    M("B9", "With nothing to spend the burn stops", BURN,
-      "require!(spend > 0, BurrError::NothingToBurn);", "", "the_spend_never_passes_the_pot_or_the_limit"),
+    M("B9", "With an empty pot nothing is recorded and nothing is spent", BURN,
+      "require!(ledger.pots[SINK_BURN] > 0, BurrError::NothingToBurn);", "",
+      "an_empty_pot_cannot_be_used_to_move_the_reference"),
+    M("B23", "The limit is measured against the smaller of the reserve now and the reserve last recorded", BURN,
+      "reserves.quote.min(b.reference.quote),", "reserves.quote,",
+      "liquidity_added_just_for_one_call_does_not_raise_the_limit"),
+    M("B24", "If nothing can be bought (no fee charged, or too little), the burn stops", BURN,
+      "require!(min_out > 0, BurrError::NothingToBurn);", "", "the_limit_follows_the_fee_pump_fun_really_charges"),
     M("B10", "The curve burn works only while the curve is trading", BURN,
       "!curve.complete && curve.quote_mint == ZEC_MINT", "curve.quote_mint == ZEC_MINT",
       "each_burn_instruction_only_works_on_its_own_venue"),
@@ -271,7 +298,7 @@ MANUAL = [
       "if zec_left > 0 {", "if false && zec_left > 0 {", "gifts_to_the_burner_do_not_confuse_it"),
     M("B18", "After a curve burn the new price becomes the reference", BURN,
       "    b.reference = Reserves { quote: after.virtual_quote_reserves, base: after.virtual_token_reserves };\n    b.last_time = now;",
-      "    let _ = after;\n    b.last_time = now;", "burns_wait_between_calls"),
+      "    let _ = after;\n    b.last_time = now;", "a_burn_buys_the_coin_and_destroys_it"),
     M("B19", "After a burn the time is recorded", BURN,
       "    b.reference = Reserves { quote: after.virtual_quote_reserves, base: after.virtual_token_reserves };\n    b.last_time = now;",
       "    b.reference = Reserves { quote: after.virtual_quote_reserves, base: after.virtual_token_reserves };",
@@ -283,7 +310,7 @@ MANUAL = [
       "let quote = quote_amount;", "a_burn_on_the_pool_buys_and_destroys"),
     M("B21", "The least-coins-out is worked out from the pool's own figures", "math.rs",
       "u64::try_from(ideal.checked_mul(keep)? / BPS as u128).ok()", "let _ = (ideal, keep);\n    Some(1)",
-      "a_burn_is_undone_if_the_buy_did_not_deliver", "one coin too few"),
+      "a_burn_is_undone_if_the_buy_did_not_deliver", "a crumb"),
 
     # ---- vault share ----
     M("V1", "Staking nothing is refused", VS, "require!(amount > 0, BurrError::ZeroAmount);", "",
@@ -326,6 +353,13 @@ MANUAL = [
       "let v = (staked as u128).checked_mul(growth)?.div_ceil(ACC_SCALE);",
       "the_vault_share_never_owes_more_than_it_was_given"),
 
+    M("V14", "What the last staker leaves starts its release afresh", VS,
+      "        ledger.vault_share.release_end =\n            now.checked_add(ctx.accounts.coin.vault_release_secs as i64).ok_or(BurrError::Overflow)?;\n", "",
+      "what_the_last_staker_leaves_starts_its_release_afresh"),
+    M("V15", "A stake record can be closed only when it is empty", VS,
+      "require!(s.amount == 0 && s.owed == 0, BurrError::StakeNotEmpty);", "",
+      "an_empty_stake_record_can_be_closed_by_its_owner_only"),
+
     # ---- king of the hill ----
     M("K1", "A coin without the king hook takes no king buys", KING,
       "require!(coin.share_of(SINK_KING) > 0, BurrError::HookNotChosen);", "",
@@ -357,14 +391,20 @@ MANUAL = [
       "    ledger.king.leader = Pubkey::default();\n", "", "the_largest_buy_through_burr_leads_and_wins_the_pot"),
     M("K12", "The leader's amount is cleared when a round is settled", KING,
       "    ledger.king.leader_amount = 0;\n    ledger.king.round = round;", "    ledger.king.round = round;",
-      "a_buy_in_the_last_second_counts_and_one_second_later_does_not"),
+      "after_a_round_is_settled_any_buy_leads_the_next"),
     M("K13", "The size of a buy is measured from the buyer's ZEC balance after the call", KING,
       "    ctx.accounts.buyer_zec.reload()?;\n", "", "the_largest_buy_through_burr_leads_and_wins_the_pot", nth=0),
     M("K14", "The size of a pool buy is measured from the buyer's ZEC balance after the call", KING,
       "    ctx.accounts.buyer_zec.reload()?;\n", "", "king_of_the_hill_works_on_the_pool", nth=1),
-    M("K15", "A round's leader amount starts from nothing in a new round", KING,
-      "        k.round = round;\n        k.leader_amount = 0;", "        k.round = round;",
-      "a_round_with_no_buys_carries_its_pot_forward"),
+    # ---- pairs: two checks cover the same thing; removing both must be noticed ----
+    dict(id="Z1", what="pump.fun's program address is pinned (both checks removed together)", test="t11_substitution",
+         msg="swapping pump_program", nth=0, file=f"{SRC}/pump.rs",
+         find="require_keys_eq!(*program.key, *expected, BurrError::WrongPumpAccount);", repl="",
+         also=[(f"{SRC}/instructions/collect.rs", "    #[account(address = pump::PUMP_ID)]\n    pub pump_program", "    pub pump_program")]),
+    dict(id="Z2", what="PumpSwap's program address is pinned (both checks removed together)", test="t11_substitution",
+         msg="swapping amm_program", nth=0, file=f"{SRC}/pump.rs",
+         find="require_keys_eq!(*program.key, *expected, BurrError::WrongPumpAccount);", repl="",
+         also=[(f"{SRC}/instructions/collect.rs", "    #[account(address = pump::PUMP_AMM_ID)]\n    pub amm_program", "    pub amm_program")]),
 ]
 
 # ---------------------------------------------------------------------------
@@ -462,8 +502,8 @@ def apply(entry, text):
     assert count > entry["nth"], f"{entry['id']}: text not found ({count} found, need #{entry['nth']})"
     if entry["nth"] == 0 and count != 1:
         # several places: the first is meant only when nth was given on purpose
-        assert any(e["id"] != entry["id"] and e.get("find") == entry["find"] for e in MANUAL), \
-            f"{entry['id']}: text found {count} times; say which"
+        shared = any(e["id"] != entry["id"] and e.get("find") == entry["find"] for e in MANUAL)
+        assert shared, f"{entry['id']}: text found {count} times; say which"
     pos = -1
     for _ in range(entry["nth"] + 1):
         pos = text.index(entry["find"], pos + 1)
@@ -529,8 +569,14 @@ def worker(n, queue, results):
             return
         path = w / entry["file"]
         original = (ROOT / entry["file"]).read_text()
+        extra = []
         try:
             path.write_text(apply(entry, original))
+            for f, old, new in entry.get("also", []):
+                t = (ROOT / f).read_text()
+                assert t.count(old) == 1, f"{entry['id']}: extra text not found once in {f}"
+                (w / f).write_text(t.replace(old, new))
+                extra.append((f, t))
             state, out = build_and_test(w)
             if state == "does not build":
                 r = dict(status="DOES NOT BUILD", detail=out[-1500:])
@@ -543,6 +589,8 @@ def worker(n, queue, results):
             r = dict(status="ERROR", detail=str(e))
         finally:
             path.write_text(original)
+            for f, t in extra:
+                (w / f).write_text(t)
         r.update(id=entry["id"], what=entry["what"], test=entry["test"])
         results.put(r)
         print(f"[w{n}] {entry['id']:34} {r['status']}", flush=True)
@@ -554,6 +602,7 @@ def worker(n, queue, results):
 SECOND_LINE = {}
 
 GROUPS = [
+    ("Z", "Pairs of checks that cover the same thing, removed together"),
     ("A", "The administrator"), ("L", "Launch"), ("N", "The coin's mint"), ("R", "Reading pump.fun's accounts"),
     ("C", "Collect and split"), ("P", "Payouts"), ("B", "Buy back and burn"), ("V", "Vault share"),
     ("K", "King of the hill"), ("X", "Every account is the one it should be"), ("Y", "Every program is the real one"),

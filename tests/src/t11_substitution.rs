@@ -39,8 +39,23 @@ fn stage() -> Stage {
     let user = w.trader(10_000 * ZEC1);
     let thief = w.trader(ZEC1);
     let mut coins = vec![];
+    let payer = w.b.payer.pubkey();
     for graduated in [false, false, true, true] {
-        let m = w.launch(&plan);
+        // Every account that an instruction would otherwise make on first use
+        // is made beforehand, so that these tests exercise the checks on
+        // accounts that exist.
+        let mint = kit::mint_with_plain_bumps();
+        let m = mint.pubkey();
+        let (auth, bn) = (kit::authority(&m), kit::burner(&m));
+        assert!(w.b.send(&[pump::create_ata(&payer, &auth, &ZEC, &TOKEN)], &[]).is_ok());
+        let r = w.launch_with_mint(&mint, &plan);
+        assert!(r.is_ok(), "{}", logs(&r));
+        let made = [
+            pump::create_ata(&payer, &auth, &m, &TOKEN_2022),
+            pump::create_ata(&payer, &bn, &ZEC, &TOKEN),
+            pump::create_ata(&payer, &bn, &m, &TOKEN_2022),
+        ];
+        assert!(w.b.send(&made, &[]).is_ok());
         assert!(w.buy(&user, &m, ZEC1 / 4).is_ok());
         assert!(w.buy(&thief, &m, ZEC1 / 100).is_ok());
         assert!(w.stake(&user, &m, 1_000).is_ok());
@@ -102,6 +117,8 @@ fn launch() {
     let Stage { mut w, a, thief, nothing, fake, .. } = stage();
     let payer = w.b.payer.insecure_clone();
     let mint = Keypair::new();
+    let early = pump::create_ata(&payer.pubkey(), &kit::authority(&mint.pubkey()), &ZEC, &TOKEN);
+    assert!(w.b.send(&[early], &[]).is_ok());
     let good = w.launch_accounts(&payer.pubkey(), &mint.pubkey());
     let plan = LaunchPlan::default();
     let data = burr::instruction::Launch {
@@ -168,7 +185,10 @@ fn split() {
     let swaps: Vec<Swap<A>> = vec![
         sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
         sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
-        sw("authority", |x: &mut A| x.authority = kit::authority(&b)),
+        sw("authority", |x: &mut A| {
+            x.authority = kit::authority(&b);
+            x.vault = kit::vault(&b);
+        }),
         sw("vault", |x: &mut A| x.vault = thief_zec),
         sw("vault (another coin's)", |x: &mut A| x.vault = kit::vault(&b)),
         sw("zec_mint", |x: &mut A| x.zec_mint = a),
@@ -189,13 +209,23 @@ fn collect_curve() {
     let swaps: Vec<Swap<A>> = vec![
         sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
         sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
-        sw("authority", |x: &mut A| x.authority = kit::authority(&b)),
+        sw("authority", |x: &mut A| {
+            x.authority = kit::authority(&b);
+            x.vault = kit::vault(&b);
+        }),
         sw("vault", |x: &mut A| x.vault = thief_zec),
         sw("zec_mint", |x: &mut A| x.zec_mint = a),
         sw("pump_global", |x: &mut A| x.pump_global = pump::amm_global_config()),
-        sw("bonding_curve", |x: &mut A| x.bonding_curve = pump::curve(&b)),
+        sw("bonding_curve", |x: &mut A| {
+            x.bonding_curve = pump::curve(&b);
+            x.associated_quote_bonding_curve = ata(&pump::curve(&b), &ZEC, &TOKEN);
+        }),
         sw("associated_quote_bonding_curve", |x: &mut A| x.associated_quote_bonding_curve = thief_zec),
-        sw("creator_vault", |x: &mut A| x.creator_vault = pump::creator_vault(&kit::authority(&b))),
+        sw("creator_vault", |x: &mut A| {
+            // Another coin's fee vault at pump.fun, with its own ZEC account.
+            x.creator_vault = pump::creator_vault(&kit::authority(&b));
+            x.creator_vault_ata = ata(&x.creator_vault, &ZEC, &TOKEN);
+        }),
         sw("creator_vault_ata", |x: &mut A| x.creator_vault_ata = thief_zec),
         sw("pump_event_authority", |x: &mut A| x.pump_event_authority = fake),
         sw("pump_program", |x: &mut A| x.pump_program = nothing),
@@ -220,7 +250,10 @@ fn collect_pool() {
     let swaps: Vec<Swap<A>> = vec![
         sw("coin", |x: &mut A| x.coin = kit::coin(&d)),
         sw("ledger", |x: &mut A| x.ledger = kit::ledger(&d)),
-        sw("authority", |x: &mut A| x.authority = kit::authority(&d)),
+        sw("authority", |x: &mut A| {
+            x.authority = kit::authority(&d);
+            x.vault = kit::vault(&d);
+        }),
         sw("vault", |x: &mut A| x.vault = thief_zec),
         sw("zec_mint", |x: &mut A| x.zec_mint = c),
         sw("amm_global_config", |x: &mut A| x.amm_global_config = pump::global()),
@@ -228,7 +261,8 @@ fn collect_pool() {
         sw("pool", |x: &mut A| x.pool = pump::pool(&d)),
         sw("pool_quote_token_account", |x: &mut A| x.pool_quote_token_account = ata(&pump::pool(&d), &ZEC, &TOKEN)),
         sw("amm_creator_vault_authority", |x: &mut A| {
-            x.amm_creator_vault_authority = pda(&[b"creator_vault", kit::authority(&d).as_ref()], &PUMP_AMM)
+            x.amm_creator_vault_authority = pda(&[b"creator_vault", kit::authority(&d).as_ref()], &PUMP_AMM);
+            x.amm_creator_vault_ata = ata(&x.amm_creator_vault_authority, &ZEC, &TOKEN);
         }),
         sw("amm_creator_vault_ata", |x: &mut A| x.amm_creator_vault_ata = thief_zec),
         sw("amm_event_authority", |x: &mut A| x.amm_event_authority = fake),
@@ -256,7 +290,10 @@ fn pay_out() {
     let swaps: Vec<Swap<A>> = vec![
         sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
         sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
-        sw("authority", |x: &mut A| x.authority = kit::authority(&b)),
+        sw("authority", |x: &mut A| {
+            x.authority = kit::authority(&b);
+            x.vault = kit::vault(&b);
+        }),
         sw("vault", |x: &mut A| x.vault = kit::vault(&b)),
         sw("zec_mint", |x: &mut A| x.zec_mint = a),
         sw("receiver", |x: &mut A| {
@@ -288,14 +325,29 @@ fn burn_curve() {
         sw("mint", |x: &mut A| x.mint = b),
         sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
         sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
-        sw("authority", |x: &mut A| x.authority = kit::authority(&b)),
+        sw("authority", |x: &mut A| {
+            x.authority = kit::authority(&b);
+            x.vault = kit::vault(&b);
+        }),
         sw("vault", |x: &mut A| x.vault = kit::vault(&b)),
         sw("zec_mint", |x: &mut A| x.zec_mint = b),
-        sw("burner", |x: &mut A| x.burner = kit::burner(&b)),
+        sw("burner", |x: &mut A| {
+            // Another burner, with accounts that really are its own.
+            let other_burner = kit::burner(&Pubkey::new_unique());
+            x.burner = other_burner;
+            x.burner_zec = ata(&other_burner, &ZEC, &TOKEN);
+            x.burner_coin = ata(&other_burner, &a, &TOKEN_2022);
+            x.user_volume = pump::user_volume(&other_burner);
+        }),
         sw("burner_zec", |x: &mut A| x.burner_zec = thief_zec),
         sw("burner_coin", |x: &mut A| x.burner_coin = thief_coin),
         sw("pump_global", |x: &mut A| x.pump_global = pump::amm_global_config()),
-        sw("bonding_curve", |x: &mut A| x.bonding_curve = pump::curve(&b)),
+        sw("bonding_curve", |x: &mut A| {
+            // Another coin's curve, with that curve's own accounts.
+            x.bonding_curve = pump::curve(&b);
+            x.associated_base_bonding_curve = ata(&pump::curve(&b), &a, &TOKEN_2022);
+            x.associated_quote_bonding_curve = ata(&pump::curve(&b), &ZEC, &TOKEN);
+        }),
         sw("associated_base_bonding_curve", |x: &mut A| x.associated_base_bonding_curve = thief_coin),
         sw("associated_quote_bonding_curve", |x: &mut A| x.associated_quote_bonding_curve = thief_zec),
         sw("user_volume", |x: &mut A| x.user_volume = pump::user_volume(&kit::burner(&b))),
@@ -326,10 +378,20 @@ fn burn_pool() {
         sw("mint", |x: &mut A| x.mint = d),
         sw("coin", |x: &mut A| x.coin = kit::coin(&d)),
         sw("ledger", |x: &mut A| x.ledger = kit::ledger(&d)),
-        sw("authority", |x: &mut A| x.authority = kit::authority(&d)),
+        sw("authority", |x: &mut A| {
+            x.authority = kit::authority(&d);
+            x.vault = kit::vault(&d);
+        }),
         sw("vault", |x: &mut A| x.vault = kit::vault(&d)),
         sw("zec_mint", |x: &mut A| x.zec_mint = d),
-        sw("burner", |x: &mut A| x.burner = kit::burner(&d)),
+        sw("burner", |x: &mut A| {
+            // Another burner, with accounts that really are its own.
+            let other_burner = kit::burner(&Pubkey::new_unique());
+            x.burner = other_burner;
+            x.burner_zec = ata(&other_burner, &ZEC, &TOKEN);
+            x.burner_coin = ata(&other_burner, &c, &TOKEN_2022);
+            x.user_volume = pda(&[b"user_volume_accumulator", other_burner.as_ref()], &PUMP_AMM);
+        }),
         sw("burner_zec", |x: &mut A| x.burner_zec = thief_zec),
         sw("burner_coin", |x: &mut A| x.burner_coin = thief_coin),
         sw("amm_global_config", |x: &mut A| x.amm_global_config = pump::global()),
@@ -364,7 +426,10 @@ fn stake() {
         sw("mint", |x: &mut A| x.mint = b),
         sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
         sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
-        sw("authority", |x: &mut A| x.authority = kit::authority(&b)),
+        sw("authority", |x: &mut A| {
+            x.authority = kit::authority(&b);
+            x.stake_vault = kit::stake_vault(&b);
+        }),
         sw("stake", |x: &mut A| x.stake = kit::stake(&a, &thief_key)),
         sw("stake_vault", |x: &mut A| x.stake_vault = thief_coin),
         sw("owner_coin", |x: &mut A| x.owner_coin = thief_coin),
@@ -392,7 +457,11 @@ fn unstake() {
         sw("mint", |x: &mut A| x.mint = b),
         sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
         sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
-        sw("authority", |x: &mut A| x.authority = kit::authority(&b)),
+        sw("authority", |x: &mut A| {
+            x.authority = kit::authority(&b);
+            x.vault = kit::vault(&b);
+            x.stake_vault = kit::stake_vault(&b);
+        }),
         sw("stake", |x: &mut A| x.stake = kit::stake(&a, &thief_key)),
         sw("stake (the same person's in another coin)", |x: &mut A| x.stake = kit::stake(&b, &x.owner)),
         sw("stake_vault", |x: &mut A| x.stake_vault = kit::stake_vault(&b)),
@@ -429,7 +498,12 @@ fn king_buy_curve() {
         sw("buyer_coin", |x: &mut A| x.buyer_coin = thief_coin),
         sw("buyer_zec", |x: &mut A| x.buyer_zec = thief_zec),
         sw("pump_global", |x: &mut A| x.pump_global = pump::amm_global_config()),
-        sw("bonding_curve", |x: &mut A| x.bonding_curve = pump::curve(&b)),
+        sw("bonding_curve", |x: &mut A| {
+            // Another coin's curve, with that curve's own accounts.
+            x.bonding_curve = pump::curve(&b);
+            x.associated_base_bonding_curve = ata(&pump::curve(&b), &a, &TOKEN_2022);
+            x.associated_quote_bonding_curve = ata(&pump::curve(&b), &ZEC, &TOKEN);
+        }),
         sw("associated_base_bonding_curve", |x: &mut A| x.associated_base_bonding_curve = thief_coin),
         sw("associated_quote_bonding_curve", |x: &mut A| x.associated_quote_bonding_curve = thief_zec),
         sw("user_volume", |x: &mut A| x.user_volume = fake),
@@ -496,7 +570,10 @@ fn king_settle() {
     let swaps: Vec<Swap<A>> = vec![
         sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
         sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
-        sw("authority", |x: &mut A| x.authority = kit::authority(&b)),
+        sw("authority", |x: &mut A| {
+            x.authority = kit::authority(&b);
+            x.vault = kit::vault(&b);
+        }),
         sw("vault", |x: &mut A| x.vault = kit::vault(&b)),
         sw("zec_mint", |x: &mut A| x.zec_mint = a),
         sw("winner", |x: &mut A| {

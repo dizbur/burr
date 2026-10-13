@@ -52,6 +52,7 @@ fn a_burn_is_undone_if_the_buy_did_not_deliver() {
         (s::BUY_TAKES_GIVES_NOTHING, E::BurnBadFill, "took the ZEC and gave nothing"),
         (s::BUY_GIVES_ONE_TOO_FEW, E::BurnBadFill, "gave one coin too few"),
         (s::BUY_DOES_NOTHING, E::BurnBadFill, "did nothing"),
+        (s::BUY_GIVES_A_CRUMB, E::BurnBadFill, "gave a crumb for the whole amount"),
     ];
     for (mode, want, what) in cases {
         let (mut w, mint) = burn_coin();
