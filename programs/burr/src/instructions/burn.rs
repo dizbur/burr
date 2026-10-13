@@ -246,8 +246,13 @@ pub fn handle_burn_curve(ctx: Context<BurnCurve>) -> Result<()> {
 
     // Record the price after our own buy as the next reference.
     let after = pump::read_curve(&ctx.accounts.bonding_curve.to_account_info())?;
+    let band = ctx.accounts.coin.burn_price_band_bps;
     let b = &mut ctx.accounts.ledger.burn;
-    b.reference = Reserves { quote: after.virtual_quote_reserves, base: after.virtual_token_reserves };
+    b.reference = next_reference(
+        &b.reference,
+        Reserves { quote: after.virtual_quote_reserves, base: after.virtual_token_reserves },
+        band,
+    )?;
     b.last_time = now;
     emit!(Burned { mint: mint_key, spent, burned });
     Ok(())
@@ -468,11 +473,21 @@ pub fn handle_burn_pool(ctx: Context<BurnPool>) -> Result<()> {
         ctx.accounts.pool_base_token_account.amount,
         ctx.accounts.pool_quote_token_account.amount,
     )?;
+    let band = ctx.accounts.coin.burn_price_band_bps;
     let b = &mut ctx.accounts.ledger.burn;
-    b.reference = after;
+    b.reference = next_reference(&b.reference, after, band)?;
     b.last_time = now;
     emit!(Burned { mint: mint_key, spent, burned });
     Ok(())
+}
+
+/// The reference to record after a buy: the pool's price right after it,
+/// with the reserve figure allowed to grow by at most one band over the last
+/// one. Without that bound, liquidity added around one burn would raise the
+/// limit of the next.
+fn next_reference(last: &Reserves, after: Reserves, band_bps: u16) -> Result<Reserves> {
+    let ceiling = last.raised_by(band_bps).ok_or(BurrError::Overflow)?.quote;
+    after.held_to(ceiling).ok_or(BurrError::Overflow.into())
 }
 
 /// Moves exactly `spend` from the vault to the burner. Nothing else in the

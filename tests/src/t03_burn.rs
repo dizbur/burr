@@ -420,4 +420,17 @@ fn liquidity_added_just_for_one_call_does_not_raise_the_limit() {
     let r = w.burn_curve(&mint);
     assert!(r.is_ok(), "{}", logs(&r));
     assert_eq!(before - w.ledger(&mint).pots[3], recorded * 200 / 40_000);
+
+    // Nor the limit of the call after: the reserve recorded after a burn may
+    // be at most one 5% step above the one before, at the same price.
+    let r = w.ledger(&mint).burn.reference;
+    assert!(r.quote as u128 <= recorded as u128 * 10_500 / 10_000 + 1, "recorded {} after {recorded}", r.quote);
+    let c = w.b.curve(&mint);
+    let (lhs, rhs) =
+        (r.quote as u128 * c.virtual_token_reserves as u128, c.virtual_quote_reserves as u128 * r.base as u128);
+    assert!(lhs.abs_diff(rhs) <= rhs / 1_000_000, "the price recorded is still the pool's price");
+    w.b.wait(60);
+    let before = w.ledger(&mint).pots[3];
+    assert!(w.burn_curve(&mint).is_ok());
+    assert!((before - w.ledger(&mint).pots[3]) as u128 <= recorded as u128 * 10_500 / 10_000 * 200 / 40_000 + 1);
 }

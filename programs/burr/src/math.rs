@@ -150,6 +150,17 @@ impl Reserves {
         Some(Reserves { quote: u64::try_from(q.max(self.quote as u128 + 1)).ok()?, base: self.base })
     }
 
+    /// The same price, with the quote figure held to at most `max_quote`.
+    /// Used when recording a reference, so that the reserve the spend limit
+    /// is measured against can grow only a step at a time.
+    pub fn held_to(&self, max_quote: u64) -> Option<Reserves> {
+        if self.quote <= max_quote || self.quote == 0 {
+            return Some(*self);
+        }
+        let base = (self.base as u128).checked_mul(max_quote as u128)? / self.quote as u128;
+        Some(Reserves { quote: max_quote, base: u64::try_from(base.max(1)).ok()? })
+    }
+
     /// Coins a fee-free constant-product pool would give for `spend`.
     pub fn ideal_out(&self, spend: u64) -> Option<u64> {
         let d = (self.quote as u128).checked_add(spend as u128)?;

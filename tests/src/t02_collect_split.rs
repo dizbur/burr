@@ -354,3 +354,15 @@ fn an_empty_pot_pays_nothing_and_makes_no_account() {
     assert!(r.is_ok(), "{}", logs(&r));
     assert!(w.b.account(&ata(&Pubkey::default(), &ZEC, &TOKEN)).is_none(), "no account was made for nobody");
 }
+
+#[test]
+fn the_platforms_receiver_cannot_be_a_coins_own_address_either() {
+    let mut w = World::new();
+    let mint = solana_keypair::Keypair::new();
+    let own = kit::authority(&mint.pubkey());
+    assert!(w.as_admin(burr::instruction::SetPlatformReceiver { receiver: own }).is_ok());
+    let payer = w.b.payer.pubkey();
+    let i = w.launch_ix(&payer, &mint.pubkey(), &LaunchPlan::default());
+    let r = w.b.send(&[i], &[&mint]);
+    assert_eq!(custom_code(&r), Some(err(E::ReceiverNotAllowed)), "{}", logs(&r));
+}
