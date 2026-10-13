@@ -20,7 +20,7 @@ pub use constants::*;
 pub use instructions::*;
 pub use state::*;
 
-declare_id!("GDbkhHSpg15QWNwqws6SKyrwFMhe2AWQ59UxJciLa6Qt");
+declare_id!("42w1jV45WeSmfM96vr6GrqSWRcyF5rVbPWjmQ89bvdhg");
 
 #[program]
 pub mod burrpad {

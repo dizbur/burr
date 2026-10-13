@@ -7,7 +7,7 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-burrpad = "GDbkhHSpg15QWNwqws6SKyrwFMhe2AWQ59UxJciLa6Qt"
+burrpad = "42w1jV45WeSmfM96vr6GrqSWRcyF5rVbPWjmQ89bvdhg"
 
 [provider]
 cluster = "localnet"

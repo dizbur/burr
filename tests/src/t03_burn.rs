@@ -373,6 +373,10 @@ fn pushing_the_price_for_one_call_does_not_move_the_reference_to_it() {
     let mint = coin_with_burn_pot(&mut w, 200, 50 * ZEC1);
     let pusher = w.trader(1_000 * ZEC1);
     let payer = w.b.payer.pubkey();
+    // The price at launch, as recorded. (pump.fun sets a new ZEC coin's
+    // starting figures and moves them over time, so they are read, not assumed.)
+    let at_launch = w.ledger(&mint).burn.reference;
+    let launch_price = (at_launch.quote as u128, at_launch.base as u128);
     for round in 0..3 {
         assert!(w.buy(&pusher, &mint, 2 * ZEC1).is_ok());
         let pot = w.ledger(&mint).pots[3];
@@ -384,7 +388,6 @@ fn pushing_the_price_for_one_call_does_not_move_the_reference_to_it() {
         w.b.wait(60);
     }
     // Three pushes moved the reference by three 5% steps, no more.
-    let launch_price = (275_548_581u128, 1_073_000_000_000_000u128);
     let r = w.ledger(&mint).burn.reference;
     assert_eq!(r.quote as u128, launch_price.0, "the recorded reserve did not grow");
     assert!(r.base as u128 * 116 / 100 > launch_price.1, "the price rose by three steps at most");

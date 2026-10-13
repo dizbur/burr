@@ -82,7 +82,7 @@ python3 scripts/protections.py
 Not done by this repository: whoever deploys runs the scripts in `scripts/deploy/` themselves, with their own keys, given as paths to key files. No script has a default network. The network's address is taken from the environment variable `BURRPAD_RPC_URL` and is never printed, and the main network needs `--mainnet yes` on every command. Every transaction is simulated first and is not sent if the simulation fails.
 
 ```
-scripts/deploy/set-program-id.sh     writes the program's real address into the code (the one in declare_id! is a local test address)
+scripts/deploy/set-program-id.sh     writes the program's address into the code (declare_id! and Anchor.toml)
 scripts/deploy/build.sh              a reproducible build in Docker (needs solana-verify); --plain for an ordinary one
 scripts/deploy/deploy.sh             puts the program on a network; checks the wallet holds enough first
 scripts/deploy/initialize.mjs        calls initialize, in the same sitting
