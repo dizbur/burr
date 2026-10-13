@@ -239,6 +239,10 @@ MANUAL = [
       "    if amount == 0 {\n        return Ok(());\n    }\n    if p.destination.data_is_empty()", "    if p.destination.data_is_empty()",
       "an_empty_pot_pays_nothing_and_makes_no_account"),
 
+    M("L41", "pump.fun's curve fee vault for the coin cannot be a receiver", LAUNCH,
+      "r != curve_fee_vault && ", "", "pump_funs_fee_vaults_for_a_coin_cannot_be_named_as_its_receivers", "fee vault case 0"),
+    M("L42", "pump.fun's pool fee vault for the coin cannot be a receiver", LAUNCH,
+      "r != curve_fee_vault && r != pool_fee_vault", "r != curve_fee_vault", "pump_funs_fee_vaults_for_a_coin_cannot_be_named_as_its_receivers", "fee vault case 2"),
     M("L40", "Launch makes up the rent pump.fun leaves a new mint short of", LAUNCH,
       "    if short > 0 {", "    if false {", "a_launch_works_at_every_text_length"),
 

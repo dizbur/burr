@@ -148,8 +148,15 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     let (burner_key, burner_bump) = Pubkey::find_program_address(&[SEED_BURNER, mint_key.as_ref()], ctx.program_id);
     // A receiver may not be one of this coin's own program-controlled
     // addresses: a payout to the authority would land back in the vault.
+    // Nor one of pump.fun's fee vaults for this coin: a payout there would be
+    // collected again as if it were new fee, and counted twice.
+    let (curve_fee_vault, _) =
+        Pubkey::find_program_address(&[pump::SEED_CREATOR_VAULT, authority_key.as_ref()], &pump::PUMP_ID);
+    let (pool_fee_vault, _) =
+        Pubkey::find_program_address(&[pump::SEED_AMM_CREATOR_VAULT, authority_key.as_ref()], &pump::PUMP_AMM_ID);
     for r in [args.creator_receiver, args.give_receiver, cfg.platform_receiver] {
         require!(r != authority_key && r != burner_key, BurrpadError::ReceiverNotAllowed);
+        require!(r != curve_fee_vault && r != pool_fee_vault, BurrpadError::ReceiverNotAllowed);
     }
 
     // 2. Create the coin on pump.fun, with our authority as its creator.

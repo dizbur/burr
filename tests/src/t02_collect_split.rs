@@ -345,6 +345,31 @@ fn a_coins_own_addresses_cannot_be_named_as_receivers() {
 }
 
 #[test]
+fn pump_funs_fee_vaults_for_a_coin_cannot_be_named_as_its_receivers() {
+    // A payout to either would come straight back at the next collect and
+    // be split again as if it were new fee.
+    let mut w = World::new();
+    for which in 0..4 {
+        let mint = solana_keypair::Keypair::new();
+        let auth = kit::authority(&mint.pubkey());
+        let vault = [
+            crate::pump::creator_vault(&auth),
+            crate::pump::pda(&[b"creator_vault", auth.as_ref()], &crate::pump::PUMP_AMM),
+        ][which / 2];
+        let mut plan = LaunchPlan::default();
+        if which % 2 == 0 {
+            plan.creator_receiver = vault;
+        } else {
+            plan.give_receiver = vault;
+        }
+        let payer = w.b.payer.pubkey();
+        let i = w.launch_ix(&payer, &mint.pubkey(), &plan);
+        let r = w.b.send(&[i], &[&mint]);
+        assert_eq!(custom_code(&r), Some(err(E::ReceiverNotAllowed)), "fee vault case {which}\n{}", logs(&r));
+    }
+}
+
+#[test]
 fn an_empty_pot_pays_nothing_and_makes_no_account() {
     let mut w = World::new();
     // No give hook: its receiver is the empty address and its pot stays empty.
