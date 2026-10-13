@@ -2,7 +2,7 @@
 // network the program was deployed to. Small amounts, your own key files.
 // Every transaction is simulated first and is not sent if that fails.
 //
-//   node scripts/deploy/first-coin.mjs start  --payer <file> [--mainnet yes]
+//   node scripts/deploy/first-coin.mjs start  --payer <file> [--name <name>] [--symbol <ticker>] [--mainnet yes]
 //        launches a coin with a first buy, buys, sells, collects, splits and pays out
 //   node scripts/deploy/first-coin.mjs finish --payer <file> --rewards-key <file> [--mainnet yes]
 //        thirty minutes later: buy back and burn, then the holders' release
@@ -17,7 +17,13 @@ import { buyIx, burnCurveIx, clock, coinAccount, collectCurveIx, curveOf, launch
 import { address, checker, coinAddresses, configAddress, connect, fail, loadIdl, loadKey, loadTable, need, options, readAccount,
   readOut, send, sleep, TOKEN_2022, writeOut } from "./lib.mjs";
 
-const opts = options(["url", "payer", "rewards-key", "table", "again", "mainnet"]);
+const opts = options(["url", "payer", "rewards-key", "table", "again", "name", "symbol", "mainnet"]);
+// The coin is real and public. Its name says nothing about who made it unless you choose otherwise.
+const coinName = opts.name ?? "first test";
+const coinSymbol = opts.symbol ?? "TEST1";
+const bytes = (t) => Buffer.byteLength(t, "utf8");
+if (bytes(coinName) < 1 || bytes(coinName) > 32) fail("--name must be 1 to 32 bytes long. Nothing was sent.");
+if (bytes(coinSymbol) < 1 || bytes(coinSymbol) > 13) fail("--symbol must be 1 to 13 bytes long. Nothing was sent.");
 const phase = opts._[0];
 if (phase !== "start" && phase !== "finish") fail("say: start or finish");
 const conn = await connect(opts);
@@ -66,7 +72,7 @@ if (phase === "start") {
     mint = mintKey.publicKey;
     // Written down before sending: if the answer is lost on the way back, the next run finds the coin instead of making another.
     writeOut(conn.outName, { firstCoin: mint.toBase58(), firstCoinStep: 0, firstCoinLastHeight: (await conn.getLatestBlockhash()).lastValidBlockHeight + 150 });
-    const plan = { name: "Burrpad first coin", symbol: "BFC", uri: "https://example.invalid/first-coin.json",
+    const plan = { name: coinName, symbol: coinSymbol, uri: "https://example.invalid/first-coin.json",
       fee_bps: 200, shares: [2500, 2500, 2500, 2500], creator_receiver: me, give_receiver: me };
     sent = await send(conn, [
       await launchIx(conn, idl, mint, me, plan),
@@ -74,7 +80,7 @@ if (phase === "start") {
       buyIx(mint, me, 1_000_000n, ANY_PRICE_COINS),
     ], [payer, mintKey], { table, units: 900_000 });
     done(1);
-    did(`launch with a first buy of 0.01 ZEC: coin ${mint.toBase58()}`, sent, `${sent.size} of 1232 bytes`);
+    did(`launch "${coinName}" (${coinSymbol}) with a first buy of 0.01 ZEC: coin ${mint.toBase58()}`, sent, `${sent.size} of 1232 bytes`);
   }
   const a = coinAddresses(idl, mint);
   const coin = await readAccount(conn, idl, "Coin", a.coin);
