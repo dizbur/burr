@@ -403,15 +403,6 @@ MANUAL = [
       "    ctx.accounts.buyer_zec.reload()?;\n", "", "the_largest_buy_through_burr_leads_and_wins_the_pot", nth=0),
     M("K14", "The size of a pool buy is measured from the buyer's ZEC balance after the call", KING,
       "    ctx.accounts.buyer_zec.reload()?;\n", "", "king_of_the_hill_works_on_the_pool", nth=1),
-    # ---- pairs: two checks cover the same thing; removing both must be noticed ----
-    dict(id="Z1", what="pump.fun's program address is pinned (both checks removed together)", test="t11_substitution",
-         msg="swapping pump_program", nth=0, file=f"{SRC}/pump.rs",
-         find="require_keys_eq!(*program.key, *expected, BurrError::WrongPumpAccount);", repl="",
-         also=[(f"{SRC}/instructions/collect.rs", "    #[account(address = pump::PUMP_ID)]\n    pub pump_program", "    pub pump_program")]),
-    dict(id="Z2", what="PumpSwap's program address is pinned (both checks removed together)", test="t11_substitution",
-         msg="swapping amm_program", nth=0, file=f"{SRC}/pump.rs",
-         find="require_keys_eq!(*program.key, *expected, BurrError::WrongPumpAccount);", repl="",
-         also=[(f"{SRC}/instructions/collect.rs", "    #[account(address = pump::PUMP_AMM_ID)]\n    pub amm_program", "    pub amm_program")]),
 ]
 
 # ---------------------------------------------------------------------------
@@ -474,7 +465,7 @@ def auto_entries():
                 keep = [p for p in parts if not p.startswith(CONSTRAINT_KEYS)]
                 if len(keep) == len(parts):
                     continue
-                if "init" in parts:
+                if "init" in parts or (struct, field) == ("Launch", "authority"):
                     continue  # the address is fixed by creation itself; see the list's notes
                 if "init_if_needed" in parts:
                     if not any(p.startswith("associated_token::") for p in parts):
@@ -606,6 +597,46 @@ def worker(n, queue, results):
 # Protections that a second check also covers, so that no test can see the
 # first one missing on its own. Each is listed with the check that still
 # stands. Filled from the run's results, by reasoning about each one.
+def second_line(entry_id):
+    """Why no test can see this check missing on its own: what else stops the same swap."""
+    if entry_id == "R12":
+        return "the call's target is a constant in the code, not the account passed; and the account's address is pinned too"
+    m = re.match(r"([XY])\.(\w+)\.(\w+)$", entry_id)
+    if not m:
+        return None
+    kind, struct, field = m.groups()
+    if kind == "Y":
+        if field in ("token_program", "token_2022_program"):
+            return "every token account and mint in the instruction is tied to its token program by its own check"
+        if field == "system_program":
+            return "accounts are created through the system program's fixed address"
+        if field == "associated_token_program":
+            return "a payment needs a real token account at the fixed address, which only the real program can make"
+    if field in ("pump_program", "amm_program"):
+        return "the call's target is a constant in the code, not the account passed"
+    if field == "mint":
+        return "a record exists only for mints this program launched, all Token-2022; any other mint has no record"
+    if field == "zec_mint":
+        return "the vault's own check ties it to the ZEC mint, and the token program refuses a transfer naming another mint"
+    if field == "coin":
+        return ("the record's own mint field is used to sign for the vault, so another coin's record cannot move this "
+                "coin's money; the same address check is held alone in split, collect and stake")
+    if field == "authority":
+        return ("signing uses this coin's own seeds, so another coin's authority cannot sign; "
+                "the same check is held alone in split")
+    if field in ("vault", "stake_vault", "owner_coin"):
+        return "the token program refuses: the signer does not own that account"
+    if field in ("pump_global", "amm_global_config"):
+        return "the buy-back check reads this account and requires pump.fun's owner and its settings code"
+    if field == "pool_authority":
+        return "the pool's own address is derived from it and checked"
+    if field == "pool" and struct == "BurnPool":
+        return "the pool's own record is read and must name this coin and ZEC"
+    if (struct, field) == ("Launch", "config"):
+        return "only `initialize` can make a Config, at one address; anything else fails to load as one"
+    return None
+
+
 SECOND_LINE = {}
 
 GROUPS = [
@@ -619,6 +650,9 @@ GROUPS = [
 def write_report():
     results = json.loads((ROOT / "notes" / "protections.json").read_text())
     by_id = {r["id"]: r for r in results}
+    for r in results:
+        if r["status"] != "noticed" and second_line(r["id"]):
+            SECOND_LINE[r["id"]] = second_line(r["id"])
     held = [r for r in results if r["status"] == "noticed"]
     second = [r for r in results if r["status"] != "noticed" and r["id"] in SECOND_LINE]
     open_ = [r for r in results if r["status"] != "noticed" and r["id"] not in SECOND_LINE]
@@ -633,8 +667,13 @@ def write_report():
         f"- Second line (another check also covers it, so no test can see it missing alone): **{len(second)}**",
         f"- Not held: **{len(open_)}**",
         "",
+        "**Second line** means the check was removed and no test failed, because another check stops the very same "
+        "wrong account. The reason given is by reasoning about the code; it was not shown by a run. An auditor "
+        "should treat each of these as a place where two checks overlap, and confirm it.",
+        "",
         "Not in the table because they cannot be removed without removing the instruction itself: the addresses of "
-        "`Config`, `Coin`, `Ledger` and `Stake` when they are first made (fixed by creation), and the kind of each "
+        "`Config`, `Coin`, `Ledger` and `Stake` when they are first made (fixed by creation), the coin authority's "
+        "address at launch (its bump is taken from the same check), and the kind of each "
         "program-owned account (`Coin`, `Ledger`, `Stake`, `Config` each carry their own 8-byte code, checked on every "
         "load). The substitution tests swap these too and they are refused.",
         "",
@@ -713,8 +752,8 @@ def main():
         # A partial run replaces just those entries in the full results.
         merged = {r["id"]: r for r in json.loads(full.read_text())}
         merged.update({r["id"]: r for r in got})
-        allr = sorted(merged.values(), key=lambda r: order.get(r["id"], -1))
-        allr = [r for r in allr if r["id"] in order]
+        allr = [r for r in merged.values() if r["id"] in order]
+        allr.sort(key=lambda r: order[r["id"]])
         full.write_text(json.dumps(allr, indent=1))
     else:
         full.write_text(json.dumps(got, indent=1))

@@ -145,12 +145,21 @@ fn launch() {
         sw("vault", |x: &mut A| x.vault = thief_zec),
         sw("zec_mint", |x: &mut A| x.zec_mint = a),
         sw("pump_mint_authority", |x: &mut A| x.pump_mint_authority = fake),
-        sw("bonding_curve", |x: &mut A| x.bonding_curve = pump::curve(&Pubkey::new_unique())),
+        sw("bonding_curve", |x: &mut A| {
+            // Another coin's curve address, with the accounts derived from it.
+            let other = pump::curve(&Pubkey::new_unique());
+            x.associated_bonding_curve = ata(&other, &x.mint, &TOKEN_2022);
+            x.associated_quote_bonding_curve = ata(&other, &ZEC, &TOKEN);
+            x.bonding_curve = other;
+        }),
         sw("associated_bonding_curve", |x: &mut A| x.associated_bonding_curve = fake),
         sw("pump_global", |x: &mut A| x.pump_global = pump::amm_global_config()),
         sw("mayhem_program", |x: &mut A| x.mayhem_program = nothing),
         sw("mayhem_global_params", |x: &mut A| x.mayhem_global_params = fake),
-        sw("mayhem_sol_vault", |x: &mut A| x.mayhem_sol_vault = fake),
+        sw("mayhem_sol_vault", |x: &mut A| {
+            x.mayhem_sol_vault = fake;
+            x.mayhem_token_vault = ata(&fake, &x.mint, &TOKEN_2022);
+        }),
         sw("mayhem_state", |x: &mut A| x.mayhem_state = fake),
         sw("mayhem_token_vault", |x: &mut A| x.mayhem_token_vault = fake),
         sw("pump_event_authority", |x: &mut A| x.pump_event_authority = pump::amm_event_authority()),
@@ -258,7 +267,11 @@ fn collect_pool() {
         sw("zec_mint", |x: &mut A| x.zec_mint = c),
         sw("amm_global_config", |x: &mut A| x.amm_global_config = pump::global()),
         sw("pool_authority", |x: &mut A| x.pool_authority = pump::pool_authority(&d)),
-        sw("pool", |x: &mut A| x.pool = pump::pool(&d)),
+        sw("pool", |x: &mut A| {
+            // Another coin's pool, with its own ZEC account.
+            x.pool = pump::pool(&d);
+            x.pool_quote_token_account = ata(&pump::pool(&d), &ZEC, &TOKEN);
+        }),
         sw("pool_quote_token_account", |x: &mut A| x.pool_quote_token_account = ata(&pump::pool(&d), &ZEC, &TOKEN)),
         sw("amm_creator_vault_authority", |x: &mut A| {
             x.amm_creator_vault_authority = pda(&[b"creator_vault", kit::authority(&d).as_ref()], &PUMP_AMM);
@@ -486,6 +499,7 @@ fn unstake() {
 fn king_buy_curve() {
     let Stage { mut w, a, b, user, thief, nothing, fake, .. } = stage();
     assert!(w.king_settle(&a).is_ok());
+    assert!(w.king_settle(&b).is_ok());
     let good = w.king_buy_curve_accounts(&user.pubkey(), &a);
     let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
     let thief_coin = ata(&thief.pubkey(), &a, &TOKEN_2022);
@@ -520,13 +534,14 @@ fn king_buy_curve() {
     let r = each_refused(&mut w, &user, &[], good, data, swaps);
     assert!(r.is_ok(), "{}", logs(&r));
     assert_eq!(w.ledger(&a).king.leader, user.pubkey());
-    assert_eq!(w.ledger(&b).king.leader_amount, ZEC1 / 10, "coin B's round was not touched");
+    assert_eq!(w.ledger(&b).king.leader, Pubkey::default(), "coin B's round was not touched");
 }
 
 #[test]
 fn king_buy_pool() {
     let Stage { mut w, c, d, user, thief, nothing, fake, .. } = stage();
     assert!(w.king_settle(&c).is_ok());
+    assert!(w.king_settle(&d).is_ok());
     let good = w.king_buy_pool_accounts(&user.pubkey(), &c);
     let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
     let thief_coin = ata(&thief.pubkey(), &c, &TOKEN_2022);
@@ -540,7 +555,12 @@ fn king_buy_pool() {
         sw("buyer_zec", |x: &mut A| x.buyer_zec = thief_zec),
         sw("amm_global_config", |x: &mut A| x.amm_global_config = pump::global()),
         sw("pool_authority", |x: &mut A| x.pool_authority = pump::pool_authority(&d)),
-        sw("pool", |x: &mut A| x.pool = pump::pool(&d)),
+        sw("pool", |x: &mut A| {
+            // Another coin's pool, with the accounts derived from it.
+            x.pool = pump::pool(&d);
+            x.pool_base_token_account = ata(&pump::pool(&d), &c, &TOKEN_2022);
+            x.pool_quote_token_account = ata(&pump::pool(&d), &ZEC, &TOKEN);
+        }),
         sw("pool_base_token_account", |x: &mut A| x.pool_base_token_account = thief_coin),
         sw("pool_quote_token_account", |x: &mut A| x.pool_quote_token_account = thief_zec),
         sw("user_volume", |x: &mut A| x.user_volume = fake),
