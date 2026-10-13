@@ -41,8 +41,12 @@ export const pda = (seeds, program) =>
 export const ata = (owner, mint, tokenProgram) => pda([owner, tokenProgram, mint], ATA_PROGRAM);
 
 // A failure prints what went wrong and stops, without a page of internals.
-process.on("uncaughtException", (e) => fail(e?.message ?? String(e)));
-process.on("unhandledRejection", (e) => fail(e?.message ?? String(e)));
+const plain = (e) => {
+  const m = e?.message ?? String(e);
+  return /fetch failed|ECONNREFUSED|ENOTFOUND|ETIMEDOUT/.test(m) ? "could not reach the network. Check BURRPAD_RPC_URL and your internet connection." : m;
+};
+process.on("uncaughtException", (e) => fail(plain(e)));
+process.on("unhandledRejection", (e) => fail(plain(e)));
 
 // ---- command line ----
 
@@ -258,24 +262,44 @@ export async function send(conn, instructions, signers, { table, units = 400_000
     tx.sign(signers);
     const sim = await conn.simulateTransaction(tx, { sigVerify: true, commitment: "confirmed" });
     if (!sim.value.err) break;
+    // A fresh blockhash the answering server has not seen yet: ask again.
+    if (JSON.stringify(sim.value.err).includes("BlockhashNotFound") && attempt < 5) { await sleep(800); continue; }
     const logs = (sim.value.logs ?? []).join("\n");
     // A program can be called from the slot after it was deployed, not before.
     if (/Program is not deployed/.test(logs) && attempt < 20) { await sleep(1000); continue; }
     throw new Error(`not sent: the simulation failed (${JSON.stringify(sim.value.err)}).\n${logs}`);
   }
-  const size = tx.serialize().length;
-  const signature = await conn.sendTransaction(tx, { skipPreflight: true, maxRetries: 5 });
-  // Wait for it by asking the network directly, until well after the
-  // transaction could no longer land. Asking, not listening: a dropped
+  const raw = tx.serialize();
+  const size = raw.length;
+  const signature = await conn.sendTransaction(tx, { skipPreflight: true, maxRetries: 0 });
+  // Wait for it by asking the network directly, sending the very same signed
+  // transaction again every couple of seconds (it can only ever run once),
+  // until well after it could no longer land. Asking, not listening: a dropped
   // listening connection must not turn a landed transaction into "not seen".
-  let status = null, expiredAt = 0;
-  for (;;) {
-    status = (await conn.getSignatureStatuses([signature], { searchTransactionHistory: true }).catch(() => null))?.value?.[0] ?? null;
-    if (status && (status.err || status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")) break;
-    const height = await conn.getBlockHeight("confirmed").catch(() => 0);
+  let status = null, expiredAt = 0, history = true, unreachable = 0;
+  const started = Date.now();
+  for (let turn = 0; ; turn++) {
+    let answer;
+    try {
+      answer = await conn.getSignatureStatuses([signature], history ? { searchTransactionHistory: true } : undefined);
+      unreachable = 0;
+    } catch {
+      history = false; // some providers refuse the history search; ask plainly next time
+      unreachable++;
+    }
+    status = answer?.value?.[0] ?? null;
+    // Only a result the network has settled on counts, good or bad.
+    if (status && (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")) break;
+    status = null;
+    const height = await conn.getBlockHeight("confirmed").catch(() => { unreachable++; return 0; });
     if (height > lastValidBlockHeight) {
       if (!expiredAt) expiredAt = Date.now();
-      else if (Date.now() - expiredAt > 30_000) { status = null; break; }
+      else if (Date.now() - expiredAt > 30_000) break;
+    } else if (turn % 2 === 1) {
+      await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 }).catch(() => {});
+    }
+    if (unreachable > 20 || Date.now() - started > 240_000) {
+      throw new Error(`the network stopped answering while waiting for ${link(conn, signature)}\nLook that up before doing anything else: it may or may not have landed.`);
     }
     await sleep(1000);
   }
@@ -363,4 +387,12 @@ export function checker() {
       process.exit(failed ? 1 : 0);
     },
   };
+}
+
+// A receiver must be an ordinary wallet that has been used. An address has no
+// built-in check for typing mistakes, and coins copy the platform receiver for good.
+export async function ordinaryWallet(conn, who, what) {
+  const info = await conn.getAccountInfo(who);
+  if (!info) fail(`${what} ${who.toBase58()} has never been used on this network. Send it a little SOL first; if it still fails, the address is wrong.`);
+  if (!info.owner.equals(SYSTEM) || info.executable) fail(`${what} ${who.toBase58()} is not an ordinary wallet (it is a program's account or a token account).`);
 }

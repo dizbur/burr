@@ -49,8 +49,11 @@ if (phase === "start") {
   let mint = null, step = 0;
   if (saved.firstCoin && opts.again !== "yes") {
     const earlier = address(saved.firstCoin, "the saved coin");
+    // A launch sent moments ago may not be visible yet: give it until it can no longer land.
+    for (let i = 0; i < 100 && saved.firstCoinStep === 0 && !(await readAccount(conn, idl, "Coin", coinAddresses(idl, earlier).coin))
+      && (await conn.getBlockHeight("confirmed")) <= (saved.firstCoinLastHeight ?? 0); i++) await sleep(2000);
     if (await readAccount(conn, idl, "Coin", coinAddresses(idl, earlier).coin)) {
-      mint = earlier; step = saved.firstCoinStep ?? 1;
+      mint = earlier; step = Math.max(saved.firstCoinStep ?? 1, 1);
       console.log(`Carrying on with the coin started earlier: ${mint.toBase58()} (step ${step} of 5 done)`);
     }
   }
@@ -62,7 +65,7 @@ if (phase === "start") {
     const mintKey = Keypair.generate(); // a fresh address for every attempt
     mint = mintKey.publicKey;
     // Written down before sending: if the answer is lost on the way back, the next run finds the coin instead of making another.
-    writeOut(conn.outName, { firstCoin: mint.toBase58(), firstCoinStep: 0 });
+    writeOut(conn.outName, { firstCoin: mint.toBase58(), firstCoinStep: 0, firstCoinLastHeight: (await conn.getLatestBlockhash()).lastValidBlockHeight + 20 });
     const plan = { name: "Burrpad first coin", symbol: "BFC", uri: "https://example.invalid/first-coin.json",
       fee_bps: 200, shares: [2500, 2500, 2500, 2500], creator_receiver: me, give_receiver: me };
     sent = await send(conn, [
@@ -150,8 +153,9 @@ if (l.burn.total_burned > 0n) {
   console.log(`      buy back and burn has already bought and destroyed ${l.burn.total_burned} units of the coin`);
 } else if (l.pots[3] > 0n) {
   const supply = await supplyOf(conn, mint);
-  let sent = null;
-  for (let calls = 0; calls < 20 && (await ledger()).burn.total_burned === 0n; calls++) {
+  let sent = null, calls = 0;
+  for (; calls < 20 && (await ledger()).burn.total_burned === 0n; calls++) {
+    if (calls > 0) console.log(`      the price has moved since launch; the buy back follows it one step a minute (${calls})`);
     while ((await clock(conn)).time < (await ledger()).burn.last_time + BigInt(coin.burn_cooldown_secs) + 1n) await sleep(5000);
     sent = await send(conn, [burnCurveIx(idl, mint, me)], [payer], { units: 800_000 }).catch((e) => {
       if (/BurnTooSoon/.test(e.message)) return null; // someone else called it first; wait and look again
@@ -159,9 +163,13 @@ if (l.burn.total_burned > 0n) {
     });
   }
   l = await ledger();
-  if (t.check("buy back and burn bought the coin with its pot", l.burn.total_burned > 0n, `spent ${zec(l.burn.total_spent)}  ${sent?.link ?? ""}`)) {
-    t.check("the coins it bought were destroyed", supply - (await supplyOf(conn, mint)) >= l.burn.total_burned);
+  if (l.burn.total_burned === 0n) {
+    console.log("      The price has risen a long way since launch and the buy back is still following it. Nothing is wrong.");
+    console.log("      Run  first-coin.mjs finish  again in a few minutes; it carries on.");
+    process.exit(0);
   }
+  t.check("buy back and burn bought the coin with its pot", true, `spent ${zec(l.burn.total_spent)}  ${sent?.link ?? ""}`);
+  t.check("the coins it bought were destroyed", supply - (await supplyOf(conn, mint)) >= l.burn.total_burned);
 } else {
   console.log("      the burn pot is empty");
 }
@@ -171,7 +179,9 @@ l = await ledger();
 const pot = l.pots[4];
 if (pot > 0n) {
   const had = await tokenBalance(conn, zecAccount(rewards.publicKey));
-  const slot = (await clock(conn)).slot;
+  // A slot the whole network has settled on: later than the last release, and never ahead of the slot the release runs in.
+  const slot = BigInt(await conn.getSlot("finalized"));
+  if (slot <= l.holders.last_release_slot) fail("the network has not yet settled a slot after the launch; run this again in a minute");
   const hash = snapshotHash(mint, slot, [[me.toBase58(), await tokenBalance(conn, coinAccount(me, mint))]]);
   const sent = await send(conn, [releaseIx(idl, mint, rewards.publicKey, pot, slot, hash)], [rewards]);
   l = await ledger();

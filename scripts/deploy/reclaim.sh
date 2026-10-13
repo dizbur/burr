@@ -5,6 +5,7 @@
 #   ./scripts/deploy/reclaim.sh --payer <file> [--mainnet yes] [--url <network>]
 # It only touches holding accounts made by that wallet. It cannot touch a deployed program.
 set -euo pipefail
+START_DIR="$PWD"
 cd "$(dirname "$0")/../.."
 . scripts/deploy/net.sh
 url=""; payer=""; mainnet=""
@@ -16,13 +17,29 @@ while [ $# -gt 0 ]; do
   esac
   shift 2
 done
+payer=$(full_path "$payer")
 [ -n "$payer" ] && [ -f "$payer" ] || { echo "STOPPED: give --payer <file>." >&2; exit 1; }
 net_check "$url" "$mainnet"
+mkdir -p scripts/deploy/out
 who=$(solana-keygen pubkey "$payer")
 before=$(chain balance "$who") || exit 1
-sol program close --buffers --keypair "$payer" > /dev/null || true
-rm -f "$HOLDING"
+# First the one holding account this folder knows about, by its address. Then any others this wallet made.
+if [ -f "$HOLDING" ]; then
+  where=$(solana-keygen pubkey "$HOLDING")
+  held=$(chain balance "$where") || exit 1
+  if awk -v h="$held" 'BEGIN { exit !(h > 0) }'; then
+    echo "Closing the holding account $where, which holds $held SOL ..."
+    sol program close "$where" --keypair "$payer" || true
+    sleep 2
+    held=$(chain balance "$where") || exit 1
+    if awk -v h="$held" 'BEGIN { exit !(h > 0) }'; then
+      echo "STOPPED: the deposit is still held at $where. Nothing is lost: run this again." >&2; exit 1
+    fi
+  fi
+  holding_done
+fi
+sol program close --buffers --keypair "$payer" > "scripts/deploy/out/reclaim.log" 2>&1 || echo "NOTE  could not look for other unfinished uploads on this connection (some providers do not allow that search)."
 sleep 2
 after=$(chain balance "$who") || exit 1
 echo "The wallet had $before SOL and now has $after SOL."
-if awk -v a="$after" -v b="$before" 'BEGIN { exit !(a > b) }'; then echo "PASS  the deposit is back"; else echo "Nothing was being held."; fi
+if awk -v a="$after" -v b="$before" 'BEGIN { exit !(a > b) }'; then echo "PASS  the deposit is back"; else echo "Nothing more was found being held."; fi

@@ -4,6 +4,7 @@
 # Both files are key files you made yourself. They are passed straight to the
 # `solana` tool and are never shown.
 set -euo pipefail
+START_DIR="$PWD"
 cd "$(dirname "$0")/../.."
 . scripts/deploy/net.sh
 url=""; program_key=""; payer=""; mainnet=""
@@ -15,6 +16,7 @@ while [ $# -gt 0 ]; do
   esac
   shift 2
 done
+program_key=$(full_path "$program_key"); payer=$(full_path "$payer")
 [ -n "$program_key" ] && [ -n "$payer" ] || { echo "Missing --program-key or --payer." >&2; exit 1; }
 [ -f "$program_key" ] && [ -f "$payer" ] || { echo "STOPPED: a key file was not found at the path given." >&2; exit 1; }
 net_check "$url" "$mainnet"
@@ -33,7 +35,7 @@ holding_key
 echo "Deploying $id ..."
 sol program deploy "$BUILT" --keypair "$payer" --program-id "$program_key" --buffer "$HOLDING" \
   --use-rpc --max-sign-attempts 30 --with-compute-unit-price "$PRIORITY" || upload_stopped
-rm -f "$HOLDING"
+holding_done
 sleep 2
 node scripts/deploy/verify-code.mjs ${mainnet:+--mainnet "$mainnet"}
 echo "PASS  deployed: $id"

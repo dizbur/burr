@@ -60,14 +60,13 @@ until solana cluster-version --url "$url" >/dev/null 2>&1; do
   sleep 1
 done
 echo "validator up: $(solana cluster-version --url "$url")"
-solana airdrop 12 "$(addr deployer)" --url "$url" >/dev/null
+solana airdrop 1 "$(addr deployer)" --url "$url" >/dev/null
 for k in wallet rewards platform; do solana airdrop 6 "$(addr "$k")" --url "$url" >/dev/null; done
 sol() { solana balance "$(addr "$1")" --url "$url"; }
-echo "deploy wallet starts with $(sol deployer)"
 
 # The solana tool prints twelve recovery words for a temporary account each time it uploads code. They are left out of this output.
 quiet_upload() { "$@" > "$work/upload.log" 2>&1 || { grep -vE "^[a-z]+( [a-z]+){11}$" "$work/upload.log" | tail -25; exit 1; }
-  grep -E "^(Network|Release build|Program |An upload|The program file|The new program file|The new code|Carrying on|  |PASS|FAIL|Next|Then|All items)" "$work/upload.log" || true; }
+  grep -E "^(Network|Release build|Program |An upload|The program file|The new program file|The new code|Carrying on|Uploading|  |PASS|FAIL|Next|Then|All items)" "$work/upload.log" || true; }
 
 step "3. the program's address into the code, and the build"
 in_copy ./scripts/deploy/set-program-id.sh "$(addr program)"
@@ -79,17 +78,30 @@ echo "-- with too little SOL it refuses before sending anything, and says by how
 solana-keygen new --no-bip39-passphrase --silent --outfile "$work/keys/poor.json" >/dev/null
 solana airdrop 1 "$(addr poor)" --url "$url" >/dev/null
 if in_copy ./scripts/deploy/deploy.sh --program-key "$(key program)" --payer "$(key poor)" > "$work/again.log" 2>&1; then echo "FAIL  it started without enough SOL"; exit 1; else grep -E "needed to start|this wallet has|STOPPED" "$work/again.log"; echo "PASS  refused"; fi
+# The deploy wallet is given only just enough, as on the real network: what
+# the script says is needed, and nothing to spare beyond the margin it asks for.
+size=$(wc -c < "$work/src/target/release-kit/burrpad.so" | tr -d ' ')
+tight=$(solana rent "$((size + 45))" --url "$url" | head -1 | awk '{printf "%.2f", $3 + 0.03 - 1}')
+solana airdrop "$tight" "$(addr deployer)" --url "$url" >/dev/null
+echo "deploy wallet starts with $(sol deployer): just enough"
 half_upload() { ( cd "$work/src" && mkdir -p scripts/deploy/out && solana-keygen new --no-bip39-passphrase --silent --outfile scripts/deploy/out/upload-holding-keypair.json >/dev/null \
+  && shasum -a 256 target/release-kit/burrpad.so | cut -d' ' -f1 | tr -d '\n' > scripts/deploy/out/upload-holding-keypair.json.build \
   && solana program write-buffer target/release-kit/burrpad.so --url "$url" --keypair "$(key deployer)" --buffer scripts/deploy/out/upload-holding-keypair.json >/dev/null 2>&1 ); }
 echo "-- an upload left unfinished: the deposit can be taken back"
 half_upload
 echo "deploy wallet with an unfinished upload: $(sol deployer)"
+in_copy ./scripts/deploy/reclaim.sh --payer "$(key deployer)"
+echo "-- an unfinished upload of a different build is not carried on with:"
+half_upload
+printf 'some other build' > "$work/src/scripts/deploy/out/upload-holding-keypair.json.build"
+if in_copy ./scripts/deploy/deploy.sh --program-key "$(key program)" --payer "$(key deployer)" > "$work/again.log" 2>&1; then echo "FAIL  it carried on with another build's upload"; exit 1; else grep STOPPED "$work/again.log"; echo "PASS  refused"; fi
 in_copy ./scripts/deploy/reclaim.sh --payer "$(key deployer)"
 echo "-- an upload left unfinished: or the same command carries on from it"
 half_upload
 echo "deploy wallet with an unfinished upload: $(sol deployer)"
 quiet_upload in_copy ./scripts/deploy/deploy.sh --program-key "$(key program)" --payer "$(key deployer)"
 echo "deploy wallet now has $(sol deployer)"
+solana airdrop 8 "$(addr deployer)" --url "$url" >/dev/null   # for the rest of the rehearsal: an upgrade's float and the coins
 echo "-- a second deploy to the same address is refused:"
 if in_copy ./scripts/deploy/deploy.sh --program-key "$(key program)" --payer "$(key deployer)" > "$work/again.log" 2>&1; then echo "FAIL  it deployed twice"; exit 1; else grep STOPPED "$work/again.log"; echo "PASS  refused"; fi
 
@@ -107,7 +119,7 @@ node "$kit/address-table.mjs" --payer "$(key deployer)"
 verify() { node "$kit/verify.mjs" --wallet "$(addr "$1")" --platform-receiver "$(addr platform)" --rewards-wallet "$(addr rewards)"; }
 step "7. read everything back (one wallet is upgrade key and administrator, as in the first tests)"
 verify deployer
-echo "set-up cost the deploy wallet: started with 12 SOL, now $(sol deployer)"
+echo "after set-up the deploy wallet has $(sol deployer)"
 
 step "8. the first-coin check, first half"
 before=$(sol deployer)

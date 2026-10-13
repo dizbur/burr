@@ -4,7 +4,7 @@
 // The upgrade key becomes the administrator for now; admin.mjs hands that on.
 // The platform's share (one half) and the fee range (0.50% to 3.00%, first
 // offered 2.00%) are fixed in the program and are checked here afterwards.
-import { address, checker, fail, configAddress, connect, instruction, loadIdl, loadKey, need, options, programDataAddress,
+import { address, checker, fail, ordinaryWallet, configAddress, connect, instruction, loadIdl, loadKey, need, options, programDataAddress,
   readAccount, send, SYSTEM, writeOut } from "./lib.mjs";
 
 const opts = options(["url", "upgrade-key", "platform-receiver", "rewards-wallet", "mainnet"]);
@@ -17,11 +17,8 @@ const config = configAddress(idl);
 
 // A receiver must be an ordinary funded wallet. An address has no built-in
 // check for typing mistakes, and every coin copies the platform receiver for good.
-for (const [what, who] of [["--platform-receiver", platformReceiver], ["--rewards-wallet", rewardsWallet]]) {
-  const info = await conn.getAccountInfo(who);
-  if (!info) fail(`${what} ${who.toBase58()} has never been used on this network. Send it a little SOL first; if it still fails, the address is wrong.`);
-  if (!info.owner.equals(SYSTEM) || info.executable) fail(`${what} ${who.toBase58()} is not an ordinary wallet (it is a program's account or a token account).`);
-}
+await ordinaryWallet(conn, platformReceiver, "--platform-receiver");
+await ordinaryWallet(conn, rewardsWallet, "--rewards-wallet");
 if (new Set([key.publicKey.toBase58(), platformReceiver.toBase58(), rewardsWallet.toBase58()]).size !== 3) {
   fail("the upgrade key, the platform receiver and the rewards wallet must be three different addresses.");
 }

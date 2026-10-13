@@ -14,7 +14,7 @@
 //   propose-rewards-wallet <address>                 starts the 24-hour wait
 //   cancel-rewards-wallet | apply-rewards-wallet
 //   set-platform-receiver <address>                  for coins launched from now on
-import { address, configAddress, connect, fail, instruction, loadIdl, loadKey, options, readAccount, send, unsignedForWallet } from "./lib.mjs";
+import { address, configAddress, connect, fail, ordinaryWallet, instruction, loadIdl, loadKey, options, readAccount, send, unsignedForWallet } from "./lib.mjs";
 
 const opts = options(["url", "admin-key", "admin", "mainnet"]);
 const [action, value] = opts._;
@@ -41,6 +41,7 @@ const actions = {
   "set-platform-receiver": () => asAdmin("set_platform_receiver", { receiver: target() }),
 };
 if (!actions[action]) fail("Unknown action. One of: " + Object.keys(actions).join(", "));
+if (action === "set-platform-receiver" || action === "propose-rewards-wallet") await ordinaryWallet(conn, target(), "the new address");
 const ix = actions[action]();
 
 if (!key) {

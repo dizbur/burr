@@ -12,13 +12,16 @@ const name = conn.outName;
 const want = fixedAccounts(idl);
 
 let table = opts.table === "new" ? null : opts.table ? address(opts.table, "--table") : readOut(name).table ? address(readOut(name).table, "saved table") : null;
-if (table && !(await conn.getAddressLookupTable(table)).value) table = null;
+if (table && !(await conn.getAddressLookupTable(table)).value) {
+  await sleep(3000); // one more look before deciding it is not there
+  if (!(await conn.getAddressLookupTable(table)).value) { console.log("The saved table was not found on this network. Making a new one."); table = null; }
+}
 if (!table) {
   const slot = await conn.getSlot("finalized");
   const [create, addr] = AddressLookupTableProgram.createLookupTable({ authority: payer.publicKey, payer: payer.publicKey, recentSlot: slot });
-  await send(conn, [create], [payer]);
   table = addr;
-  writeOut(name, { table: table.toBase58() });
+  writeOut(name, { table: table.toBase58() }); // written down first, so a lost answer does not orphan it
+  await send(conn, [create], [payer]);
   console.log("Table made: " + table.toBase58());
 }
 const state = async () => (await conn.getAddressLookupTable(table)).value.state;
