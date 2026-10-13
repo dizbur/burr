@@ -20,6 +20,9 @@ cargo audit
 echo "== build the program, and the misbehaving stand-in the tests use"
 cargo build-sbf --manifest-path programs/burrpad/Cargo.toml
 cargo build-sbf --manifest-path tests-standin/Cargo.toml
+echo "== interface file (target/idl/burrpad.json), in step with the build"
+mkdir -p target/idl target/types
+anchor idl build -p burrpad -o target/idl/burrpad.json -t target/types/burrpad.ts
 echo "== tests"
 cargo test --workspace
 echo "== all passed"
