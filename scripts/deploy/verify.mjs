@@ -26,7 +26,7 @@ const program = await conn.getAccountInfo(idl.programId);
 t.check("the program is on the network and runnable", !!program?.executable);
 const data = await conn.getAccountInfo(programDataAddress(idl.programId));
 if (t.check("its code is stored", !!data)) {
-  const local = trim(readFileSync(path.join(ROOT, "target/deploy/burrpad.so")));
+  const local = trim(readFileSync(path.join(ROOT, "target/release-kit/burrpad.so")));
   const onChain = trim(data.data.subarray(45));
   t.check("the code on the network is byte for byte the file built here", onChain.equals(local),
     `sha256 ${sha256(onChain).toString("hex").slice(0, 16)}… on the network, ${sha256(local).toString("hex").slice(0, 16)}… here`);

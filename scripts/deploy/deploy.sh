@@ -16,19 +16,21 @@ while [ $# -gt 0 ]; do
 done
 [ -n "$program_key" ] && [ -n "$payer" ] || { echo "Missing --program-key or --payer." >&2; exit 1; }
 [ -f "$program_key" ] && [ -f "$payer" ] || { echo "STOPPED: a key file was not found at the path given." >&2; exit 1; }
-[ -f target/deploy/burrpad.so ] || { echo "STOPPED: not built yet. Run scripts/deploy/build.sh first." >&2; exit 1; }
+[ -f target/release-kit/burrpad.so ] || { echo "STOPPED: not built yet. Run scripts/deploy/build.sh first." >&2; exit 1; }
 net_check "$url" "$mainnet"
 
 id=$(solana-keygen pubkey "$program_key")
 [ "$id" = "$(code_id)" ] || { echo "STOPPED: the program key's address ($id) is not the one in the code ($(code_id)). Run set-program-id.sh and build again." >&2; exit 1; }
-grep -q "\"address\": \"$id\"" target/idl/burrpad.json || { echo "STOPPED: the build is older than the address in the code. Run build.sh again." >&2; exit 1; }
+grep -q "\"address\": \"$id\"" target/release-kit/burrpad.json || { echo "STOPPED: the build is older than the address in the code. Run build.sh again." >&2; exit 1; }
 if node scripts/deploy/program-info.mjs "$id" --url "$url" >/dev/null 2>&1; then
   echo "STOPPED: a program is already at $id. To replace its code use scripts/deploy/upgrade.sh." >&2; exit 1
 fi
-balance_check "$url" "$payer"
+balance_check "$url" "$payer" deploy
+holding_key
 
 echo "Deploying $id ..."
-solana program deploy target/deploy/burrpad.so --url "$url" --keypair "$payer" --program-id "$program_key" \
+solana program deploy target/release-kit/burrpad.so --url "$url" --keypair "$payer" --program-id "$program_key" --buffer "$HOLDING" \
   --use-rpc --max-sign-attempts 30 --with-compute-unit-price "${BURRPAD_PRIORITY_FEE:-50000}"
+rm -f "$HOLDING"
 echo "PASS  deployed: $id"
 echo "Next, in the same sitting: node scripts/deploy/initialize.mjs"

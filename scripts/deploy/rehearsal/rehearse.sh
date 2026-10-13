@@ -66,7 +66,7 @@ echo "deploy wallet starts with $(sol deployer)"
 
 # The solana tool prints twelve recovery words for a temporary account each time it uploads code. They are left out of this output.
 quiet_upload() { "$@" > "$work/upload.log" 2>&1 || { grep -vE "^[a-z]+( [a-z]+){11}$" "$work/upload.log" | tail -25; exit 1; }
-  grep -E "^(Network|Program |The program file|The new code|PASS|FAIL|      |Next|Then|All items)" "$work/upload.log" || true; }
+  grep -E "^(Network|Program |The program file|The new program file|The new code|Carrying on|  |PASS|FAIL|Next|Then|All items)" "$work/upload.log" || true; }
 
 step "3. the program's address into the code, and the build"
 in_copy ./scripts/deploy/set-program-id.sh "$(addr program)"
@@ -74,6 +74,19 @@ in_copy ./scripts/deploy/build.sh --plain > "$work/build.log" 2>&1 || { tail -30
 grep -E "^(PASS|      )" "$work/build.log"
 
 step "4. deploy"
+echo "-- with too little SOL it refuses before sending anything, and says by how much:"
+solana-keygen new --no-bip39-passphrase --silent --outfile "$work/keys/poor.json" >/dev/null
+solana airdrop 1 "$(addr poor)" --url "$url" >/dev/null
+if in_copy ./scripts/deploy/deploy.sh --program-key "$(key program)" --payer "$(key poor)" > "$work/again.log" 2>&1; then echo "FAIL  it started without enough SOL"; exit 1; else grep -E "needed to start|this wallet has|STOPPED" "$work/again.log"; echo "PASS  refused"; fi
+half_upload() { ( cd "$work/src" && mkdir -p scripts/deploy/out && solana-keygen new --no-bip39-passphrase --silent --outfile scripts/deploy/out/upload-holding-keypair.json >/dev/null \
+  && solana program write-buffer target/deploy/burrpad.so --url "$url" --keypair "$(key deployer)" --buffer scripts/deploy/out/upload-holding-keypair.json >/dev/null 2>&1 ); }
+echo "-- an upload left unfinished: the deposit can be taken back"
+half_upload
+echo "deploy wallet with an unfinished upload: $(sol deployer)"
+in_copy ./scripts/deploy/reclaim.sh --payer "$(key deployer)"
+echo "-- an upload left unfinished: or the same command carries on from it"
+half_upload
+echo "deploy wallet with an unfinished upload: $(sol deployer)"
 quiet_upload in_copy ./scripts/deploy/deploy.sh --program-key "$(key program)" --payer "$(key deployer)"
 echo "deploy wallet now has $(sol deployer)"
 echo "-- a second deploy to the same address is refused:"
@@ -112,12 +125,13 @@ node "$kit/rehearsal/exercise.mjs" resumed --payer "$(key deployer)" --rewards-k
 step "11. the first-coin check, second half (after the thirty minutes)"
 echo "-- too early, it sends nothing:"
 if node "$kit/first-coin.mjs" finish --payer "$(key deployer)" --rewards-key "$(key rewards)"; then echo "FAIL  it ran early"; exit 1; else echo "PASS  refused"; fi
+[ -z "${REHEARSAL_QUICK:-}" ] || echo "(quick run: the thirty-minute wait and the second half are skipped)"
 echo "waiting ..."
-until node "$kit/first-coin.mjs" finish --payer "$(key deployer)" --rewards-key "$(key rewards)" > "$work/finish.log" 2>&1; do
+until [ -n "${REHEARSAL_QUICK:-}" ] || node "$kit/first-coin.mjs" finish --payer "$(key deployer)" --rewards-key "$(key rewards)" > "$work/finish.log" 2>&1; do
   grep -q "too early" "$work/finish.log" || { cat "$work/finish.log"; exit 1; }
   sleep 30
 done
-cat "$work/finish.log"
+[ -n "${REHEARSAL_QUICK:-}" ] || cat "$work/finish.log"
 
 step "12. before the public: hand the administrator role to the wallet (two steps), then the upgrade key"
 echo "-- the upgrade key cannot be handed over before the wallet has proved itself:"

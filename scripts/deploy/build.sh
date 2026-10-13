@@ -22,8 +22,15 @@ fi
 echo "== interface file"
 mkdir -p target/idl target/types
 anchor idl build -p burrpad -o target/idl/burrpad.json -t target/types/burrpad.ts
+# A copy of exactly what was built, kept apart from the folder the tests
+# rebuild into. deploy.sh, upgrade.sh and the read-back scripts use this copy,
+# so later work on the code cannot change what gets deployed by accident.
+mkdir -p target/release-kit
+cp target/deploy/burrpad.so target/release-kit/burrpad.so
+cp target/idl/burrpad.json target/release-kit/burrpad.json
+git rev-parse HEAD > target/release-kit/commit.txt 2>/dev/null || echo none > target/release-kit/commit.txt
 id=$(grep -o 'declare_id!("[^"]*")' programs/burrpad/src/lib.rs | cut -d'"' -f2)
-echo "PASS  built target/deploy/burrpad.so"
+echo "PASS  built, and kept as target/release-kit/burrpad.so"
 echo "      program address in the code: $id"
 echo "      commit: $(git rev-parse --short HEAD 2>/dev/null || echo none)"
-echo "      sha256 of the file: $(shasum -a 256 target/deploy/burrpad.so | cut -d' ' -f1)"
+echo "      sha256 of the file: $(shasum -a 256 target/release-kit/burrpad.so | cut -d' ' -f1)"

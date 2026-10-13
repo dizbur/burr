@@ -13,7 +13,7 @@ const t = checker();
 const trim = (b) => { let n = b.length; while (n && b[n - 1] === 0) n--; return b.subarray(0, n); };
 const data = await conn.getAccountInfo(programDataAddress(idl.programId));
 if (t.check(`program ${idl.programId.toBase58()} is on the network`, !!data)) {
-  const local = trim(readFileSync(path.join(ROOT, "target/deploy/burrpad.so")));
+  const local = trim(readFileSync(path.join(ROOT, "target/release-kit/burrpad.so")));
   const onChain = trim(data.data.subarray(45));
   t.check("the code on the network is byte for byte the file built here", onChain.equals(local),
     `sha256 ${sha256(onChain).toString("hex").slice(0, 16)}… on the network, ${sha256(local).toString("hex").slice(0, 16)}… here`);

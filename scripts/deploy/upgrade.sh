@@ -10,6 +10,7 @@
 #   ./scripts/deploy/upgrade.sh --payer <file> --offer-to <the wallet's vault address> [--plain] [--mainnet yes]
 #
 # --plain builds without Docker (nobody can verify that build afterwards).
+# --built builds nothing: it uses the release build already made by build.sh.
 # The wallet needs the program's rent again as a float (about 4.7 SOL); it comes back when the upgrade lands.
 set -euo pipefail
 cd "$(dirname "$0")/../.."
@@ -18,6 +19,7 @@ url="${BURRPAD_RPC_URL:-}"; key=""; payer=""; offer=""; mainnet=""; build="verif
 while [ $# -gt 0 ]; do
   case "$1" in
     --plain) build="--plain"; shift; continue;;
+    --built) build="none"; shift; continue;;
     --url) url="$2";; --upgrade-key) key="$2";; --payer) payer="$2";; --offer-to) offer="$2";; --mainnet) mainnet="$2";;
     *) echo "Unknown option $1" >&2; exit 1;;
   esac
@@ -37,9 +39,15 @@ echo "Program $id, upgrade key $authority"
 want="${offer:-$(solana-keygen pubkey "$key")}"
 [ "$authority" = "$want" ] || { echo "STOPPED: the upgrade key on the network is $authority, not $want." >&2; exit 1; }
 
-if [ "$build" = "--plain" ]; then ./scripts/deploy/build.sh --plain; else ./scripts/deploy/build.sh; fi
-balance_check "$url" "$signer"
-size=$(wc -c < target/deploy/burrpad.so | tr -d ' ')
+case "$build" in
+  none) [ -f target/release-kit/burrpad.so ] || { echo "STOPPED: no release build here. Run scripts/deploy/build.sh first." >&2; exit 1; }
+        echo "Using the release build already here: commit $(cut -c1-7 target/release-kit/commit.txt), sha256 $(shasum -a 256 target/release-kit/burrpad.so | cut -c1-16)…";;
+  --plain) ./scripts/deploy/build.sh --plain;;
+  *) ./scripts/deploy/build.sh;;
+esac
+grep -q "\"address\": \"$id\"" target/release-kit/burrpad.json || { echo "STOPPED: the release build is for a different program address. Run build.sh again." >&2; exit 1; }
+balance_check "$url" "$signer" upgrade
+size=$(wc -c < target/release-kit/burrpad.so | tr -d ' ')
 if [ "$size" -gt "$room" ]; then
   if [ -n "$offer" ]; then
     echo "STOPPED: the new code is $((size - room)) bytes larger than the room the program has. The multi-signature wallet must extend the program first." >&2; exit 1
@@ -48,20 +56,23 @@ if [ "$size" -gt "$room" ]; then
   solana program extend "$id" "$((size - room))" --url "$url" --keypair "$key"
 fi
 
+holding_key
 if [ -n "$key" ]; then
-  solana program deploy target/deploy/burrpad.so --url "$url" --keypair "$key" --program-id "$id" --upgrade-authority "$key" \
+  solana program deploy target/release-kit/burrpad.so --url "$url" --keypair "$key" --program-id "$id" --upgrade-authority "$key" --buffer "$HOLDING" \
     --use-rpc --max-sign-attempts 30 --with-compute-unit-price "${BURRPAD_PRIORITY_FEE:-50000}"
+  rm -f "$HOLDING"
   sleep 2
   node scripts/deploy/verify-code.mjs --url "$url" ${mainnet:+--mainnet "$mainnet"}
 else
-  out=$(solana program write-buffer target/deploy/burrpad.so --url "$url" --keypair "$payer" \
+  out=$(solana program write-buffer target/release-kit/burrpad.so --url "$url" --keypair "$payer" --buffer "$HOLDING" \
     --use-rpc --max-sign-attempts 30 --with-compute-unit-price "${BURRPAD_PRIORITY_FEE:-50000}")
   buffer=$(echo "$out" | awk '/^Buffer:/ {print $2}')
   [ -n "$buffer" ] || { echo "STOPPED: the upload did not finish."; exit 1; }
   solana program set-buffer-authority "$buffer" --new-buffer-authority "$offer" --url "$url" --keypair "$payer" >/dev/null
+  rm -f "$HOLDING"
   echo "PASS  new code uploaded and offered to $offer"
   echo "      buffer address: $buffer"
-  echo "      sha256 of the file: $(shasum -a 256 target/deploy/burrpad.so | cut -d' ' -f1)"
+  echo "      sha256 of the file: $(shasum -a 256 target/release-kit/burrpad.so | cut -d' ' -f1)"
   echo "Next: in the multi-signature wallet's app, upgrade program $id from that buffer and approve it."
   echo "Then: node scripts/deploy/verify-code.mjs"
 fi

@@ -100,8 +100,9 @@ export async function connect(opts) {
 // ---- the program's interface file ----
 
 export function loadIdl() {
-  const file = path.join(ROOT, "target/idl/burrpad.json");
-  if (!existsSync(file)) fail("target/idl/burrpad.json is missing. Run scripts/deploy/build.sh first.");
+  // The interface file kept with the release build (see build.sh).
+  const file = path.join(ROOT, "target/release-kit/burrpad.json");
+  if (!existsSync(file)) fail("No release build here yet. Run scripts/deploy/build.sh first.");
   const idl = JSON.parse(readFileSync(file, "utf8"));
   idl.programId = new PublicKey(idl.address);
   return idl;
