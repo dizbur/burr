@@ -29,3 +29,5 @@ mod t10_whole_life;
 mod t11_substitution;
 #[cfg(test)]
 mod t12_pump_facts;
+#[cfg(test)]
+mod t13_launch_with_buy;

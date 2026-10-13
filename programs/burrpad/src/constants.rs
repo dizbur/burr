@@ -55,7 +55,9 @@ pub const VAULT_RELEASE_SECS: u32 = 86_400;
 // pump.fun's limits on text, checked here so a launch fails early and clearly.
 pub const MAX_NAME_LEN: usize = 32;
 pub const MAX_SYMBOL_LEN: usize = 13;
-pub const MAX_URI_LEN: usize = 200;
+/// pump.fun allows 200. With 100, a launch and the launcher's first buy fit
+/// one transaction (1,147 of 1,232 bytes, using an address table).
+pub const MAX_URI_LEN: usize = 100;
 
 /// How many hooks a coin can choose from.
 pub const HOOKS: usize = 4;

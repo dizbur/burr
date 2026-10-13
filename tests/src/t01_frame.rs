@@ -225,8 +225,14 @@ fn launch_refuses_bad_plans() {
         (LaunchPlan { give_receiver: empty, ..d.clone() }, E::MissingReceiver),
         (LaunchPlan { name: "x".repeat(33), ..d.clone() }, E::TextTooLong),
     ];
+    // Sent as a site would send a launch, with an address table: a long
+    // name does not fit an old-style transaction at all.
+    let table = w.b.address_table(&kit::fixed_accounts());
+    let payer = w.b.payer.insecure_clone();
     for (plan, want) in cases {
-        let (_, r) = w.try_launch(&plan);
+        let mint = solana_keypair::Keypair::new();
+        let i = w.launch_ix(&payer.pubkey(), &mint.pubkey(), &plan);
+        let (_, r) = w.b.send_with_table(&payer, &[i], &[&mint], &table);
         assert_eq!(custom_code(&r), Some(err(want)), "{want:?}\n{}", logs(&r));
     }
 }

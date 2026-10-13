@@ -57,6 +57,8 @@ pub struct LaunchPlan {
     pub creator_receiver: Pubkey,
     pub give_receiver: Pubkey,
     pub name: String,
+    /// The picture link.
+    pub uri: String,
     /// The platform terms the launcher agrees to; `None` means those in force.
     pub max_platform_fraction_bps: Option<u16>,
     pub platform_receiver: Option<Pubkey>,
@@ -70,6 +72,7 @@ impl Default for LaunchPlan {
             creator_receiver: Pubkey::new_unique(),
             give_receiver: Pubkey::new_unique(),
             name: "Test".into(),
+            uri: "https://e.co/t".into(),
             max_platform_fraction_bps: None,
             platform_receiver: None,
         }
@@ -200,7 +203,7 @@ impl World {
                 args: burrpad::LaunchArgs {
                     name: plan.name.clone(),
                     symbol: "TST".into(),
-                    uri: "https://e.co/t".into(),
+                    uri: plan.uri.clone(),
                     fee_bps: plan.fee_bps,
                     shares: plan.shares,
                     creator_receiver: plan.creator_receiver,
@@ -624,4 +627,35 @@ pub fn mint_with_plain_bumps() -> Keypair {
             return k;
         }
     }
+}
+
+/// The accounts that are the same for every coin: programs, pump.fun's fixed
+/// accounts, the ZEC mint, Burrpad's settings. A site puts these in an
+/// address table so that larger transactions fit.
+pub fn fixed_accounts() -> Vec<Pubkey> {
+    vec![
+        BURRPAD,
+        config(),
+        ZEC,
+        PUMP,
+        PUMP_AMM,
+        PUMP_FEES,
+        pump::MAYHEM,
+        pump::global(),
+        pump::event_authority(),
+        pump::quote_control(),
+        pump::fee_config(),
+        pump::amm_global_config(),
+        pump::amm_event_authority(),
+        pda(&[b"fee_config", PUMP_AMM.as_ref()], &PUMP_FEES),
+        pda(&[b"mint-authority"], &PUMP),
+        pda(&[b"global-params"], &pump::MAYHEM),
+        pda(&[b"sol-vault"], &pump::MAYHEM),
+        ata(&BUYBACK, &ZEC, &TOKEN),
+        TOKEN,
+        TOKEN_2022,
+        ATA_PROGRAM,
+        SYSTEM,
+        "ComputeBudget111111111111111111111111111111".parse().unwrap(),
+    ]
 }

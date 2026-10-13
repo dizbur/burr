@@ -30,6 +30,9 @@ pub fn root() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("..")
 }
 
+/// The most bytes a Solana transaction may have.
+pub const MAX_TRANSACTION: usize = 1_232;
+
 pub struct Bench {
     pub svm: LiteSVM,
     pub payer: Keypair,
@@ -95,8 +98,59 @@ impl Bench {
             }
         }
         let tx = Transaction::new(&ks, msg, self.svm.latest_blockhash());
+        // The test runtime does not enforce the network's size limit; do it here.
+        let size = 1 + 64 * ks.len() + tx.message.serialize().len();
+        assert!(size <= MAX_TRANSACTION, "transaction of {size} bytes would not fit on the network");
         self.svm.expire_blockhash();
         self.svm.send_transaction(tx).map_err(Box::new)
+    }
+
+    /// Makes an address table holding `addresses`, as a site would to fit a
+    /// launch in one transaction. A table only shortens addresses; it holds no power.
+    pub fn address_table(&mut self, addresses: &[Pubkey]) -> solana_message::AddressLookupTableAccount {
+        let key = Pubkey::new_unique();
+        let mut data = vec![0u8; 56];
+        data[0..4].copy_from_slice(&1u32.to_le_bytes()); // a lookup table
+        data[4..12].copy_from_slice(&u64::MAX.to_le_bytes()); // not deactivated
+        for a in addresses {
+            data.extend_from_slice(a.as_ref());
+        }
+        let lamports = self.svm.minimum_balance_for_rent_exemption(data.len());
+        let owner: Pubkey = "AddressLookupTab1e1111111111111111111111111".parse().unwrap();
+        self.svm.set_account(key, Account { lamports, data, owner, executable: false, rent_epoch: u64::MAX }).unwrap();
+        // A table can be used from the slot after it was last changed.
+        let mut c = self.svm.get_sysvar::<Clock>();
+        c.slot += 10;
+        self.svm.set_sysvar(&c);
+        solana_message::AddressLookupTableAccount { key, addresses: addresses.to_vec() }
+    }
+
+    /// Sends a versioned transaction that uses an address table.
+    /// Returns its size in bytes with the result.
+    pub fn send_with_table(
+        &mut self,
+        payer: &Keypair,
+        ixs: &[Instruction],
+        signers: &[&Keypair],
+        table: &solana_message::AddressLookupTableAccount,
+    ) -> (usize, TxResult) {
+        let mut all = vec![ComputeBudgetInstruction::set_compute_unit_limit(1_400_000)];
+        all.extend_from_slice(ixs);
+        let msg = solana_message::v0::Message::try_compile(
+            &payer.pubkey(),
+            &all,
+            std::slice::from_ref(table),
+            self.svm.latest_blockhash(),
+        )
+        .unwrap();
+        let mut ks: Vec<&Keypair> = vec![payer];
+        ks.extend(signers.iter().filter(|s| s.pubkey() != payer.pubkey()));
+        let vmsg = solana_message::VersionedMessage::V0(msg);
+        // One byte for the count of signatures, 64 bytes each, then the message.
+        let size = 1 + 64 * ks.len() + vmsg.serialize().len();
+        let tx = solana_transaction::versioned::VersionedTransaction::try_new(vmsg, &ks).unwrap();
+        self.svm.expire_blockhash();
+        (size, self.svm.send_transaction(tx).map_err(Box::new))
     }
 
     /// A new wallet with SOL.

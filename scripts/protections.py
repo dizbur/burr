@@ -112,6 +112,8 @@ MANUAL = [
       "launch_refuses_bad_plans"),
     M("L9", "Name, ticker and link lengths are checked before calling pump.fun", LAUNCH,
       "args.name.len() <= MAX_NAME_LEN && ", "", "launch_refuses_bad_plans"),
+    M("L29", "A picture link may be at most 100 characters, so launch and first buy fit one transaction", LAUNCH,
+      " && args.uri.len() <= MAX_URI_LEN", "", "a_link_longer_than_fits_is_refused"),
     M("L10", "After the call: the coin's creator is our authority", LAUNCH,
       "curve.creator == authority_key", "true", "a_launch_is_refused_if_the_coin_made_is_not", "another creator"),
     M("L11", "After the call: the coin is priced in ZEC", LAUNCH,

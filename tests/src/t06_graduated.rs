@@ -395,8 +395,11 @@ fn liquidity_added_at_the_end_of_a_climb_does_not_raise_the_pool_burns_limit() {
             ),
             kit::raw(w.burn_pool_accounts(&payer, &mint), burrpad::instruction::BurnPool {}),
         ];
+        // Both steps in one transaction need an address table to fit.
         let payer_kp = w.b.payer.insecure_clone();
-        let r = w.b.send_as(Some(&lp), &ixs, &[&payer_kp]);
+        let table = w.b.address_table(&kit::fixed_accounts());
+        let (size, r) = w.b.send_with_table(&lp, &ixs, &[&payer_kp], &table);
+        assert!(size <= crate::bench::MAX_TRANSACTION);
         assert!(r.is_ok(), "{}", logs(&r));
         let spent = (pot - w.ledger(&mint).pots[3]) as u128;
         assert!(spent > 0, "this was the call that buys");
