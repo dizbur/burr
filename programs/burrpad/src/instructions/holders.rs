@@ -10,6 +10,7 @@
 //! - the pot can go only to the rewards wallet named in the settings, to its
 //!   standard ZEC account, and that wallet must sign;
 //! - at most one release per coin per interval (30 minutes);
+//! - none at all while the administrator has releases switched off;
 //! - each release records the slot and a 32-byte fingerprint of the snapshot
 //!   it is for, so the published snapshot can be checked against the chain.
 //!
@@ -68,6 +69,7 @@ pub fn handle_release_holder_rewards(
     snapshot_hash: [u8; 32],
 ) -> Result<()> {
     let clock = Clock::get()?;
+    require!(!ctx.accounts.config.holder_releases_paused, BurrpadError::HolderReleasesPaused);
     let coin = &ctx.accounts.coin;
     require!(coin.share_of(SINK_HOLDERS) > 0, BurrpadError::HookNotChosen);
 

@@ -66,4 +66,6 @@ pub enum BurrpadError {
     NoRewardsWalletProposed,
     #[msg("The proposed rewards wallet's wait is not over")]
     RewardsWalletWaitNotOver,
+    #[msg("Holder releases are switched off")]
+    HolderReleasesPaused,
 }

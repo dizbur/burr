@@ -10,6 +10,7 @@ pub struct ConfigChanged {
     pub max_fee_bps: u16,
     pub default_fee_bps: u16,
     pub launches_paused: bool,
+    pub holder_releases_paused: bool,
 }
 
 /// The administrator named a successor, who has not yet accepted.

@@ -21,6 +21,8 @@ pub struct Config {
     pub pending_rewards_wallet: Pubkey,
     /// When the proposed wallet may be applied.
     pub rewards_wallet_ready_at: i64,
+    /// While set, no coin's holder pot can be released. The pots keep filling.
+    pub holder_releases_paused: bool,
     /// The platform's part of a coin's fee, for future launches.
     pub platform_fraction_bps: u16,
     pub min_fee_bps: u16,

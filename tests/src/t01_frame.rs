@@ -127,6 +127,7 @@ fn a_stranger_cannot_use_any_admin_instruction() {
         w.admin_ix(&s.pubkey(), burrpad::instruction::ProposeRewardsWallet { wallet: s.pubkey() }),
         w.admin_ix(&s.pubkey(), burrpad::instruction::CancelRewardsWallet {}),
         w.admin_ix(&s.pubkey(), burrpad::instruction::ApplyRewardsWallet {}),
+        w.admin_ix(&s.pubkey(), burrpad::instruction::SetHolderReleasesPaused { paused: true }),
         w.admin_ix(&s.pubkey(), burrpad::instruction::ProposeAdmin { new_admin: s.pubkey() }),
     ];
     for i in tries {

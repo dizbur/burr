@@ -338,6 +338,44 @@ fn a_proposed_rewards_wallet_can_be_cancelled_or_replaced() {
 }
 
 #[test]
+fn the_pause_stops_every_coins_release_at_once_and_nothing_else() {
+    // For a stolen rewards wallet: no waiting. The pots stay where they are.
+    let mut w = World::new();
+    let a = w.launch(&LaunchPlan::default());
+    let b = w.launch(&holders_plan());
+    fee(&mut w, &a, 8 * ZEC1);
+    fee(&mut w, &b, ZEC1);
+    w.b.wait(HALF_HOUR);
+    let (pa, pb) = (w.ledger(&a).pots[4], w.ledger(&b).pots[4]);
+
+    let r = w.as_admin(burrpad::instruction::SetHolderReleasesPaused { paused: true });
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert!(w.config().holder_releases_paused);
+    let said = events::<burrpad::events::ConfigChanged>(&r);
+    assert_eq!(said.len(), 1);
+    assert_eq!(said[0].last(), Some(&1), "the pause was not announced");
+    for m in [a, b] {
+        let r = w.release_holders(&m);
+        assert_eq!(custom_code(&r), Some(err(E::HolderReleasesPaused)), "released while paused: {}", logs(&r));
+    }
+    assert_eq!((w.ledger(&a).pots[4], w.ledger(&b).pots[4]), (pa, pb));
+    assert_eq!(w.zec_of(&w.rewards_wallet.pubkey()), 0);
+
+    // Everything else carries on: fees are split, other pots are paid, launches work.
+    fee(&mut w, &a, ZEC1);
+    assert!(w.ledger(&a).pots[4] > pa, "the pot keeps filling");
+    assert!(w.pay_out(&a, burrpad::state::Payee::Creator).is_ok());
+    w.launch(&LaunchPlan::default());
+
+    // Switched back on, each coin releases as before.
+    assert!(w.as_admin(burrpad::instruction::SetHolderReleasesPaused { paused: false }).is_ok());
+    let (pa, pb) = (w.ledger(&a).pots[4], w.ledger(&b).pots[4]);
+    assert!(w.release_holders(&a).is_ok());
+    assert!(w.release_holders(&b).is_ok());
+    assert_eq!(w.zec_of(&w.rewards_wallet.pubkey()), pa + pb);
+}
+
+#[test]
 fn holder_releases_work_the_same_after_graduation() {
     let mut w = World::new();
     let mint = w.launch(&holders_plan());

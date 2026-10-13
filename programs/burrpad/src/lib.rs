@@ -49,6 +49,10 @@ pub mod burrpad {
         instructions::admin::handle_apply_rewards_wallet(ctx)
     }
 
+    pub fn set_holder_releases_paused(ctx: Context<AdminOnly>, paused: bool) -> Result<()> {
+        instructions::admin::handle_set_holder_releases_paused(ctx, paused)
+    }
+
     pub fn set_platform_fraction(ctx: Context<AdminOnly>, fraction_bps: u16) -> Result<()> {
         instructions::admin::handle_set_platform_fraction(ctx, fraction_bps)
     }

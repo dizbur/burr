@@ -46,6 +46,7 @@ pub fn handle_initialize(
     c.rewards_wallet = rewards_wallet;
     c.pending_rewards_wallet = Pubkey::default();
     c.rewards_wallet_ready_at = 0;
+    c.holder_releases_paused = false;
     c.platform_fraction_bps = START_PLATFORM_FRACTION_BPS;
     c.min_fee_bps = START_MIN_FEE_BPS;
     c.max_fee_bps = START_MAX_FEE_BPS;
@@ -143,6 +144,15 @@ pub fn handle_set_launches_paused(ctx: Context<AdminOnly>, paused: bool) -> Resu
     Ok(())
 }
 
+/// Stops, or allows again, the release of every coin's holder pot. At once:
+/// this is how a stolen rewards wallet is shut out without waiting. Nothing
+/// is moved; the pots wait.
+pub fn handle_set_holder_releases_paused(ctx: Context<AdminOnly>, paused: bool) -> Result<()> {
+    ctx.accounts.config.holder_releases_paused = paused;
+    announce(&ctx.accounts.config);
+    Ok(())
+}
+
 /// First step of handing the role over. Proposing the empty address cancels.
 pub fn handle_propose_admin(ctx: Context<AdminOnly>, new_admin: Pubkey) -> Result<()> {
     ctx.accounts.config.pending_admin = new_admin;
@@ -180,5 +190,6 @@ fn announce(c: &Config) {
         max_fee_bps: c.max_fee_bps,
         default_fee_bps: c.default_fee_bps,
         launches_paused: c.launches_paused,
+        holder_releases_paused: c.holder_releases_paused,
     });
 }
