@@ -668,9 +668,9 @@ def write_report():
         "should treat each of these as a place where two checks overlap, and confirm it.",
         "",
         "Not in the table because they cannot be removed without removing the instruction itself: the addresses of "
-        "`Config`, `Coin`, `Ledger` and `Stake` when they are first made (fixed by creation), the coin authority's "
+        "`Config`, `Coin` and `Ledger` when they are first made (fixed by creation), the coin authority's "
         "address at launch (its bump is taken from the same check), and the kind of each "
-        "program-owned account (`Coin`, `Ledger`, `Stake`, `Config` each carry their own 8-byte code, checked on every "
+        "program-owned account (`Coin`, `Ledger`, `Config` each carry their own 8-byte code, checked on every "
         "load). The substitution tests swap these too and they are refused.",
         "",
     ]
