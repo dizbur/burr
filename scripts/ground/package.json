@@ -1,0 +1,9 @@
+{
+  "name": "burr-ground",
+  "private": true,
+  "type": "module",
+  "description": "Read-only checks against the main network. Sends nothing.",
+  "dependencies": {
+    "@solana/web3.js": "1.98.4"
+  }
+}
