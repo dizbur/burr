@@ -335,6 +335,9 @@ fn the_limit_follows_the_fee_pump_fun_really_charges() {
     set_curve_fee(&mut w, &mint, 0);
     let r = w.burn_curve(&mint);
     assert_eq!(custom_code(&r), Some(err(E::NothingToBurn)));
+    // pump.fun has an error with the same number, so check it was Burr that
+    // stopped, before pump.fun was ever called.
+    assert!(crate::bench::refused_by_burr(&r), "{}", logs(&r));
 }
 
 /// Prints the worked figures quoted in the note for the auditor.
