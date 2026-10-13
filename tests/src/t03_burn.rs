@@ -439,3 +439,33 @@ fn liquidity_added_just_for_one_call_does_not_raise_the_limit() {
     assert!(w.burn_curve(&mint).is_ok());
     assert!((before - w.ledger(&mint).pots[3]) as u128 <= recorded as u128 * 10_500 / 10_000 * 200 / 40_000 + 1);
 }
+
+/// Prints what someone gains or loses who buys once, holds while several
+/// burns run, and then sells. Quoted in the note for the auditor.
+/// Run with: cargo test -p burrpad-tests print_hold_across_burns -- --ignored --nocapture
+#[test]
+#[ignore = "prints figures; not a check"]
+fn print_hold_across_burns_figures() {
+    println!("fee_bps, burns held through, position (ZEC units), result, as % of position, burn pot spent");
+    for fee in [50u16, 200, 300] {
+        for burns in [1u32, 3, 6, 10, 20] {
+            let mut w = World::new();
+            let mint = coin_with_burn_pot(&mut w, fee, 500 * ZEC1);
+            let holder = w.trader(1_000 * ZEC1);
+            let start = w.zec_of(&holder.pubkey());
+            let position = ZEC1 / 20;
+            assert!(w.buy(&holder, &mint, position).is_ok());
+            let pot = w.ledger(&mint).pots[3];
+            for _ in 0..burns {
+                let r = w.burn_curve(&mint);
+                assert!(r.is_ok(), "{}", logs(&r));
+                w.b.wait(60);
+            }
+            let spent = pot - w.ledger(&mint).pots[3];
+            let coins = w.coins_of(&holder.pubkey(), &mint);
+            assert!(w.sell(&holder, &mint, coins).is_ok());
+            let gain = w.zec_of(&holder.pubkey()) as i128 - start as i128;
+            println!("{fee}, {burns}, {position}, {gain}, {:+.2}%, {spent}", gain as f64 * 100.0 / position as f64);
+        }
+    }
+}
