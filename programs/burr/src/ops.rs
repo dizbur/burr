@@ -7,6 +7,7 @@ use crate::events::Split;
 use crate::math;
 use crate::state::{Coin, Ledger};
 use anchor_lang::prelude::*;
+use anchor_spl::associated_token::{self, get_associated_token_address_with_program_id};
 use anchor_spl::token_interface::{self, TransferChecked};
 
 /// Splits whatever ZEC has arrived in the vault since the last split.
@@ -67,4 +68,49 @@ pub fn pay_from_vault<'info>(
         amount,
         ZEC_DECIMALS,
     )
+}
+
+/// The accounts needed to pay ZEC from a coin's vault to someone's standard
+/// ZEC account.
+pub struct PayTo<'a, 'info> {
+    pub payer: &'a AccountInfo<'info>,
+    /// Who is being paid.
+    pub owner: &'a AccountInfo<'info>,
+    /// Their standard ZEC account. Checked here by address.
+    pub destination: &'a AccountInfo<'info>,
+    pub vault: &'a AccountInfo<'info>,
+    pub zec_mint: &'a AccountInfo<'info>,
+    pub authority: &'a AccountInfo<'info>,
+    pub token_program: &'a AccountInfo<'info>,
+    pub associated_token_program: &'a AccountInfo<'info>,
+    pub system_program: &'a AccountInfo<'info>,
+}
+
+/// Pays `amount` to the standard ZEC account of `owner`, creating it if it
+/// does not exist.
+///
+/// The destination is fixed by its address alone: nobody chooses another.
+/// Nothing about the account's present state can block the payment. In
+/// particular the receiver cannot make themselves unpayable by handing the
+/// account to someone else: the ZEC still goes to that same address.
+pub fn pay_to_standard_account(p: &PayTo, mint: &Pubkey, authority_bump: u8, amount: u64) -> Result<()> {
+    let expected = get_associated_token_address_with_program_id(p.owner.key, &ZEC_MINT, p.token_program.key);
+    require_keys_eq!(*p.destination.key, expected, BurrError::WrongReceiver);
+    if amount == 0 {
+        return Ok(());
+    }
+    if p.destination.data_is_empty() {
+        associated_token::create(CpiContext::new(
+            *p.associated_token_program.key,
+            associated_token::Create {
+                payer: p.payer.clone(),
+                associated_token: p.destination.clone(),
+                authority: p.owner.clone(),
+                mint: p.zec_mint.clone(),
+                system_program: p.system_program.clone(),
+                token_program: p.token_program.clone(),
+            },
+        ))?;
+    }
+    pay_from_vault(p.token_program, p.vault, p.zec_mint, p.destination, p.authority, mint, authority_bump, amount)
 }

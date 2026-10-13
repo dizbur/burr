@@ -109,13 +109,11 @@ fn graduated_with_burn_pot(fee_bps: u16, pot: u64) -> (World, Pubkey) {
     let (mut w, mint) = graduated(&burn_plan(fee_bps));
     w.b.give_zec(&kit::authority(&mint), pot * 8 / 7 + 8);
     assert!(w.split(&mint).is_ok());
-    // The price at graduation is far above the launch price, so the first
-    // call records it and buys nothing. Burns proper start one wait later.
+    // The price at graduation is far above the launch price. The burn
+    // follows it up a 5% step a minute before it buys.
     w.b.wait(60);
-    let before = w.ledger(&mint).pots[3];
-    let r = w.burn_pool(&mint);
-    assert!(r.is_ok(), "{}", logs(&r));
-    assert_eq!(w.ledger(&mint).pots[3], before);
+    let calls = w.burn_until_it_buys(&mint);
+    assert!(calls > 10);
     w.b.wait(60);
     (w, mint)
 }
@@ -125,6 +123,7 @@ fn a_burn_on_the_pool_buys_and_destroys() {
     let (mut w, mint) = graduated_with_burn_pot(200, 50 * ZEC1);
     let supply = w.b.mint_supply(&mint);
     let pot = w.ledger(&mint).pots[3];
+    let burned_before = w.ledger(&mint).burn.total_burned;
     let (reserve, _) = w.pool_reserves(&mint);
     // The reserve used is the pool's ZEC balance plus the pool's own adjustment.
     assert_ne!(w.pool(&mint).virtual_quote_reserves, 0);
@@ -136,7 +135,7 @@ fn a_burn_on_the_pool_buys_and_destroys() {
     assert_eq!(spent, reserve * 200 / 40_000);
     let burned = supply - w.b.mint_supply(&mint);
     assert!(burned > 0);
-    assert_eq!(l.burn.total_burned, burned);
+    assert_eq!(l.burn.total_burned - burned_before, burned);
     let bn = kit::burner(&mint);
     assert_eq!(w.b.token_balance(&ata(&bn, &ZEC, &TOKEN)), 0);
     assert_eq!(w.b.token_balance(&ata(&bn, &mint, &TOKEN_2022)), 0);
@@ -152,8 +151,12 @@ fn a_burn_on_the_pool_buys_and_destroys() {
     assert!(w.burn_pool(&mint).is_ok());
     assert_eq!(w.ledger(&mint).pots[3], before, "a pushed-up price is not bought at");
     w.b.wait(60);
-    assert!(w.burn_pool(&mint).is_ok());
+    w.burn_until_it_buys(&mint);
     assert!(w.ledger(&mint).pots[3] < before);
+    // After a burn the pool's figures at that moment are the new reference.
+    let (q, b) = w.pool_reserves(&mint);
+    let r = w.ledger(&mint).burn.reference;
+    assert_eq!((r.quote, r.base), (q, b));
 }
 
 #[test]
@@ -184,12 +187,12 @@ fn a_burn_started_on_the_curve_carries_on_from_the_pool() {
     w.graduate(&mint);
     w.b.wait(60);
     // The price recorded on the curve is the reference for the first pool burn.
-    // Graduation happened well above it, so the first call records and skips.
+    // Graduation happened well above it, so the first call skips.
     let pot = w.ledger(&mint).pots[3];
     assert!(w.burn_pool(&mint).is_ok());
     assert_eq!(w.ledger(&mint).pots[3], pot);
     w.b.wait(60);
-    assert!(w.burn_pool(&mint).is_ok());
+    w.burn_until_it_buys(&mint);
     assert!(w.ledger(&mint).pots[3] < pot);
     w.assert_sound(&mint);
 }

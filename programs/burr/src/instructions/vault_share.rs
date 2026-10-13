@@ -147,14 +147,9 @@ pub struct UnstakeCoins<'info> {
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
     #[account(address = ZEC_MINT)]
     pub zec_mint: Box<InterfaceAccount<'info, Mint>>,
-    #[account(
-        init_if_needed,
-        payer = owner,
-        associated_token::mint = zec_mint,
-        associated_token::authority = owner,
-        associated_token::token_program = token_program
-    )]
-    pub owner_zec: Box<InterfaceAccount<'info, TokenAccount>>,
+    /// CHECK: the staker's standard ZEC account, checked by address in the handler and made if missing
+    #[account(mut)]
+    pub owner_zec: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
     pub token_2022_program: Program<'info, Token2022>,
     pub associated_token_program: Program<'info, AssociatedToken>,
@@ -182,6 +177,10 @@ pub fn handle_unstake(ctx: Context<UnstakeCoins>, amount: u64) -> Result<()> {
         // Nobody is left, so nobody is owed anything: all that remains in the
         // pot (the unreleased queue and rounding dust) waits for the next staker.
         ledger.vault_share.queued = ledger.pots[SINK_VAULT_SHARE];
+        // Its release starts afresh when the next staker arrives, even if
+        // that is in this same second.
+        ledger.vault_share.release_end =
+            now.checked_add(ctx.accounts.coin.vault_release_secs as i64).ok_or(BurrError::Overflow)?;
     }
     let total_staked = ledger.vault_share.total_staked;
 
@@ -203,16 +202,46 @@ pub fn handle_unstake(ctx: Context<UnstakeCoins>, amount: u64) -> Result<()> {
             a.mint.decimals,
         )?;
     }
-    ops::pay_from_vault(
-        &a.token_program.to_account_info(),
-        &a.vault.to_account_info(),
-        &a.zec_mint.to_account_info(),
-        &a.owner_zec.to_account_info(),
-        &a.authority.to_account_info(),
+    ops::pay_to_standard_account(
+        &ops::PayTo {
+            payer: &a.owner.to_account_info(),
+            owner: &a.owner.to_account_info(),
+            destination: &a.owner_zec.to_account_info(),
+            vault: &a.vault.to_account_info(),
+            zec_mint: &a.zec_mint.to_account_info(),
+            authority: &a.authority.to_account_info(),
+            token_program: &a.token_program.to_account_info(),
+            associated_token_program: &a.associated_token_program.to_account_info(),
+            system_program: &a.system_program.to_account_info(),
+        },
         &mint_key,
         a.coin.authority_bump,
         pay,
     )?;
     emit!(StakeChanged { mint: mint_key, owner: a.owner.key(), staked: staked_now, total_staked, paid: pay });
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct CloseStake<'info> {
+    #[account(mut)]
+    pub owner: Signer<'info>,
+    /// CHECK: only its address is used, to derive the stake's address
+    pub mint: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        close = owner,
+        seeds = [SEED_STAKE, mint.key().as_ref(), owner.key().as_ref()],
+        bump = stake.bump,
+        has_one = owner,
+        has_one = mint
+    )]
+    pub stake: Box<Account<'info, Stake>>,
+}
+
+/// Closes an empty stake record and returns its rent to its owner.
+pub fn handle_close_stake(ctx: Context<CloseStake>) -> Result<()> {
+    let s = &ctx.accounts.stake;
+    require!(s.amount == 0 && s.owed == 0, BurrError::StakeNotEmpty);
     Ok(())
 }

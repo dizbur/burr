@@ -139,8 +139,8 @@ fn collect_credits_only_what_really_arrived() {
 fn graduated_burn_coin() -> (World, Pubkey) {
     let (mut w, mint) = burn_coin();
     w.graduate(&mint);
-    // With the real pool: the first call records the graduated price.
-    assert!(w.burn_pool(&mint).is_ok());
+    // With the real pool: the burn follows the price up to where it graduated.
+    w.burn_until_it_buys(&mint);
     w.b.wait(60);
     (w, mint)
 }

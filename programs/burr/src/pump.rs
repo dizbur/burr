@@ -106,11 +106,8 @@ pub fn read_curve(ai: &AccountInfo) -> Result<CurveView> {
 
 /// The fields of a PumpSwap pool that we rely on.
 pub struct PoolView {
-    pub creator: Pubkey,
     pub base_mint: Pubkey,
     pub quote_mint: Pubkey,
-    pub pool_base_token_account: Pubkey,
-    pub pool_quote_token_account: Pubkey,
     /// Added to the pool's ZEC balance to get the reserve prices are worked from.
     pub virtual_quote_reserves: i128,
     /// The creator fee the pool charges now.
@@ -127,11 +124,8 @@ pub fn read_pool(ai: &AccountInfo) -> Result<PoolView> {
     let mut v = [0u8; 16];
     v.copy_from_slice(&d[245..261]);
     Ok(PoolView {
-        creator: key_at(&d, 11),
         base_mint: key_at(&d, 43),
         quote_mint: key_at(&d, 75),
-        pool_base_token_account: key_at(&d, 139),
-        pool_quote_token_account: key_at(&d, 171),
         virtual_quote_reserves: i128::from_le_bytes(v),
         creator_fee_bps: u64_at(&d, 261),
     })

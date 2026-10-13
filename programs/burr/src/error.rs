@@ -68,4 +68,10 @@ pub enum BurrError {
     KingWrongWinner,
     #[msg("The buy did not go through as measured")]
     KingBadBuy,
+    #[msg("A receiver cannot be one of the coin's own program-controlled addresses")]
+    ReceiverNotAllowed,
+    #[msg("The platform's terms changed since this launch was prepared")]
+    PlatformTermsChanged,
+    #[msg("A stake can be closed only when it is empty")]
+    StakeNotEmpty,
 }

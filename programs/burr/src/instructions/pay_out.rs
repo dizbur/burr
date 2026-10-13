@@ -38,15 +38,9 @@ pub struct PayOut<'info> {
     /// CHECK: must be the receiver written in the coin's record for this pot
     #[account(address = payee.receiver(&coin) @ BurrError::WrongReceiver)]
     pub receiver: UncheckedAccount<'info>,
-    /// The receiver's standard ZEC account. Nobody chooses another.
-    #[account(
-        init_if_needed,
-        payer = payer,
-        associated_token::mint = zec_mint,
-        associated_token::authority = receiver,
-        associated_token::token_program = token_program
-    )]
-    pub receiver_zec: Box<InterfaceAccount<'info, TokenAccount>>,
+    /// CHECK: the receiver's standard ZEC account, checked by address in the handler and made if missing
+    #[account(mut)]
+    pub receiver_zec: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -58,12 +52,18 @@ pub fn handle_pay_out(ctx: Context<PayOut>, payee: Payee) -> Result<()> {
     // The pot is emptied in the ledger before the ZEC moves.
     ops::debit(&mut ctx.accounts.ledger, sink, amount)?;
     let a = &ctx.accounts;
-    ops::pay_from_vault(
-        &a.token_program.to_account_info(),
-        &a.vault.to_account_info(),
-        &a.zec_mint.to_account_info(),
-        &a.receiver_zec.to_account_info(),
-        &a.authority.to_account_info(),
+    ops::pay_to_standard_account(
+        &ops::PayTo {
+            payer: &a.payer.to_account_info(),
+            owner: &a.receiver.to_account_info(),
+            destination: &a.receiver_zec.to_account_info(),
+            vault: &a.vault.to_account_info(),
+            zec_mint: &a.zec_mint.to_account_info(),
+            authority: &a.authority.to_account_info(),
+            token_program: &a.token_program.to_account_info(),
+            associated_token_program: &a.associated_token_program.to_account_info(),
+            system_program: &a.system_program.to_account_info(),
+        },
         &a.coin.mint,
         a.coin.authority_bump,
         amount,

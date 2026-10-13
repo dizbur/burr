@@ -25,6 +25,11 @@ pub struct LaunchArgs {
     pub creator_receiver: Pubkey,
     pub give_receiver: Pubkey,
     pub king_round_secs: u32,
+    /// The most the launcher accepts as the platform's part of the fee. The
+    /// launch fails if the setting is higher when it lands.
+    pub max_platform_fraction_bps: u16,
+    /// Where the launcher expects the platform's part to be paid.
+    pub platform_receiver: Pubkey,
 }
 
 #[derive(Accounts)]
@@ -121,6 +126,12 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
 
     // 1. Checks before anything is created.
     require!(!cfg.launches_paused, BurrError::LaunchesPaused);
+    // The record is for good, so the launcher states the platform's terms they
+    // saw. A change made while the launch was on its way stops it.
+    require!(
+        cfg.platform_fraction_bps <= args.max_platform_fraction_bps && cfg.platform_receiver == args.platform_receiver,
+        BurrError::PlatformTermsChanged
+    );
     require!(args.fee_bps >= cfg.min_fee_bps && args.fee_bps <= cfg.max_fee_bps, BurrError::FeeOutOfRange);
     require!(math::weights(cfg.platform_fraction_bps, &args.shares).is_some(), BurrError::SharesDoNotAddUp);
     require!(
@@ -137,9 +148,16 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
         BurrError::TextTooLong
     );
 
-    // 2. Create the coin on pump.fun, with our authority as its creator.
     let mint_key = a.mint.key();
     let authority_key = a.authority.key();
+    let (burner_key, burner_bump) = Pubkey::find_program_address(&[SEED_BURNER, mint_key.as_ref()], ctx.program_id);
+    // A receiver may not be one of this coin's own program-controlled
+    // addresses: a payout to the authority would land back in the vault.
+    for r in [args.creator_receiver, args.give_receiver] {
+        require!(r != authority_key && r != burner_key, BurrError::ReceiverNotAllowed);
+    }
+
+    // 2. Create the coin on pump.fun, with our authority as its creator.
     pump::create_v2(
         pump::CreateV2 {
             mint: &a.mint.to_account_info(),
@@ -188,7 +206,6 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let platform_fraction_bps = cfg.platform_fraction_bps;
     let platform_receiver = cfg.platform_receiver;
-    let (_, burner_bump) = Pubkey::find_program_address(&[SEED_BURNER, mint_key.as_ref()], ctx.program_id);
     let coin = &mut ctx.accounts.coin;
     coin.mint = mint_key;
     coin.bump = ctx.bumps.coin;

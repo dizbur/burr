@@ -144,6 +144,12 @@ impl Reserves {
         Some(lhs > rhs)
     }
 
+    /// This price raised by `band_bps`, for stepping a reference upward.
+    pub fn raised_by(&self, band_bps: u16) -> Option<Reserves> {
+        let q = (self.quote as u128).checked_mul(BPS as u128 + band_bps as u128)? / BPS as u128;
+        Some(Reserves { quote: u64::try_from(q.max(self.quote as u128 + 1)).ok()?, base: self.base })
+    }
+
     /// Coins a fee-free constant-product pool would give for `spend`.
     pub fn ideal_out(&self, spend: u64) -> Option<u64> {
         let d = (self.quote as u128).checked_add(spend as u128)?;

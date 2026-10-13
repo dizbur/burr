@@ -57,12 +57,10 @@ fn stage() -> Stage {
         assert!(w.split(&m).is_ok());
         coins.push(m);
     }
-    // Past the burn's waiting time and the king round. The first burn call on
-    // each coin records the moved price; a second, a minute later, can buy.
+    // Past the king round, and each coin's burn brought up to its price.
     w.b.wait(700);
-    for (i, m) in coins.iter().enumerate() {
-        let r = if i < 2 { w.burn_curve(m) } else { w.burn_pool(m) };
-        assert!(r.is_ok(), "{}", logs(&r));
+    for m in &coins {
+        w.burn_until_it_buys(m);
     }
     w.b.wait(60);
     let nothing = w.b.do_nothing_program();
@@ -116,6 +114,8 @@ fn launch() {
             creator_receiver: plan.creator_receiver,
             give_receiver: plan.give_receiver,
             king_round_secs: plan.king_round_secs,
+            max_platform_fraction_bps: 1_250,
+            platform_receiver: w.platform_receiver,
         },
     };
     let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);

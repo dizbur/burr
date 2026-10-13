@@ -254,3 +254,83 @@ fn a_buy_that_buys_nothing_is_not_a_buy() {
     assert!(r.is_err());
     assert_eq!(w.ledger(&mint).king.leader, Pubkey::default());
 }
+
+#[test]
+fn a_winner_cannot_block_settlement_by_giving_their_account_away() {
+    // The leader hands their ZEC account to another key, hoping that nobody
+    // can settle, the game freezes, and the pot keeps growing for them.
+    let (mut w, mint) = setup();
+    let a = w.trader(100 * ZEC1);
+    let other = w.b.wallet();
+    let a_zec = ata(&a.pubkey(), &ZEC, &TOKEN);
+    let ixs = [
+        w.king_buy_curve_ix(&a.pubkey(), &mint, ZEC1 / 10),
+        kit::give_token_account_away(&a_zec, &a.pubkey(), &other.pubkey()),
+    ];
+    let r = w.b.send_as(Some(&a), &ixs, &[]);
+    assert!(r.is_ok(), "{}", logs(&r));
+    fee(&mut w, &mint, ZEC1);
+    w.b.wait(ROUND);
+
+    // Anyone can still settle. The pot goes to the same address as always.
+    let pot = w.ledger(&mint).pots[5];
+    let before = w.b.token_balance(&a_zec);
+    let r = w.king_settle(&mint);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert_eq!(w.b.token_balance(&a_zec), before + pot);
+    // And the game goes on.
+    let b = w.trader(100 * ZEC1);
+    assert!(w.king_buy_curve(&b, &mint, ZEC1 / 100).is_ok());
+    assert_eq!(w.ledger(&mint).king.leader, b.pubkey());
+}
+
+#[test]
+fn a_winner_who_closed_their_account_is_still_paid() {
+    let (mut w, mint) = setup();
+    let a = w.trader(ZEC1 / 10);
+    assert!(w.king_buy_curve(&a, &mint, ZEC1 / 10).is_ok());
+    // Their ZEC account is now empty; it is removed altogether.
+    let a_zec = ata(&a.pubkey(), &ZEC, &TOKEN);
+    w.b.svm.set_account(a_zec, solana_account::Account::default()).unwrap();
+    fee(&mut w, &mint, ZEC1);
+    w.b.wait(ROUND);
+    let pot = w.ledger(&mint).pots[5];
+    let r = w.king_settle(&mint);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert_eq!(w.zec_of(&a.pubkey()), pot);
+}
+
+#[test]
+fn after_a_round_is_settled_any_buy_leads_the_next() {
+    let (mut w, mint) = setup();
+    let (a, b) = (w.trader(100 * ZEC1), w.trader(100 * ZEC1));
+    assert!(w.king_buy_curve(&a, &mint, ZEC1).is_ok());
+    w.b.wait(ROUND);
+    assert!(w.king_settle(&mint).is_ok());
+    assert_eq!(w.ledger(&mint).king.leader_amount, 0);
+    // A far smaller buy than last round's winner leads the new round.
+    assert!(w.king_buy_curve(&b, &mint, ZEC1 / 1_000).is_ok());
+    assert_eq!(w.ledger(&mint).king.leader, b.pubkey());
+}
+
+/// What it really costs to take the lead by buying and selling at once, when
+/// the fee paid comes back through the pot the washer then wins.
+#[test]
+fn the_wash_trade_is_cheaper_when_the_washer_wins_their_own_fee_back() {
+    // A coin whose whole fee goes to the king pot: the worst case.
+    let (mut w, mint) = setup();
+    let a = w.trader(100 * ZEC1);
+    let size = ZEC1;
+    let start = w.zec_of(&a.pubkey());
+    assert!(w.king_buy_curve(&a, &mint, size).is_ok());
+    let coins = w.coins_of(&a.pubkey(), &mint);
+    assert!(w.sell(&a, &mint, coins).is_ok());
+    assert!(w.collect_curve(&mint).is_ok());
+    w.b.wait(ROUND);
+    assert!(w.king_settle(&mint).is_ok());
+    let net_cost = start - w.zec_of(&a.pubkey());
+    let pct_x100 = net_cost * 10_000 / size;
+    // Gross cost is about 5.7%. Seven eighths of the 2% fee, paid twice,
+    // comes back: the net cost is about 2.3% of the size.
+    assert!((200..=260).contains(&pct_x100), "net cost was {pct_x100} hundredths of a percent");
+}

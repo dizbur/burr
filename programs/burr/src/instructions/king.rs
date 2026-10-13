@@ -26,7 +26,6 @@ fn enter_round(coin: &Coin, ledger: &mut Ledger, now: i64) -> Result<u64> {
     if round > k.round {
         require!(k.leader == Pubkey::default(), BurrError::KingSettleFirst);
         k.round = round;
-        k.leader_amount = 0;
     }
     Ok(round)
 }
@@ -317,15 +316,10 @@ pub struct KingSettle<'info> {
     /// CHECK: must be the leader recorded in the ledger
     #[account(address = ledger.king.leader @ BurrError::KingWrongWinner)]
     pub winner: UncheckedAccount<'info>,
-    /// The winner's standard ZEC account. Nobody chooses another.
-    #[account(
-        init_if_needed,
-        payer = payer,
-        associated_token::mint = zec_mint,
-        associated_token::authority = winner,
-        associated_token::token_program = token_program
-    )]
-    pub winner_zec: Box<InterfaceAccount<'info, TokenAccount>>,
+    /// CHECK: the winner's standard ZEC account, checked by address in the handler and made if missing.
+    /// Its present state is not looked at, so a winner cannot block settlement by changing it.
+    #[account(mut)]
+    pub winner_zec: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -348,12 +342,18 @@ pub fn handle_king_settle(ctx: Context<KingSettle>) -> Result<()> {
     ledger.king.round = round;
 
     let a = &ctx.accounts;
-    ops::pay_from_vault(
-        &a.token_program.to_account_info(),
-        &a.vault.to_account_info(),
-        &a.zec_mint.to_account_info(),
-        &a.winner_zec.to_account_info(),
-        &a.authority.to_account_info(),
+    ops::pay_to_standard_account(
+        &ops::PayTo {
+            payer: &a.payer.to_account_info(),
+            owner: &a.winner.to_account_info(),
+            destination: &a.winner_zec.to_account_info(),
+            vault: &a.vault.to_account_info(),
+            zec_mint: &a.zec_mint.to_account_info(),
+            authority: &a.authority.to_account_info(),
+            token_program: &a.token_program.to_account_info(),
+            associated_token_program: &a.associated_token_program.to_account_info(),
+            system_program: &a.system_program.to_account_info(),
+        },
         &a.coin.mint,
         a.coin.authority_bump,
         amount,

@@ -374,3 +374,30 @@ fn initialise_cannot_be_passed_another_programs_upgrade_record() {
     assert_eq!(custom_code(&r), Some(err(E::NotUpgradeAuthority)), "{}", logs(&r));
     assert!(w.b.account(&kit::config()).is_none());
 }
+
+#[test]
+fn a_launch_is_stopped_if_the_platforms_terms_changed_on_the_way() {
+    // The launcher prepared the launch seeing one eighth to the platform's
+    // receiver. Before it lands, the administrator changes the terms.
+    let mut w = World::new();
+    let agreed = LaunchPlan {
+        max_platform_fraction_bps: Some(1_250),
+        platform_receiver: Some(w.platform_receiver),
+        ..Default::default()
+    };
+    w.launch(&agreed);
+
+    assert!(w.as_admin(burr::instruction::SetPlatformFraction { fraction_bps: 5_000 }).is_ok());
+    let (mint, r) = w.try_launch(&agreed);
+    assert_eq!(custom_code(&r), Some(err(E::PlatformTermsChanged)), "a higher fraction\n{}", logs(&r));
+    assert!(w.b.account(&kit::coin(&mint)).is_none());
+    // A lower fraction than agreed is fine.
+    assert!(w.as_admin(burr::instruction::SetPlatformFraction { fraction_bps: 1_000 }).is_ok());
+    let lower = w.launch(&agreed);
+    assert_eq!(w.coin(&lower).platform_fraction_bps, 1_000);
+
+    let elsewhere = solana_pubkey::Pubkey::new_unique();
+    assert!(w.as_admin(burr::instruction::SetPlatformReceiver { receiver: elsewhere }).is_ok());
+    let (_, r) = w.try_launch(&agreed);
+    assert_eq!(custom_code(&r), Some(err(E::PlatformTermsChanged)), "another receiver\n{}", logs(&r));
+}

@@ -17,10 +17,12 @@ A coin launched through Burr is a real pump.fun coin, priced in ZEC, whose creat
 ## What is here
 
 ```
-programs/burr/     the program
-tests/             the test bench: Burr run against real copies of pump.fun's programs
-scripts/ground/    read-only checks against the main network (they send nothing)
-scripts/check.sh   format, lint, advisories, build, tests
+programs/burr/          the program
+tests/                  the test bench: Burr run against real copies of pump.fun's programs
+tests-standin/          a stand-in for pump.fun that misbehaves on purpose; tests only, never deployed
+scripts/ground/         read-only checks against the main network (they send nothing)
+scripts/check.sh        format, lint, advisories, build, tests
+scripts/protections.py  removes each protection in turn, in a throwaway copy, to prove a test notices
 ```
 
 ## Pinned tools
@@ -58,6 +60,18 @@ cd ../..
 ```
 
 `check.sh` builds the program with `cargo build-sbf` and runs the whole suite. The tests load `target/deploy/burr.so`, so the build must come first.
+
+The tests do not use a validator. They run the program, and pump.fun's real programs, inside an in-process Solana runtime, which lets them move the clock.
+
+To check that the tests have teeth (about half an hour, several GB of disk for throwaway copies):
+
+```sh
+python3 scripts/protections.py
+```
+
+## Using it from a site
+
+`launch` passes about 27 accounts. With a long picture link that does not fit an old-style transaction: use a versioned transaction with an address table holding the fixed accounts. An address table holds no power.
 
 ## Deploying
 

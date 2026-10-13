@@ -55,6 +55,9 @@ pub struct LaunchPlan {
     pub give_receiver: Pubkey,
     pub king_round_secs: u32,
     pub name: String,
+    /// The platform terms the launcher agrees to; `None` means those in force.
+    pub max_platform_fraction_bps: Option<u16>,
+    pub platform_receiver: Option<Pubkey>,
 }
 
 impl Default for LaunchPlan {
@@ -66,6 +69,8 @@ impl Default for LaunchPlan {
             give_receiver: Pubkey::new_unique(),
             king_round_secs: 3_600,
             name: "Test".into(),
+            max_platform_fraction_bps: None,
+            platform_receiver: None,
         }
     }
 }
@@ -186,6 +191,8 @@ impl World {
     }
 
     pub fn launch_ix(&self, payer: &Pubkey, mint: &Pubkey, plan: &LaunchPlan) -> Instruction {
+        // Unless a test says otherwise, the launcher agrees to the terms in force.
+        let cfg = self.config();
         ix(
             self.launch_accounts(payer, mint),
             burr::instruction::Launch {
@@ -198,6 +205,8 @@ impl World {
                     creator_receiver: plan.creator_receiver,
                     give_receiver: plan.give_receiver,
                     king_round_secs: plan.king_round_secs,
+                    max_platform_fraction_bps: plan.max_platform_fraction_bps.unwrap_or(cfg.platform_fraction_bps),
+                    platform_receiver: plan.platform_receiver.unwrap_or(cfg.platform_receiver),
                 },
             },
         )
@@ -490,6 +499,30 @@ impl World {
         self.b.send(&[i], &[])
     }
 
+    /// Calls the burn once a minute until it really buys. After the price
+    /// has risen, the burn follows it up one 5% step per call. Returns how
+    /// many calls it took.
+    pub fn burn_until_it_buys(&mut self, mint: &Pubkey) -> u32 {
+        for n in 1..=300 {
+            let before = self.ledger(mint).pots[3];
+            let r = if self.b.curve(mint).complete { self.burn_pool(mint) } else { self.burn_curve(mint) };
+            assert!(r.is_ok(), "{}", crate::bench::logs(&r));
+            if self.ledger(mint).pots[3] < before {
+                return n;
+            }
+            self.b.wait(60);
+        }
+        panic!("the burn never bought");
+    }
+
+    pub fn close_stake(&mut self, owner: &Keypair, mint: &Pubkey) -> TxResult {
+        let i = ix(
+            burr::accounts::CloseStake { owner: owner.pubkey(), mint: *mint, stake: stake(mint, &owner.pubkey()) },
+            burr::instruction::CloseStake {},
+        );
+        self.b.send_as(Some(owner), &[i], &[])
+    }
+
     // ---- vault share ----
 
     pub fn stake_accounts(&self, owner: &Pubkey, mint: &Pubkey) -> burr::accounts::StakeCoins {
@@ -643,4 +676,18 @@ pub fn raw(accounts: impl ToAccountMetas, data: impl InstructionData) -> Instruc
 /// Burr's own error number for a named error.
 pub fn err(e: burr::error::BurrError) -> u32 {
     e as u32 + 6000
+}
+
+/// The classic token program's "hand this account to another owner".
+pub fn give_token_account_away(account: &Pubkey, owner: &Pubkey, new_owner: &Pubkey) -> Instruction {
+    let mut data = vec![6u8, 2, 1];
+    data.extend_from_slice(new_owner.as_ref());
+    Instruction {
+        program_id: TOKEN,
+        accounts: vec![
+            solana_instruction::AccountMeta::new(*account, false),
+            solana_instruction::AccountMeta::new_readonly(*owner, true),
+        ],
+        data,
+    }
 }

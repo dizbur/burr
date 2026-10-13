@@ -112,12 +112,17 @@ fn a_price_pushed_up_is_not_bought_at() {
     assert_eq!(w.b.mint_supply(&mint), supply, "nothing was burned");
     assert!(l.burn.last_time > after_first.burn.last_time, "the new price and time were recorded");
 
+    // The pushed price was not taken as the new reference: it rose by one 5% step only.
+    assert_eq!(l.burn.reference.base, after_first.burn.reference.base);
+    assert_eq!(l.burn.reference.quote as u128, after_first.burn.reference.quote as u128 * 10_500 / 10_000);
+
     // It cannot be retried at once.
     let r = w.burn_curve(&mint);
     assert_eq!(custom_code(&r), Some(err(E::BurnTooSoon)));
-    // If the price is still there one waiting time later, it is accepted as real.
+    // If the price stays, the reference climbs to it a step a minute, and then the burn buys.
     w.b.wait(60);
-    assert!(w.burn_curve(&mint).is_ok());
+    let calls = w.burn_until_it_buys(&mint);
+    assert!(calls > 5, "a rise of this size takes many steps, not one ({calls})");
     assert!(w.ledger(&mint).pots[3] < after_first.pots[3]);
     w.assert_sound(&mint);
 }
@@ -128,10 +133,8 @@ fn a_price_that_fell_is_bought_at_once() {
     let mint = coin_with_burn_pot(&mut w, 200, 10 * ZEC1);
     let t = w.trader(100 * ZEC1);
     assert!(w.buy(&t, &mint, ZEC1).is_ok());
-    // The first call sees a price well above launch: it records and skips.
-    assert!(w.burn_curve(&mint).is_ok());
-    w.b.wait(60);
-    assert!(w.burn_curve(&mint).is_ok());
+    // The price is well above launch; the burn follows it up, then buys.
+    w.burn_until_it_buys(&mint);
     let have = w.coins_of(&t.pubkey(), &mint);
     assert!(w.sell(&t, &mint, have).is_ok());
     w.b.wait(60);
@@ -148,9 +151,7 @@ fn sandwich(fee_bps: u16, attack_zec: u64) -> i128 {
     // Some ordinary trading first, so the pool is not at its starting point.
     let other = w.trader(100 * ZEC1);
     assert!(w.buy(&other, &mint, 2 * ZEC1).is_ok());
-    assert!(w.burn_curve(&mint).is_ok()); // records the new price
-    w.b.wait(60);
-    assert!(w.burn_curve(&mint).is_ok());
+    w.burn_until_it_buys(&mint);
     w.b.wait(60);
 
     let attacker = w.trader(1_000 * ZEC1);
@@ -330,4 +331,89 @@ fn the_limit_follows_the_fee_pump_fun_really_charges() {
     set_curve_fee(&mut w, &mint, 0);
     let r = w.burn_curve(&mint);
     assert_eq!(custom_code(&r), Some(err(E::NothingToBurn)));
+}
+
+/// Prints the worked figures quoted in the note for the auditor.
+/// Run with: cargo test -p burr-tests print_sandwich_figures -- --ignored --nocapture
+#[test]
+#[ignore = "prints figures; not a check"]
+fn print_sandwich_figures() {
+    println!("fee_bps, attack (ZEC units), burn spend, attacker result, loss as % of attack");
+    for fee in [50u16, 100, 200, 300] {
+        for attack in [ZEC1 / 1_000, ZEC1 / 100, ZEC1 / 20, ZEC1 / 10] {
+            let mut w = World::new();
+            let mint = coin_with_burn_pot(&mut w, fee, 50 * ZEC1);
+            let attacker = w.trader(1_000 * ZEC1);
+            let start = w.zec_of(&attacker.pubkey());
+            assert!(w.buy(&attacker, &mint, attack).is_ok());
+            let pot = w.ledger(&mint).pots[3];
+            assert!(w.burn_curve(&mint).is_ok());
+            let spent = pot - w.ledger(&mint).pots[3];
+            let coins = w.coins_of(&attacker.pubkey(), &mint);
+            assert!(w.sell(&attacker, &mint, coins).is_ok());
+            let gain = w.zec_of(&attacker.pubkey()) as i128 - start as i128;
+            println!("{fee}, {attack}, {spent}, {gain}, {:.2}%", -gain as f64 * 100.0 / attack as f64);
+        }
+    }
+}
+
+#[test]
+fn pushing_the_price_for_one_call_does_not_move_the_reference_to_it() {
+    // In one transaction: push the price up, call the burn so it "sees" the
+    // high price, sell back. A minute later the same push must still be refused.
+    let mut w = World::new();
+    let mint = coin_with_burn_pot(&mut w, 200, 50 * ZEC1);
+    let pusher = w.trader(1_000 * ZEC1);
+    let payer = w.b.payer.pubkey();
+    for round in 0..3 {
+        assert!(w.buy(&pusher, &mint, 2 * ZEC1).is_ok());
+        let pot = w.ledger(&mint).pots[3];
+        let i = kit::raw(w.burn_curve_accounts(&payer, &mint), burr::instruction::BurnCurve {});
+        assert!(w.b.send(&[i], &[]).is_ok());
+        assert_eq!(w.ledger(&mint).pots[3], pot, "round {round}: bought at a pushed price");
+        let coins = w.coins_of(&pusher.pubkey(), &mint);
+        assert!(w.sell(&pusher, &mint, coins).is_ok());
+        w.b.wait(60);
+    }
+    // Three pushes moved the reference by three 5% steps, no more.
+    let launch_price = (275_548_581u128, 1_073_000_000_000_000u128);
+    let r = w.ledger(&mint).burn.reference;
+    assert_eq!(r.base as u128, launch_price.1);
+    assert!((r.quote as u128) < launch_price.0 * 116 / 100);
+}
+
+#[test]
+fn an_empty_pot_cannot_be_used_to_move_the_reference() {
+    let mut w = World::new();
+    let mint = w.launch(&burn_plan(200));
+    w.b.wait(60);
+    let before = w.ledger(&mint).burn.reference;
+    let pusher = w.trader(100 * ZEC1);
+    assert!(w.buy(&pusher, &mint, 3 * ZEC1).is_ok());
+    let r = w.burn_curve(&mint);
+    assert_eq!(custom_code(&r), Some(err(E::NothingToBurn)));
+    assert_eq!(w.ledger(&mint).burn.reference, before);
+}
+
+#[test]
+fn liquidity_added_just_for_one_call_does_not_raise_the_limit() {
+    // The pool's figures are doubled at the same price, as a deposit of
+    // liquidity would do. The limit stays measured against the reserve
+    // recorded at the last call.
+    let mut w = World::new();
+    let mint = coin_with_burn_pot(&mut w, 200, 50 * ZEC1);
+    assert!(w.burn_curve(&mint).is_ok());
+    w.b.wait(60);
+    let recorded = w.ledger(&mint).burn.reference.quote;
+    let key = pump::curve(&mint);
+    let mut a = w.b.account(&key).unwrap();
+    for o in [8usize, 16] {
+        let v = u64::from_le_bytes(a.data[o..o + 8].try_into().unwrap());
+        a.data[o..o + 8].copy_from_slice(&(v * 2).to_le_bytes());
+    }
+    w.b.svm.set_account(key, a).unwrap();
+    let before = w.ledger(&mint).pots[3];
+    let r = w.burn_curve(&mint);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert_eq!(before - w.ledger(&mint).pots[3], recorded * 200 / 40_000);
 }

@@ -354,3 +354,74 @@ fn random_sequences_never_pay_out_more_than_came_in() {
         w.assert_sound(&mint);
     }
 }
+
+#[test]
+fn what_the_last_staker_leaves_starts_its_release_afresh() {
+    let (mut w, mint, h) = setup(2);
+    assert!(w.stake(&h[0], &mint, 1_000).is_ok());
+    let credited = fee(&mut w, &mint, ZEC1);
+    // Three quarters of the way through, the only staker leaves and another
+    // arrives in the same second.
+    w.b.wait(DAY * 3 / 4);
+    assert!(w.unstake(&h[0], &mint, 1_000).is_ok());
+    let left = w.ledger(&mint).pots[4];
+    assert!((credited / 4).abs_diff(left) <= 2);
+    assert!(w.stake(&h[1], &mint, 1_000).is_ok());
+    // A quarter of a day later they have a quarter of what was left, not all of it.
+    w.b.wait(DAY / 4);
+    let before = w.zec_of(&h[1].pubkey());
+    assert!(w.unstake(&h[1], &mint, 0).is_ok());
+    let got = w.zec_of(&h[1].pubkey()) - before;
+    assert!((left / 4).abs_diff(got) <= 2, "got {got} of {left}");
+}
+
+#[test]
+fn a_staker_who_gave_their_zec_account_away_can_still_take_coins_out() {
+    let (mut w, mint, h) = setup(1);
+    let other = w.b.wallet();
+    assert!(w.stake(&h[0], &mint, 1_000).is_ok());
+    fee(&mut w, &mint, ZEC1);
+    w.b.wait(DAY);
+    let z = ata(&h[0].pubkey(), &crate::pump::ZEC, &crate::pump::TOKEN);
+    let i = kit::give_token_account_away(&z, &h[0].pubkey(), &other.pubkey());
+    assert!(w.b.send_as(Some(&h[0]), &[i], &[]).is_ok());
+    let coins = w.coins_of(&h[0].pubkey(), &mint);
+    let r = w.unstake(&h[0], &mint, 1_000);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert_eq!(w.coins_of(&h[0].pubkey(), &mint), coins + 1_000);
+}
+
+#[test]
+fn an_empty_stake_record_can_be_closed_by_its_owner_only() {
+    let (mut w, mint, h) = setup(2);
+    assert!(w.stake(&h[0], &mint, 1_000).is_ok());
+    fee(&mut w, &mint, ZEC1);
+    w.b.wait(DAY / 2);
+    // Not while coins are in it.
+    let r = w.close_stake(&h[0], &mint);
+    assert_eq!(custom_code(&r), Some(err(E::StakeNotEmpty)));
+    assert!(w.unstake(&h[0], &mint, 1_000).is_ok());
+    // Not by someone else, even naming the owner.
+    let mut i = kit::raw(
+        burr::accounts::CloseStake { owner: h[0].pubkey(), mint, stake: kit::stake(&mint, &h[0].pubkey()) },
+        burr::instruction::CloseStake {},
+    );
+    i.accounts[0].is_signer = false;
+    assert!(w.b.send_as(Some(&h[1]), &[i], &[]).is_err());
+    let i = kit::raw(
+        burr::accounts::CloseStake { owner: h[1].pubkey(), mint, stake: kit::stake(&mint, &h[0].pubkey()) },
+        burr::instruction::CloseStake {},
+    );
+    assert!(w.b.send_as(Some(&h[1]), &[i], &[]).is_err());
+    // By its owner: the rent comes back.
+    let sol = w.b.svm.get_balance(&h[0].pubkey()).unwrap();
+    let r = w.close_stake(&h[0], &mint);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert!(w.b.svm.get_balance(&h[0].pubkey()).unwrap() > sol);
+    assert!(w.stake_of(&mint, &h[0].pubkey()).is_none());
+    // And they can come back later.
+    assert!(w.stake(&h[0], &mint, 10).is_ok());
+    assert_eq!(w.stake_of(&mint, &h[0].pubkey()).unwrap().amount, 10);
+    assert!(w.unstake(&h[0], &mint, 10).is_ok());
+    w.assert_sound(&mint);
+}

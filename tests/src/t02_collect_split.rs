@@ -304,3 +304,53 @@ fn a_pot_cannot_be_debited_below_zero() {
     l.accounted = 5;
     assert!(burr::ops::debit(&mut l, 2, 30).is_err(), "more than the ledger's total");
 }
+
+#[test]
+fn a_receiver_cannot_make_their_pot_unpayable() {
+    let mut w = World::new();
+    let receiver = w.trader(1);
+    let other = w.b.wallet();
+    let plan = LaunchPlan { creator_receiver: receiver.pubkey(), ..Default::default() };
+    let (mint, _) = coin_with_fee(&mut w, &plan);
+    assert!(w.collect_curve(&mint).is_ok());
+    // The receiver hands their ZEC account to another key.
+    let r_zec = ata(&receiver.pubkey(), &ZEC, &TOKEN);
+    let i = kit::give_token_account_away(&r_zec, &receiver.pubkey(), &other.pubkey());
+    assert!(w.b.send_as(Some(&receiver), &[i], &[]).is_ok());
+    let pot = w.ledger(&mint).pots[1];
+    let r = w.pay_out(&mint, Payee::Creator);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert_eq!(w.b.token_balance(&r_zec), 1 + pot, "paid to the same address as always");
+    assert_eq!(w.ledger(&mint).pots[1], 0);
+}
+
+#[test]
+fn a_coins_own_addresses_cannot_be_named_as_receivers() {
+    let mut w = World::new();
+    for which in 0..4 {
+        let mint = solana_keypair::Keypair::new();
+        let own = if which < 2 { kit::authority(&mint.pubkey()) } else { kit::burner(&mint.pubkey()) };
+        let mut plan = LaunchPlan::default();
+        if which % 2 == 0 {
+            plan.creator_receiver = own;
+        } else {
+            plan.give_receiver = own;
+        }
+        let payer = w.b.payer.pubkey();
+        let i = w.launch_ix(&payer, &mint.pubkey(), &plan);
+        let r = w.b.send(&[i], &[&mint]);
+        assert_eq!(custom_code(&r), Some(err(E::ReceiverNotAllowed)), "case {which}\n{}", logs(&r));
+    }
+}
+
+#[test]
+fn an_empty_pot_pays_nothing_and_makes_no_account() {
+    let mut w = World::new();
+    // No give hook: its receiver is the empty address and its pot stays empty.
+    let plan = LaunchPlan { shares: [10_000, 0, 0, 0, 0], give_receiver: Pubkey::default(), ..Default::default() };
+    let (mint, _) = coin_with_fee(&mut w, &plan);
+    assert!(w.collect_curve(&mint).is_ok());
+    let r = w.pay_out(&mint, Payee::Give);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert!(w.b.account(&ata(&Pubkey::default(), &ZEC, &TOKEN)).is_none(), "no account was made for nobody");
+}

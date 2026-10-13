@@ -41,9 +41,7 @@ fn a_coins_whole_life_and_its_record_never_changes() {
     admin_moves(&mut w);
     check(&w, "admin changes");
     w.b.wait(60);
-    assert!(w.burn_curve(&mint).is_ok()); // records the moved price
-    w.b.wait(60);
-    assert!(w.burn_curve(&mint).is_ok());
+    w.burn_until_it_buys(&mint);
     check(&w, "burn on the curve");
     for p in [Payee::Platform, Payee::Creator, Payee::Give] {
         assert!(w.pay_out(&mint, p).is_ok());
@@ -70,10 +68,8 @@ fn a_coins_whole_life_and_its_record_never_changes() {
     assert!(r.is_ok(), "{}", logs(&r));
     check(&w, "collect on the pool");
     w.b.wait(60);
-    assert!(w.burn_pool(&mint).is_ok()); // records the graduated price
-    w.b.wait(60);
     let supply = w.b.mint_supply(&mint);
-    assert!(w.burn_pool(&mint).is_ok());
+    w.burn_until_it_buys(&mint);
     assert!(w.b.mint_supply(&mint) < supply);
     check(&w, "burn on the pool");
     for p in [Payee::Platform, Payee::Creator, Payee::Give] {

@@ -34,26 +34,36 @@ fn plan(
     now: i64,
 ) -> Result<Option<(u64, u64)>> {
     require!(coin.share_of(SINK_BURN) > 0, BurrError::HookNotChosen);
+    // Nothing is recorded unless there is something to spend, so an empty
+    // pot cannot be used to move the reference price.
+    require!(ledger.pots[SINK_BURN] > 0, BurrError::NothingToBurn);
     let b = &mut ledger.burn;
     let ready = b.last_time.checked_add(coin.burn_cooldown_secs as i64).ok_or(BurrError::Overflow)?;
     require!(now >= ready, BurrError::BurnTooSoon);
     if reserves.above(&b.reference, coin.burn_price_band_bps).ok_or(BurrError::Overflow)? {
-        b.reference = reserves;
+        // Do not take the price seen now as the new reference: it may have
+        // been pushed for this one call. Raise the reference by one band
+        // only. A real rise is followed step by step, one waiting time each.
+        b.reference = b.reference.raised_by(coin.burn_price_band_bps).ok_or(BurrError::Overflow)?;
         b.last_time = now;
         emit!(BurnSkipped { mint: coin.mint });
         return Ok(None);
     }
-    let charged = u16::try_from(venue_fee_bps).map_err(|_| BurrError::Overflow)?;
+    // The limit is measured against the smaller of the reserve now and the
+    // reserve recorded last time, so liquidity added just for this call
+    // cannot raise it.
+    let charged = u16::try_from(venue_fee_bps).unwrap_or(u16::MAX);
     let spend = math::burn_spend_limit(
         ledger.pots[SINK_BURN],
-        reserves.quote,
+        reserves.quote.min(b.reference.quote),
         coin.fee_bps.min(charged),
         coin.burn_spend_divisor,
     )
     .ok_or(BurrError::Overflow)?;
-    require!(spend > 0, BurrError::NothingToBurn);
     let min_out =
         math::burn_min_out(&reserves, spend, charged, coin.burn_fee_allowance_bps).ok_or(BurrError::Overflow)?;
+    // Zero here means nothing can be spent now (no fee is being charged, or
+    // the amount is too small to buy one unit).
     require!(min_out > 0, BurrError::NothingToBurn);
     Ok(Some((spend, min_out)))
 }
