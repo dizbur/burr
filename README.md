@@ -75,8 +75,8 @@ python3 scripts/protections.py
 
 ## Deploying
 
-Not yet, and not by this repository. Before any deployment: an outside audit, a program address chosen by the owner (the one in `declare_id!` is a local test address with no key kept), and a two-of-three wallet as upgrade key and administrator.
+Not yet, and not by this repository. Before any deployment: an outside audit, a program address chosen at deployment (the one in `declare_id!` is a local test address with no key kept), and a two-of-three wallet as upgrade key and administrator.
 
 ## Licence
 
-Not yet chosen. All rights reserved until the owner picks one.
+No licence has been chosen yet. All rights reserved.
