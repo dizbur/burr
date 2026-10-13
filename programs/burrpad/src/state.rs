@@ -14,9 +14,13 @@ pub struct Config {
     /// Where the platform's share of future launches is paid.
     pub platform_receiver: Pubkey,
     /// The wallet that receives every coin's holder pot and pays holders
-    /// from it. It is read at each release, so the administrator can replace
-    /// it, for every coin at once, if its key is ever lost or stolen.
+    /// from it. It is read at each release, so replacing it reaches every
+    /// coin at once. Replacing it takes a proposal and a fixed wait.
     pub rewards_wallet: Pubkey,
+    /// The proposed next rewards wallet; the empty address when there is none.
+    pub pending_rewards_wallet: Pubkey,
+    /// When the proposed wallet may be applied.
+    pub rewards_wallet_ready_at: i64,
     /// The platform's part of a coin's fee, for future launches.
     pub platform_fraction_bps: u16,
     pub min_fee_bps: u16,

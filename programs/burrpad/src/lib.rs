@@ -37,8 +37,16 @@ pub mod burrpad {
         instructions::admin::handle_initialize(ctx, admin, platform_receiver, rewards_wallet)
     }
 
-    pub fn set_rewards_wallet(ctx: Context<AdminOnly>, wallet: Pubkey) -> Result<()> {
-        instructions::admin::handle_set_rewards_wallet(ctx, wallet)
+    pub fn propose_rewards_wallet(ctx: Context<AdminOnly>, wallet: Pubkey) -> Result<()> {
+        instructions::admin::handle_propose_rewards_wallet(ctx, wallet)
+    }
+
+    pub fn cancel_rewards_wallet(ctx: Context<AdminOnly>) -> Result<()> {
+        instructions::admin::handle_cancel_rewards_wallet(ctx)
+    }
+
+    pub fn apply_rewards_wallet(ctx: Context<AdminOnly>) -> Result<()> {
+        instructions::admin::handle_apply_rewards_wallet(ctx)
     }
 
     pub fn set_platform_fraction(ctx: Context<AdminOnly>, fraction_bps: u16) -> Result<()> {

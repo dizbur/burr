@@ -62,4 +62,8 @@ pub enum BurrpadError {
     ReceiverNotAllowed,
     #[msg("The platform's terms changed since this launch was prepared")]
     PlatformTermsChanged,
+    #[msg("No new rewards wallet has been proposed")]
+    NoRewardsWalletProposed,
+    #[msg("The proposed rewards wallet's wait is not over")]
+    RewardsWalletWaitNotOver,
 }

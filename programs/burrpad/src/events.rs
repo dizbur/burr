@@ -19,6 +19,16 @@ pub struct AdminProposed {
     pub pending_admin: Pubkey,
 }
 
+/// The administrator proposed a new rewards wallet, or cancelled a proposal
+/// (then `proposed` is the empty address). It can be applied at `ready_at`.
+#[event]
+pub struct RewardsWalletProposed {
+    pub admin: Pubkey,
+    pub current: Pubkey,
+    pub proposed: Pubkey,
+    pub ready_at: i64,
+}
+
 #[event]
 pub struct Launched {
     pub mint: Pubkey,

@@ -11,6 +11,7 @@ use solana_signer::Signer;
 
 const ZEC1: u64 = 100_000_000;
 const HALF_HOUR: i64 = 1_800;
+const DAY: i64 = 86_400;
 
 fn holders_plan() -> LaunchPlan {
     LaunchPlan { shares: [0, 0, 0, 10_000], ..Default::default() }
@@ -217,29 +218,123 @@ fn the_rewards_wallet_reaches_only_holder_pots() {
     assert!(w.b.send_as(Some(&wallet), &[i], &[]).is_err());
 }
 
+/// The bodies of the events of one kind that a transaction announced.
+fn events<T: anchor_lang::Discriminator>(r: &crate::bench::TxResult) -> Vec<Vec<u8>> {
+    use base64::Engine;
+    let logs = match r {
+        Ok(m) => &m.logs,
+        Err(e) => &e.meta.logs,
+    };
+    logs.iter()
+        .filter_map(|line| line.strip_prefix("Program data: "))
+        .filter_map(|d| base64::engine::general_purpose::STANDARD.decode(d).ok())
+        .filter(|d| d.len() >= 8 && d[..8] == T::DISCRIMINATOR[..])
+        .map(|d| d[8..].to_vec())
+        .collect()
+}
+
 #[test]
-fn the_administrator_can_replace_the_rewards_wallet_for_every_coin() {
-    // This is the power the owner accepted with this hook: it reaches coins
-    // already launched. It exists so a lost or stolen wallet can be replaced.
+fn a_new_rewards_wallet_is_proposed_in_the_open_and_waits_a_day() {
+    // Naming the rewards wallet reaches coins already launched. So it is
+    // slow: anyone watching has a day to see a change coming.
     let (mut w, mint) = setup();
     let old = w.rewards_wallet.insecure_clone();
     let new = w.b.wallet();
-    let r = w.as_admin(burrpad::instruction::SetRewardsWallet { wallet: Pubkey::default() });
+    let r = w.as_admin(burrpad::instruction::ProposeRewardsWallet { wallet: Pubkey::default() });
     assert_eq!(custom_code(&r), Some(err(E::EmptyAddress)));
-    assert!(w.as_admin(burrpad::instruction::SetRewardsWallet { wallet: new.pubkey() }).is_ok());
-    assert_eq!(w.config().rewards_wallet, new.pubkey());
+    let r = w.as_admin(burrpad::instruction::ApplyRewardsWallet {});
+    assert_eq!(custom_code(&r), Some(err(E::NoRewardsWalletProposed)), "nothing proposed, nothing to apply");
 
+    let r = w.as_admin(burrpad::instruction::ProposeRewardsWallet { wallet: new.pubkey() });
+    assert!(r.is_ok(), "{}", logs(&r));
+    let ready_at = w.b.now() + DAY;
+    let c = w.config();
+    assert_eq!((c.rewards_wallet, c.pending_rewards_wallet), (old.pubkey(), new.pubkey()));
+    assert_eq!(c.rewards_wallet_ready_at, ready_at);
+    // Announced with the new address and the time it can be applied.
+    let said = events::<burrpad::events::RewardsWalletProposed>(&r);
+    assert_eq!(said.len(), 1, "no event for the proposal");
+    assert_eq!(said[0][..32], w.admin.pubkey().to_bytes());
+    assert_eq!(said[0][32..64], old.pubkey().to_bytes());
+    assert_eq!(said[0][64..96], new.pubkey().to_bytes());
+    assert_eq!(said[0][96..104], ready_at.to_le_bytes());
+
+    // Applying early is refused, to the last second.
+    let r = w.as_admin(burrpad::instruction::ApplyRewardsWallet {});
+    assert_eq!(custom_code(&r), Some(err(E::RewardsWalletWaitNotOver)), "applied at once");
+    w.b.wait(DAY - 1);
+    let r = w.as_admin(burrpad::instruction::ApplyRewardsWallet {});
+    assert_eq!(custom_code(&r), Some(err(E::RewardsWalletWaitNotOver)), "applied a second early");
+
+    // During the wait the proposed wallet can take nothing, and a release
+    // still goes to the old wallet.
     let slot = w.slot();
-    let i = release_ix(&w, &old.pubkey(), &mint, slot, [7; 32]);
-    let r = w.b.send_as(Some(&old), &[i], &[]);
-    assert_eq!(custom_code(&r), Some(err(E::NotRewardsWallet)), "the old wallet is shut out at once");
-    let pot = w.ledger(&mint).pots[4];
     let i = release_ix(&w, &new.pubkey(), &mint, slot, [7; 32]);
+    let r = w.b.send_as(Some(&new), &[i], &[]);
+    assert_eq!(custom_code(&r), Some(err(E::NotRewardsWallet)), "the proposed wallet took a pot during the wait");
+    let pot = w.ledger(&mint).pots[4];
+    assert!(w.release_holders(&mint).is_ok());
+    assert_eq!((w.zec_of(&old.pubkey()), w.zec_of(&new.pubkey())), (pot, 0));
+
+    w.b.wait(1);
+    assert!(w.as_admin(burrpad::instruction::ApplyRewardsWallet {}).is_ok());
+    let c = w.config();
+    assert_eq!(
+        (c.rewards_wallet, c.pending_rewards_wallet, c.rewards_wallet_ready_at),
+        (new.pubkey(), Pubkey::default(), 0)
+    );
+    let r = w.as_admin(burrpad::instruction::ApplyRewardsWallet {});
+    assert_eq!(custom_code(&r), Some(err(E::NoRewardsWalletProposed)), "applied twice");
+
+    // From then on the old wallet is shut out and the new one is paid.
+    fee(&mut w, &mint, ZEC1);
+    w.b.wait(HALF_HOUR);
+    let slot = w.slot();
+    let i = release_ix(&w, &old.pubkey(), &mint, slot, [8; 32]);
+    let r = w.b.send_as(Some(&old), &[i], &[]);
+    assert_eq!(custom_code(&r), Some(err(E::NotRewardsWallet)));
+    let pot = w.ledger(&mint).pots[4];
+    let i = release_ix(&w, &new.pubkey(), &mint, slot, [8; 32]);
     let r = w.b.send_as(Some(&new), &[i], &[]);
     assert!(r.is_ok(), "{}", logs(&r));
     assert_eq!(w.zec_of(&new.pubkey()), pot);
     // It did not change the coin's record.
     assert_eq!(w.coin(&mint).shares, [0, 0, 0, 10_000]);
+}
+
+#[test]
+fn a_proposed_rewards_wallet_can_be_cancelled_or_replaced() {
+    let (mut w, mint) = setup();
+    let old = w.rewards_wallet.pubkey();
+    let (first, second) = (w.b.wallet(), w.b.wallet());
+    let r = w.as_admin(burrpad::instruction::CancelRewardsWallet {});
+    assert_eq!(custom_code(&r), Some(err(E::NoRewardsWalletProposed)), "nothing to cancel");
+
+    // Cancelled: a day later there is nothing to apply.
+    assert!(w.as_admin(burrpad::instruction::ProposeRewardsWallet { wallet: first.pubkey() }).is_ok());
+    let r = w.as_admin(burrpad::instruction::CancelRewardsWallet {});
+    assert!(r.is_ok(), "{}", logs(&r));
+    let said = events::<burrpad::events::RewardsWalletProposed>(&r);
+    assert_eq!(said.len(), 1, "no event for the cancelling");
+    assert_eq!(said[0][64..96], [0u8; 32]);
+    let c = w.config();
+    assert_eq!((c.pending_rewards_wallet, c.rewards_wallet_ready_at), (Pubkey::default(), 0));
+    w.b.wait(DAY);
+    let r = w.as_admin(burrpad::instruction::ApplyRewardsWallet {});
+    assert_eq!(custom_code(&r), Some(err(E::NoRewardsWalletProposed)), "a cancelled proposal was applied");
+    assert_eq!(w.config().rewards_wallet, old);
+
+    // Replaced: the second proposal starts its own full wait.
+    assert!(w.as_admin(burrpad::instruction::ProposeRewardsWallet { wallet: first.pubkey() }).is_ok());
+    w.b.wait(DAY - 1);
+    assert!(w.as_admin(burrpad::instruction::ProposeRewardsWallet { wallet: second.pubkey() }).is_ok());
+    w.b.wait(1);
+    let r = w.as_admin(burrpad::instruction::ApplyRewardsWallet {});
+    assert_eq!(custom_code(&r), Some(err(E::RewardsWalletWaitNotOver)), "the wait did not start again");
+    w.b.wait(DAY - 1);
+    assert!(w.as_admin(burrpad::instruction::ApplyRewardsWallet {}).is_ok());
+    assert_eq!(w.config().rewards_wallet, second.pubkey());
+    assert!(w.ledger(&mint).pots[4] > 0);
 }
 
 #[test]

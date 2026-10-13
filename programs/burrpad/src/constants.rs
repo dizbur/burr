@@ -45,6 +45,10 @@ pub const BURN_FEE_ALLOWANCE_BPS: u16 = 200;
 /// Buy back and burn: spend per call is at most `reserve * fee_bps / (BPS * this)`.
 pub const BURN_SPEND_DIVISOR: u16 = 4;
 
+/// Holders: seconds a newly proposed rewards wallet must wait before it can
+/// take the place of the current one.
+pub const REWARDS_WALLET_WAIT_SECS: i64 = 86_400;
+
 /// Holders: seconds that must pass between two releases of a coin's holder pot.
 pub const HOLDERS_RELEASE_INTERVAL_SECS: u32 = 1_800;
 

@@ -1,11 +1,12 @@
 //! The administrator. It can set four things for future launches, switch new
 //! launches off and on, and name the wallet that receives holder pots. That
-//! last power reaches existing coins: see `holders.rs`. It can touch no other
-//! pot and no coin's record.
+//! last power reaches existing coins (see `holders.rs`), so it is slow: a new
+//! wallet is proposed in the open and can be applied only after a fixed wait.
+//! The administrator can touch no other pot and no coin's record.
 
 use crate::constants::*;
 use crate::error::BurrpadError;
-use crate::events::{AdminProposed, ConfigChanged};
+use crate::events::{AdminProposed, ConfigChanged, RewardsWalletProposed};
 use crate::state::Config;
 use anchor_lang::prelude::*;
 
@@ -43,6 +44,8 @@ pub fn handle_initialize(
     c.pending_admin = Pubkey::default();
     c.platform_receiver = platform_receiver;
     c.rewards_wallet = rewards_wallet;
+    c.pending_rewards_wallet = Pubkey::default();
+    c.rewards_wallet_ready_at = 0;
     c.platform_fraction_bps = START_PLATFORM_FRACTION_BPS;
     c.min_fee_bps = START_MIN_FEE_BPS;
     c.max_fee_bps = START_MAX_FEE_BPS;
@@ -92,11 +95,45 @@ pub fn handle_set_platform_receiver(ctx: Context<AdminOnly>, receiver: Pubkey) -
     Ok(())
 }
 
-/// Replaces the wallet that receives holder pots, for every coin, from now on.
-pub fn handle_set_rewards_wallet(ctx: Context<AdminOnly>, wallet: Pubkey) -> Result<()> {
+/// First step of replacing the wallet that receives holder pots. The new
+/// address is announced now and can be applied only after the wait. A second
+/// proposal replaces the first and starts the wait again.
+pub fn handle_propose_rewards_wallet(ctx: Context<AdminOnly>, wallet: Pubkey) -> Result<()> {
     require!(wallet != Pubkey::default(), BurrpadError::EmptyAddress);
-    ctx.accounts.config.rewards_wallet = wallet;
-    announce(&ctx.accounts.config);
+    let ready_at = Clock::get()?.unix_timestamp.checked_add(REWARDS_WALLET_WAIT_SECS).ok_or(BurrpadError::Overflow)?;
+    let c = &mut ctx.accounts.config;
+    c.pending_rewards_wallet = wallet;
+    c.rewards_wallet_ready_at = ready_at;
+    emit!(RewardsWalletProposed { admin: c.admin, current: c.rewards_wallet, proposed: wallet, ready_at });
+    Ok(())
+}
+
+/// Withdraws a proposed rewards wallet.
+pub fn handle_cancel_rewards_wallet(ctx: Context<AdminOnly>) -> Result<()> {
+    let c = &mut ctx.accounts.config;
+    require!(c.pending_rewards_wallet != Pubkey::default(), BurrpadError::NoRewardsWalletProposed);
+    c.pending_rewards_wallet = Pubkey::default();
+    c.rewards_wallet_ready_at = 0;
+    emit!(RewardsWalletProposed {
+        admin: c.admin,
+        current: c.rewards_wallet,
+        proposed: Pubkey::default(),
+        ready_at: 0
+    });
+    Ok(())
+}
+
+/// Second step: the proposed wallet replaces the current one, for every
+/// coin, from now on. Only once the wait is over.
+pub fn handle_apply_rewards_wallet(ctx: Context<AdminOnly>) -> Result<()> {
+    let now = Clock::get()?.unix_timestamp;
+    let c = &mut ctx.accounts.config;
+    require!(c.pending_rewards_wallet != Pubkey::default(), BurrpadError::NoRewardsWalletProposed);
+    require!(now >= c.rewards_wallet_ready_at, BurrpadError::RewardsWalletWaitNotOver);
+    c.rewards_wallet = c.pending_rewards_wallet;
+    c.pending_rewards_wallet = Pubkey::default();
+    c.rewards_wallet_ready_at = 0;
+    announce(c);
     Ok(())
 }
 
