@@ -11,3 +11,9 @@ mod t00_pump_alone;
 mod t01_frame;
 #[cfg(test)]
 mod t02_collect_split;
+#[cfg(test)]
+mod t03_burn;
+#[cfg(test)]
+mod t04_vault_share;
+#[cfg(test)]
+mod t05_king;
