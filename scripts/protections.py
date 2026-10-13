@@ -498,7 +498,7 @@ def auto_entries():
                 a, b = body_start + am.start(), body_start + attr_end
                 # A few are held by a sharper test than the general substitution one.
                 test_for = {
-                    ("PayOut", "vault"): "t15_random_sequences::no_substituted_account_moves_money_wrongly",
+                    ("PayOut", "vault"): "t15_random_sequences::the_books_close_after_every_step_of_any_sequence",
                 }.get((struct, field), test)
                 out.append(dict(
                     id=f"X.{struct}.{field}", what=f"{struct}: `{field}` must be the right account",
