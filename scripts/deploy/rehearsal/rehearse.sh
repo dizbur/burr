@@ -128,7 +128,7 @@ node "$kit/initialize.mjs" --upgrade-key "$(key deployer)" --platform-receiver "
 step "6. the address table"
 node "$kit/address-table.mjs" --payer "$(key deployer)"
 
-verify() { node "$kit/verify.mjs" --wallet "$(addr "$1")" --platform-receiver "$(addr platform)" --rewards-wallet "$(addr rewards)"; }
+verify() { node "$kit/verify.mjs" --wallet "$(addr "$1")" --platform-receiver "$(addr platform)" --rewards-wallet "$(addr rewards)" ${2:+--fee-range "$2"}; }
 step "7. read everything back (one wallet is upgrade key and administrator, as in the first tests)"
 verify deployer
 echo "after set-up the deploy wallet has $(sol deployer)"
@@ -143,6 +143,17 @@ echo "the first half cost: from $before to $(sol deployer)"
 step "9. upgrade the program in place, and read it back"
 quiet_upload in_copy ./scripts/deploy/upgrade.sh --plain --upgrade-key "$(key deployer)"
 echo "deploy wallet after the upgrade: $(sol deployer)"
+
+step "9b. the range of fees a launcher may pick"
+echo "-- values outside the limits are refused before anything is sent:"
+for bad in "--min 5 --max 300 --default 200" "--min 200 --max 301 --default 200" "--min 200 --max 300 --default 150"; do
+  # shellcheck disable=SC2086
+  if node "$kit/admin.mjs" set-fee-range $bad --admin-key "$(key deployer)" > "$work/again.log" 2>&1; then echo "FAIL  accepted: $bad"; exit 1; else grep STOPPED "$work/again.log"; fi
+done
+echo "PASS  all refused"
+node "$kit/admin.mjs" set-fee-range --min 200 --max 300 --default 200 --admin-key "$(key deployer)" | grep -E "^(PASS|Before|After|        )"
+node "$kit/admin.mjs" set-platform-fraction 5000 --admin-key "$(key deployer)" | grep -E "^(PASS|After)"
+if node "$kit/admin.mjs" set-platform-fraction 2000 --admin-key "$(key deployer)" > "$work/again.log" 2>&1; then echo "FAIL  a fraction under a quarter was accepted"; exit 1; else grep STOPPED "$work/again.log"; echo "PASS  refused"; fi
 
 step "10. stop everything: the two pause switches"
 node "$kit/admin.mjs" pause-launches --admin-key "$(key deployer)"
@@ -193,7 +204,7 @@ sleep 2
 node "$kit/verify-code.mjs"
 
 step "14. read everything back once more"
-verify wallet
+verify wallet 200,300,200
 
 step "REHEARSAL PASSED"
 rm -rf "$work/src/target" "$work/ledger"

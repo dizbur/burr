@@ -1,14 +1,17 @@
 // Reads everything back from the network and prints PASS or FAIL per item.
 // Sends nothing and needs no key.
 //   node scripts/deploy/verify.mjs --wallet <the address that should hold the upgrade key and the administrator role> \
-//        --platform-receiver <address> --rewards-wallet <address> [--table <address>] [--mainnet yes]
+//        --platform-receiver <address> --rewards-wallet <address> [--table <address>] [--fee-range 200,300,200] [--mainnet yes]
 import { PublicKey } from "@solana/web3.js";
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { address, ata, BUYBACK, checker, configAddress, connect, fixedAccounts, loadIdl, need, options, pda, programDataAddress,
   PUMP, PUMP_AMM, PUMP_FEES, readAccount, readOut, ROOT, sha256, TOKEN, ZEC } from "./lib.mjs";
 
-const opts = options(["url", "wallet", "platform-receiver", "rewards-wallet", "table", "mainnet"]);
+const opts = options(["url", "wallet", "platform-receiver", "rewards-wallet", "table", "fee-range", "mainnet"]);
+// The fees a launcher may pick: as the program starts with, unless you changed them and say so (--fee-range 200,300,200).
+const feeRange = (opts["fee-range"] ?? "50,300,200").split(",").map(Number);
+const pct = (bps) => `${(bps / 100).toFixed(2)}%`;
 const conn = await connect(opts);
 const idl = loadIdl();
 const wallet = address(need(opts, "wallet"), "--wallet").toBase58();
@@ -44,7 +47,7 @@ if (t.check("initialised", !!c)) {
   t.eq("rewards wallet", c.rewards_wallet, rewardsWallet);
   t.eq("no rewards wallet change pending", c.pending_rewards_wallet, NONE);
   t.eq("the platform's share is one half", c.platform_fraction_bps, 5000);
-  t.eq("fee range 0.50% to 3.00%, first offered 2.00%", [c.min_fee_bps, c.max_fee_bps, c.default_fee_bps], [50, 300, 200]);
+  t.eq(`fees a launcher may pick: ${pct(feeRange[0])} to ${pct(feeRange[1])}, first offered ${pct(feeRange[2])}`, [c.min_fee_bps, c.max_fee_bps, c.default_fee_bps], feeRange);
   t.eq("launches are on", c.launches_paused, false);
   t.eq("holder releases are on", c.holder_releases_paused, false);
   t.check("the three wallets are three different addresses", new Set([wallet, platformReceiver, rewardsWallet]).size === 3);

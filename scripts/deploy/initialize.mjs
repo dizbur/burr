@@ -46,7 +46,8 @@ if (!existing) t.eq("administrator is the upgrade key, for now", c.admin, key.pu
 t.eq("platform receiver", c.platform_receiver, platformReceiver.toBase58());
 t.eq("rewards wallet", c.rewards_wallet, rewardsWallet.toBase58());
 t.eq("platform's share is one half", c.platform_fraction_bps, 5000);
-t.eq("fee range", [c.min_fee_bps, c.max_fee_bps, c.default_fee_bps], [50, 300, 200]);
+if (!existing) t.eq("fee range", [c.min_fee_bps, c.max_fee_bps, c.default_fee_bps], [50, 300, 200]);
+else console.log(`      fees a launcher may pick now: ${c.min_fee_bps}, ${c.max_fee_bps}, first offered ${c.default_fee_bps} (hundredths of a percent)`);
 t.eq("launches on", c.launches_paused, false);
 t.eq("holder releases on", c.holder_releases_paused, false);
 writeOut(conn.outName, { program: idl.programId.toBase58(), config: config.toBase58() });
