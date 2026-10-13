@@ -42,7 +42,6 @@ COLLECT = "instructions/collect.rs"
 PAY = "instructions/pay_out.rs"
 BURN = "instructions/burn.rs"
 VS = "instructions/vault_share.rs"
-KING = "instructions/king.rs"
 
 MANUAL = [
     # ---- the administrator ----
@@ -101,10 +100,6 @@ MANUAL = [
     M("L6", "A chosen give hook needs a receiver", LAUNCH,
       "args.shares[SINK_GIVE - 1] == 0 || args.give_receiver != Pubkey::default()", "true",
       "launch_refuses_bad_plans"),
-    M("L7", "A king round cannot be shorter than 5 minutes", LAUNCH,
-      "(KING_MIN_ROUND_SECS..=KING_MAX_ROUND_SECS)", "(0..=KING_MAX_ROUND_SECS)", "launch_refuses_bad_plans"),
-    M("L8", "A king round cannot be longer than 7 days", LAUNCH,
-      "(KING_MIN_ROUND_SECS..=KING_MAX_ROUND_SECS)", "(KING_MIN_ROUND_SECS..=u32::MAX)", "launch_refuses_bad_plans"),
     M("L9", "Name, ticker and link lengths are checked before calling pump.fun", LAUNCH,
       "args.name.len() <= MAX_NAME_LEN && ", "", "launch_refuses_bad_plans"),
     M("L10", "After the call: the coin's creator is our authority", LAUNCH,
@@ -246,7 +241,7 @@ MANUAL = [
 
     M("P2", "A payout goes only to the receiver's standard ZEC account, fixed by its address", "ops.rs",
       "require_keys_eq!(*p.destination.key, expected, BurrError::WrongReceiver);", "",
-      "t11_substitution", "swapping (receiver_zec|winner_zec|owner_zec)"),
+      "t11_substitution", "swapping (receiver_zec|owner_zec)"),
     M("P3", "An empty pot pays nothing and makes no account", "ops.rs",
       "    if amount == 0 {\n        return Ok(());\n    }\n    if p.destination.data_is_empty()", "    if p.destination.data_is_empty()",
       "an_empty_pot_pays_nothing_and_makes_no_account"),
@@ -366,43 +361,6 @@ MANUAL = [
     M("V15", "A stake record can be closed only when it is empty", VS,
       "require!(s.amount == 0 && s.owed == 0, BurrError::StakeNotEmpty);", "",
       "an_empty_stake_record_can_be_closed_by_its_owner_only"),
-
-    # ---- king of the hill ----
-    M("K1", "A coin without the king hook takes no king buys", KING,
-      "require!(coin.share_of(SINK_KING) > 0, BurrError::HookNotChosen);", "",
-      "king_buys_need_the_hook_and_cannot_use_another_coins_accounts"),
-    M("K2", "A finished round must be settled before the next king buy", KING,
-      "require!(k.leader == Pubkey::default(), BurrError::KingSettleFirst);", "",
-      "a_buy_in_the_last_second_counts_and_one_second_later_does_not"),
-    M("K3", "A tie does not take the lead", KING, "let leads = spent > k.leader_amount;",
-      "let leads = spent >= k.leader_amount;", "a_tie_does_not_take_the_lead"),
-    M("K4", "A buy that spent nothing is not a buy", KING, "spent > 0 && received > 0", "received > 0",
-      "a_king_buy_counts_only_what_really_happened", "gave coins and took no ZEC"),
-    M("K5", "A buy that received nothing is not a buy", KING, "spent > 0 && received > 0", "spent > 0",
-      "a_king_buy_counts_only_what_really_happened", "took the ZEC and gave nothing"),
-    M("K6", "The buy-back receiver is checked before the curve king buy", KING,
-      "pump::check_buyback_recipient(\n        &a.pump_global.to_account_info(),\n        &pump::PUMP_ID,\n        &pump::ACC_GLOBAL,\n        pump::GLOBAL_BUYBACK_OFFSET,\n        &a.buyback_fee_recipient.to_account_info(),\n        &ZEC_MINT,\n        &a.token_program.key(),\n    )?;",
-      "", "t11_substitution::king_buy_curve", "swapping buyback_fee_recipient"),
-    M("K7", "The buy-back receiver is checked before the pool king buy", KING,
-      "pump::check_buyback_recipient(\n        &a.amm_global_config.to_account_info(),\n        &pump::PUMP_AMM_ID,\n        &pump::ACC_AMM_GLOBAL_CONFIG,\n        pump::AMM_GLOBAL_BUYBACK_OFFSET,\n        &a.buyback_fee_recipient.to_account_info(),\n        &ZEC_MINT,\n        &a.token_program.key(),\n    )?;",
-      "", "t11_substitution::king_buy_pool", "swapping buyback_fee_recipient"),
-    M("K8", "A round cannot be settled before it ends", KING,
-      "round > ledger.king.round && ledger.king.leader != Pubkey::default()", "ledger.king.leader != Pubkey::default()",
-      "settling_is_open_to_anyone_once_and_only_after_the_round"),
-    M("K9", "A round with no leader has nothing to settle", KING,
-      "round > ledger.king.round && ledger.king.leader != Pubkey::default()", "round > ledger.king.round",
-      "a_round_with_no_buys_carries_its_pot_forward"),
-    M("K10", "The king pot is emptied in the ledger when paid", KING,
-      "ops::debit(ledger, SINK_KING, amount)?;", "", "the_largest_buy_through_burr_leads_and_wins_the_pot"),
-    M("K11", "The lead is cleared when a round is settled", KING,
-      "    ledger.king.leader = Pubkey::default();\n", "", "the_largest_buy_through_burr_leads_and_wins_the_pot"),
-    M("K12", "The leader's amount is cleared when a round is settled", KING,
-      "    ledger.king.leader_amount = 0;\n    ledger.king.round = round;", "    ledger.king.round = round;",
-      "after_a_round_is_settled_any_buy_leads_the_next"),
-    M("K13", "The size of a buy is measured from the buyer's ZEC balance after the call", KING,
-      "    ctx.accounts.buyer_zec.reload()?;\n", "", "the_largest_buy_through_burr_leads_and_wins_the_pot", nth=0),
-    M("K14", "The size of a pool buy is measured from the buyer's ZEC balance after the call", KING,
-      "    ctx.accounts.buyer_zec.reload()?;\n", "", "king_of_the_hill_works_on_the_pool", nth=1),
 ]
 
 # ---------------------------------------------------------------------------
@@ -413,8 +371,7 @@ MANUAL = [
 STRUCT_TEST = {
     "Launch": "launch", "SplitOnly": "split", "CollectCurve": "collect_curve", "CollectPool": "collect_pool",
     "PayOut": "pay_out", "BurnCurve": "burn_curve", "BurnPool": "burn_pool", "StakeCoins": "stake",
-    "UnstakeCoins": "unstake", "KingBuyCurve": "king_buy_curve", "KingBuyPool": "king_buy_pool",
-    "KingSettle": "king_settle",
+    "UnstakeCoins": "unstake",
 }
 CONSTRAINT_KEYS = ("seeds", "bump", "address", "associated_token::", "token::", "mint::", "has_one", "constraint")
 
@@ -643,7 +600,7 @@ GROUPS = [
     ("Z", "Pairs of checks that cover the same thing, removed together"),
     ("A", "The administrator"), ("L", "Launch"), ("N", "The coin's mint"), ("R", "Reading pump.fun's accounts"),
     ("C", "Collect and split"), ("P", "Payouts"), ("B", "Buy back and burn"), ("V", "Vault share"),
-    ("K", "King of the hill"), ("X", "Every account is the one it should be"), ("Y", "Every program is the real one"),
+    ("X", "Every account is the one it should be"), ("Y", "Every program is the real one"),
 ]
 
 

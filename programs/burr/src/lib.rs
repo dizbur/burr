@@ -103,18 +103,4 @@ pub mod burr {
     pub fn close_stake(ctx: Context<CloseStake>) -> Result<()> {
         instructions::vault_share::handle_close_stake(ctx)
     }
-
-    // ---- king of the hill ----
-
-    pub fn king_buy_curve(ctx: Context<KingBuyCurve>, quote_in: u64, min_out: u64) -> Result<()> {
-        instructions::king::handle_king_buy_curve(ctx, quote_in, min_out)
-    }
-
-    pub fn king_buy_pool(ctx: Context<KingBuyPool>, quote_in: u64, min_out: u64) -> Result<()> {
-        instructions::king::handle_king_buy_pool(ctx, quote_in, min_out)
-    }
-
-    pub fn king_settle(ctx: Context<KingSettle>) -> Result<()> {
-        instructions::king::handle_king_settle(ctx)
-    }
 }

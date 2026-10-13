@@ -46,14 +46,13 @@ fn ix(accounts: impl ToAccountMetas, data: impl InstructionData) -> Instruction 
     Instruction { program_id: BURR, accounts: accounts.to_account_metas(None), data: data.data() }
 }
 
-/// What a launch asks for. Shares in order: creator, give, burn, vault share, king.
+/// What a launch asks for. Shares in order: creator, give, burn, vault share.
 #[derive(Clone)]
 pub struct LaunchPlan {
     pub fee_bps: u16,
-    pub shares: [u16; 5],
+    pub shares: [u16; 4],
     pub creator_receiver: Pubkey,
     pub give_receiver: Pubkey,
-    pub king_round_secs: u32,
     pub name: String,
     /// The platform terms the launcher agrees to; `None` means those in force.
     pub max_platform_fraction_bps: Option<u16>,
@@ -64,10 +63,9 @@ impl Default for LaunchPlan {
     fn default() -> Self {
         Self {
             fee_bps: 200,
-            shares: [2_000, 2_000, 2_000, 2_000, 2_000],
+            shares: [2_500, 2_500, 2_500, 2_500],
             creator_receiver: Pubkey::new_unique(),
             give_receiver: Pubkey::new_unique(),
-            king_round_secs: 3_600,
             name: "Test".into(),
             max_platform_fraction_bps: None,
             platform_receiver: None,
@@ -204,7 +202,6 @@ impl World {
                     shares: plan.shares,
                     creator_receiver: plan.creator_receiver,
                     give_receiver: plan.give_receiver,
-                    king_round_secs: plan.king_round_secs,
                     max_platform_fraction_bps: plan.max_platform_fraction_bps.unwrap_or(cfg.platform_fraction_bps),
                     platform_receiver: plan.platform_receiver.unwrap_or(cfg.platform_receiver),
                 },
@@ -267,9 +264,9 @@ impl World {
         let pots: u128 = l.pots.iter().map(|p| *p as u128).sum();
         assert!(self.vault_balance(mint) >= l.accounted, "vault below accounted");
         assert!(pots <= l.accounted as u128, "pots above accounted");
-        assert!(l.accounted as u128 - pots < 6, "carry too large");
+        assert!(l.accounted as u128 - pots < 5, "carry too large");
         let credited: u128 = l.credited.iter().sum();
-        assert!(credited <= l.total_split && l.total_split - credited < 6, "credited does not match total");
+        assert!(credited <= l.total_split && l.total_split - credited < 5, "credited does not match total");
     }
 
     // ---- trades made straight on pump.fun, as an ordinary trader would ----
@@ -579,97 +576,6 @@ impl World {
     pub fn unstake(&mut self, owner: &Keypair, mint: &Pubkey, amount: u64) -> TxResult {
         let i = self.unstake_ix(&owner.pubkey(), mint, amount);
         self.b.send_as(Some(owner), &[i], &[])
-    }
-
-    // ---- king of the hill ----
-
-    pub fn king_buy_curve_accounts(&self, buyer: &Pubkey, mint: &Pubkey) -> burr::accounts::KingBuyCurve {
-        let curve = pump::curve(mint);
-        burr::accounts::KingBuyCurve {
-            buyer: *buyer,
-            mint: *mint,
-            coin: coin(mint),
-            ledger: ledger(mint),
-            zec_mint: ZEC,
-            buyer_coin: ata(buyer, mint, &TOKEN_2022),
-            buyer_zec: ata(buyer, &ZEC, &TOKEN),
-            pump_global: pump::global(),
-            bonding_curve: curve,
-            associated_base_bonding_curve: ata(&curve, mint, &TOKEN_2022),
-            associated_quote_bonding_curve: ata(&curve, &ZEC, &TOKEN),
-            user_volume: pump::user_volume(buyer),
-            fee_config: pump::fee_config(),
-            buyback_fee_recipient: ata(&BUYBACK, &ZEC, &TOKEN),
-            pump_event_authority: pump::event_authority(),
-            pump_program: PUMP,
-            token_program: TOKEN,
-            token_2022_program: TOKEN_2022,
-            associated_token_program: ATA_PROGRAM,
-            system_program: SYSTEM,
-        }
-    }
-    pub fn king_buy_curve_ix(&self, buyer: &Pubkey, mint: &Pubkey, zec: u64) -> Instruction {
-        ix(self.king_buy_curve_accounts(buyer, mint), burr::instruction::KingBuyCurve { quote_in: zec, min_out: 1 })
-    }
-    pub fn king_buy_curve(&mut self, buyer: &Keypair, mint: &Pubkey, zec: u64) -> TxResult {
-        let i = self.king_buy_curve_ix(&buyer.pubkey(), mint, zec);
-        self.b.send_as(Some(buyer), &[i], &[])
-    }
-
-    pub fn king_buy_pool_accounts(&self, buyer: &Pubkey, mint: &Pubkey) -> burr::accounts::KingBuyPool {
-        let pool = pump::pool(mint);
-        burr::accounts::KingBuyPool {
-            buyer: *buyer,
-            mint: *mint,
-            coin: coin(mint),
-            ledger: ledger(mint),
-            zec_mint: ZEC,
-            buyer_coin: ata(buyer, mint, &TOKEN_2022),
-            buyer_zec: ata(buyer, &ZEC, &TOKEN),
-            amm_global_config: pump::amm_global_config(),
-            pool_authority: pump::pool_authority(mint),
-            pool,
-            pool_base_token_account: ata(&pool, mint, &TOKEN_2022),
-            pool_quote_token_account: ata(&pool, &ZEC, &TOKEN),
-            user_volume: pda(&[b"user_volume_accumulator", buyer.as_ref()], &PUMP_AMM),
-            fee_config: pda(&[b"fee_config", PUMP_AMM.as_ref()], &PUMP_FEES),
-            buyback_fee_recipient: ata(&BUYBACK, &ZEC, &TOKEN),
-            amm_event_authority: pump::amm_event_authority(),
-            amm_program: PUMP_AMM,
-            token_program: TOKEN,
-            token_2022_program: TOKEN_2022,
-            associated_token_program: ATA_PROGRAM,
-            system_program: SYSTEM,
-        }
-    }
-    pub fn king_buy_pool(&mut self, buyer: &Keypair, mint: &Pubkey, zec: u64) -> TxResult {
-        let i = ix(
-            self.king_buy_pool_accounts(&buyer.pubkey(), mint),
-            burr::instruction::KingBuyPool { quote_in: zec, min_out: 1 },
-        );
-        self.b.send_as(Some(buyer), &[i], &[])
-    }
-
-    pub fn king_settle_accounts(&self, payer: &Pubkey, mint: &Pubkey, winner: &Pubkey) -> burr::accounts::KingSettle {
-        burr::accounts::KingSettle {
-            payer: *payer,
-            mint: *mint,
-            coin: coin(mint),
-            ledger: ledger(mint),
-            authority: authority(mint),
-            vault: vault(mint),
-            zec_mint: ZEC,
-            winner: *winner,
-            winner_zec: ata(winner, &ZEC, &TOKEN),
-            token_program: TOKEN,
-            associated_token_program: ATA_PROGRAM,
-            system_program: SYSTEM,
-        }
-    }
-    pub fn king_settle(&mut self, mint: &Pubkey) -> TxResult {
-        let winner = self.ledger(mint).king.leader;
-        let i = ix(self.king_settle_accounts(&self.b.payer.pubkey(), mint, &winner), burr::instruction::KingSettle {});
-        self.b.send(&[i], &[])
     }
 }
 

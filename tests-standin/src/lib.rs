@@ -32,7 +32,6 @@ pub const BUY_TAKES_GIVES_NOTHING: u8 = 20;
 pub const BUY_GIVES_ONE_TOO_FEW: u8 = 21;
 pub const BUY_DOES_NOTHING: u8 = 22;
 pub const BUY_TAKES_EVERYTHING: u8 = 23;
-pub const BUY_GIVES_FOR_FREE: u8 = 24;
 pub const BUY_HONEST: u8 = 25;
 pub const BUY_GIVES_A_CRUMB: u8 = 26;
 
@@ -174,7 +173,6 @@ fn trade<'a>(
         BUY_GIVES_ONE_TOO_FEW => (quote_in, min_out.saturating_sub(1)),
         BUY_DOES_NOTHING => (0, 0),
         BUY_TAKES_EVERYTHING => (all, min_out),
-        BUY_GIVES_FOR_FREE => (0, min_out.max(1_000)),
         BUY_HONEST => (quote_in, min_out),
         BUY_GIVES_A_CRUMB => (quote_in, 1_000),
         _ => return Err(ProgramError::InvalidArgument),

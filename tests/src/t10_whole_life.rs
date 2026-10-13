@@ -13,7 +13,7 @@ const ZEC1: u64 = 100_000_000;
 #[test]
 fn a_coins_whole_life_and_its_record_never_changes() {
     let mut w = World::new();
-    let plan = LaunchPlan { king_round_secs: 600, ..Default::default() };
+    let plan = LaunchPlan::default();
     let mint = w.launch(&plan);
     let record = w.b.account(&kit::coin(&mint)).unwrap().data;
     let check = |w: &World, at: &str| {
@@ -32,7 +32,7 @@ fn a_coins_whole_life_and_its_record_never_changes() {
 
     // On the curve.
     assert!(w.buy(&a, &mint, ZEC1 / 2).is_ok());
-    assert!(w.king_buy_curve(&b, &mint, ZEC1 / 4).is_ok());
+    assert!(w.buy(&b, &mint, ZEC1 / 4).is_ok());
     let staked = w.coins_of(&a.pubkey(), &mint) / 2;
     assert!(w.stake(&a, &mint, staked).is_ok());
     check(&w, "stake");
@@ -47,9 +47,6 @@ fn a_coins_whole_life_and_its_record_never_changes() {
         assert!(w.pay_out(&mint, p).is_ok());
     }
     check(&w, "payouts");
-    w.b.wait(600);
-    assert!(w.king_settle(&mint).is_ok());
-    check(&w, "king settle");
     assert!(w.zec_of(&plan.creator_receiver) > 0 && w.zec_of(&plan.give_receiver) > 0);
     assert!(w.zec_of(&w.platform_receiver) > 0, "the platform's part went where the record says");
     assert_eq!(w.zec_of(&w.admin.pubkey()), 0, "not to the receiver set afterwards");
@@ -62,7 +59,7 @@ fn a_coins_whole_life_and_its_record_never_changes() {
     assert!(w.pool_buy(&c, &mint, ZEC1).is_ok());
     let have = w.coins_of(&c.pubkey(), &mint);
     assert!(w.pool_sell(&c, &mint, have / 2).is_ok());
-    assert!(w.king_buy_pool(&c, &mint, ZEC1 / 3).is_ok());
+    assert!(w.pool_buy(&c, &mint, ZEC1 / 3).is_ok());
     assert!(w.collect_curve(&mint).is_ok());
     let r = w.collect_pool(&mint);
     assert!(r.is_ok(), "{}", logs(&r));
@@ -75,10 +72,6 @@ fn a_coins_whole_life_and_its_record_never_changes() {
     for p in [Payee::Platform, Payee::Creator, Payee::Give] {
         assert!(w.pay_out(&mint, p).is_ok());
     }
-    w.b.wait(600);
-    let before = w.zec_of(&c.pubkey());
-    assert!(w.king_settle(&mint).is_ok());
-    assert!(w.zec_of(&c.pubkey()) > before);
     w.b.wait(86_400);
     let before = w.zec_of(&a.pubkey());
     assert!(w.unstake(&a, &mint, staked).is_ok());
@@ -87,6 +80,6 @@ fn a_coins_whole_life_and_its_record_never_changes() {
 
     // What is left in the vault is only what the ledger says is still owed.
     let l = w.ledger(&mint);
-    assert_eq!(l.pots[0] + l.pots[1] + l.pots[2] + l.pots[5], 0);
+    assert_eq!(l.pots[0] + l.pots[1] + l.pots[2], 0);
     assert_eq!(w.vault_balance(&mint), l.accounted);
 }

@@ -18,8 +18,7 @@ use solana_signer::Signer;
 const ZEC1: u64 = 100_000_000;
 
 /// The stage: two coins on the curve (`a`, `b`), two graduated (`c`, `d`),
-/// all with every hook, fee collected, a staker, a king leader whose round is
-/// over; a thief with accounts of the right kinds; and a program that accepts
+/// all with every hook, fee collected and a staker; a thief with accounts of the right kinds; and a program that accepts
 /// any call and does nothing.
 struct Stage {
     w: World,
@@ -35,7 +34,7 @@ struct Stage {
 
 fn stage() -> Stage {
     let mut w = World::new();
-    let plan = LaunchPlan { king_round_secs: 600, ..Default::default() };
+    let plan = LaunchPlan::default();
     let user = w.trader(10_000 * ZEC1);
     let thief = w.trader(ZEC1);
     let mut coins = vec![];
@@ -62,17 +61,14 @@ fn stage() -> Stage {
         if graduated {
             w.graduate(&m);
             assert!(w.pool_buy(&user, &m, ZEC1).is_ok());
-            assert!(w.king_buy_pool(&user, &m, ZEC1 / 10).is_ok());
             assert!(w.collect_pool(&m).is_ok());
-        } else {
-            assert!(w.king_buy_curve(&user, &m, ZEC1 / 10).is_ok());
         }
         assert!(w.collect_curve(&m).is_ok());
         w.b.give_zec(&kit::authority(&m), 50 * ZEC1);
         assert!(w.split(&m).is_ok());
         coins.push(m);
     }
-    // Past the king round, and each coin's burn brought up to its price.
+    // Each coin's burn brought up to its price.
     w.b.wait(700);
     for m in &coins {
         w.burn_until_it_buys(m);
@@ -130,7 +126,6 @@ fn launch() {
             shares: plan.shares,
             creator_receiver: plan.creator_receiver,
             give_receiver: plan.give_receiver,
-            king_round_secs: plan.king_round_secs,
             max_platform_fraction_bps: 1_250,
             platform_receiver: w.platform_receiver,
         },
@@ -493,124 +488,4 @@ fn unstake() {
     assert!(r.is_ok(), "{}", logs(&r));
     assert_eq!(w.b.token_balance(&thief_zec), thief_zec_before);
     assert_eq!(w.b.token_balance(&thief_coin), thief_coin_before);
-}
-
-#[test]
-fn king_buy_curve() {
-    let Stage { mut w, a, b, user, thief, nothing, fake, .. } = stage();
-    assert!(w.king_settle(&a).is_ok());
-    assert!(w.king_settle(&b).is_ok());
-    let good = w.king_buy_curve_accounts(&user.pubkey(), &a);
-    let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
-    let thief_coin = ata(&thief.pubkey(), &a, &TOKEN_2022);
-    type A = burr::accounts::KingBuyCurve;
-    let swaps: Vec<Swap<A>> = vec![
-        sw("mint", |x: &mut A| x.mint = b),
-        sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
-        sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
-        sw("zec_mint", |x: &mut A| x.zec_mint = b),
-        sw("buyer_coin", |x: &mut A| x.buyer_coin = thief_coin),
-        sw("buyer_zec", |x: &mut A| x.buyer_zec = thief_zec),
-        sw("pump_global", |x: &mut A| x.pump_global = pump::amm_global_config()),
-        sw("bonding_curve", |x: &mut A| {
-            // Another coin's curve, with that curve's own accounts.
-            x.bonding_curve = pump::curve(&b);
-            x.associated_base_bonding_curve = ata(&pump::curve(&b), &a, &TOKEN_2022);
-            x.associated_quote_bonding_curve = ata(&pump::curve(&b), &ZEC, &TOKEN);
-        }),
-        sw("associated_base_bonding_curve", |x: &mut A| x.associated_base_bonding_curve = thief_coin),
-        sw("associated_quote_bonding_curve", |x: &mut A| x.associated_quote_bonding_curve = thief_zec),
-        sw("user_volume", |x: &mut A| x.user_volume = fake),
-        sw("fee_config", |x: &mut A| x.fee_config = pda(&[b"fee_config", PUMP_AMM.as_ref()], &PUMP_FEES)),
-        sw("buyback_fee_recipient", |x: &mut A| x.buyback_fee_recipient = thief_zec),
-        sw("pump_event_authority", |x: &mut A| x.pump_event_authority = fake),
-        sw("pump_program", |x: &mut A| x.pump_program = nothing),
-        sw("token_program", |x: &mut A| x.token_program = nothing),
-        sw("token_2022_program", |x: &mut A| x.token_2022_program = nothing),
-        sw("associated_token_program", |x: &mut A| x.associated_token_program = nothing),
-        sw("system_program", |x: &mut A| x.system_program = nothing),
-    ];
-    let data = burr::instruction::KingBuyCurve { quote_in: ZEC1 / 10, min_out: 1 };
-    let r = each_refused(&mut w, &user, &[], good, data, swaps);
-    assert!(r.is_ok(), "{}", logs(&r));
-    assert_eq!(w.ledger(&a).king.leader, user.pubkey());
-    assert_eq!(w.ledger(&b).king.leader, Pubkey::default(), "coin B's round was not touched");
-}
-
-#[test]
-fn king_buy_pool() {
-    let Stage { mut w, c, d, user, thief, nothing, fake, .. } = stage();
-    assert!(w.king_settle(&c).is_ok());
-    assert!(w.king_settle(&d).is_ok());
-    let good = w.king_buy_pool_accounts(&user.pubkey(), &c);
-    let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
-    let thief_coin = ata(&thief.pubkey(), &c, &TOKEN_2022);
-    type A = burr::accounts::KingBuyPool;
-    let swaps: Vec<Swap<A>> = vec![
-        sw("mint", |x: &mut A| x.mint = d),
-        sw("coin", |x: &mut A| x.coin = kit::coin(&d)),
-        sw("ledger", |x: &mut A| x.ledger = kit::ledger(&d)),
-        sw("zec_mint", |x: &mut A| x.zec_mint = d),
-        sw("buyer_coin", |x: &mut A| x.buyer_coin = thief_coin),
-        sw("buyer_zec", |x: &mut A| x.buyer_zec = thief_zec),
-        sw("amm_global_config", |x: &mut A| x.amm_global_config = pump::global()),
-        sw("pool_authority", |x: &mut A| x.pool_authority = pump::pool_authority(&d)),
-        sw("pool", |x: &mut A| {
-            // Another coin's pool, with the accounts derived from it.
-            x.pool = pump::pool(&d);
-            x.pool_base_token_account = ata(&pump::pool(&d), &c, &TOKEN_2022);
-            x.pool_quote_token_account = ata(&pump::pool(&d), &ZEC, &TOKEN);
-        }),
-        sw("pool_base_token_account", |x: &mut A| x.pool_base_token_account = thief_coin),
-        sw("pool_quote_token_account", |x: &mut A| x.pool_quote_token_account = thief_zec),
-        sw("user_volume", |x: &mut A| x.user_volume = fake),
-        sw("fee_config", |x: &mut A| x.fee_config = pump::fee_config()),
-        sw("buyback_fee_recipient", |x: &mut A| x.buyback_fee_recipient = thief_zec),
-        sw("amm_event_authority", |x: &mut A| x.amm_event_authority = fake),
-        sw("amm_program", |x: &mut A| x.amm_program = nothing),
-        sw("token_program", |x: &mut A| x.token_program = nothing),
-        sw("token_2022_program", |x: &mut A| x.token_2022_program = nothing),
-        sw("associated_token_program", |x: &mut A| x.associated_token_program = nothing),
-        sw("system_program", |x: &mut A| x.system_program = nothing),
-    ];
-    let data = burr::instruction::KingBuyPool { quote_in: ZEC1 / 10, min_out: 1 };
-    let r = each_refused(&mut w, &user, &[], good, data, swaps);
-    assert!(r.is_ok(), "{}", logs(&r));
-    assert_eq!(w.ledger(&c).king.leader, user.pubkey());
-}
-
-#[test]
-fn king_settle() {
-    let Stage { mut w, a, b, user, thief, nothing, .. } = stage();
-    let payer = w.b.payer.insecure_clone();
-    let good = w.king_settle_accounts(&payer.pubkey(), &a, &user.pubkey());
-    let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
-    let thief_key = thief.pubkey();
-    type A = burr::accounts::KingSettle;
-    let swaps: Vec<Swap<A>> = vec![
-        sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
-        sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
-        sw("authority", |x: &mut A| {
-            x.authority = kit::authority(&b);
-            x.vault = kit::vault(&b);
-        }),
-        sw("vault", |x: &mut A| x.vault = kit::vault(&b)),
-        sw("zec_mint", |x: &mut A| x.zec_mint = a),
-        sw("winner", |x: &mut A| {
-            x.winner = thief_key;
-            x.winner_zec = thief_zec;
-        }),
-        sw("winner_zec", |x: &mut A| x.winner_zec = thief_zec),
-        sw("token_program", |x: &mut A| x.token_program = nothing),
-        sw("associated_token_program", |x: &mut A| x.associated_token_program = nothing),
-        sw("system_program", |x: &mut A| x.system_program = nothing),
-    ];
-    let pot = w.ledger(&a).pots[5];
-    assert!(pot > 0);
-    let before = w.zec_of(&user.pubkey());
-    let thief_before = w.b.token_balance(&thief_zec);
-    let r = each_refused(&mut w, &payer, &[], good, burr::instruction::KingSettle {}, swaps);
-    assert!(r.is_ok(), "{}", logs(&r));
-    assert_eq!(w.zec_of(&user.pubkey()), before + pot);
-    assert_eq!(w.b.token_balance(&thief_zec), thief_before);
 }

@@ -20,11 +20,10 @@ pub struct LaunchArgs {
     pub uri: String,
     /// The coin's fee, in hundredths of a percent.
     pub fee_bps: u16,
-    /// Shares in order: creator, give, burn, vault share, king. They add to 10,000.
-    pub shares: [u16; 5],
+    /// Shares in order: creator, give, burn, vault share. They add to 10,000.
+    pub shares: [u16; HOOKS],
     pub creator_receiver: Pubkey,
     pub give_receiver: Pubkey,
-    pub king_round_secs: u32,
     /// The most the launcher accepts as the platform's part of the fee. The
     /// launch fails if the setting is higher when it lands.
     pub max_platform_fraction_bps: u16,
@@ -140,10 +139,6 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     );
     require!(args.shares[SINK_GIVE - 1] == 0 || args.give_receiver != Pubkey::default(), BurrError::MissingReceiver);
     require!(
-        args.shares[SINK_KING - 1] == 0 || (KING_MIN_ROUND_SECS..=KING_MAX_ROUND_SECS).contains(&args.king_round_secs),
-        BurrError::RoundLengthOutOfRange
-    );
-    require!(
         args.name.len() <= MAX_NAME_LEN && args.symbol.len() <= MAX_SYMBOL_LEN && args.uri.len() <= MAX_URI_LEN,
         BurrError::TextTooLong
     );
@@ -218,7 +213,6 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     coin.shares = args.shares;
     coin.creator_receiver = args.creator_receiver;
     coin.give_receiver = args.give_receiver;
-    coin.king_round_secs = args.king_round_secs;
     coin.burn_cooldown_secs = BURN_COOLDOWN_SECS;
     coin.burn_price_band_bps = BURN_PRICE_BAND_BPS;
     coin.burn_fee_allowance_bps = BURN_FEE_ALLOWANCE_BPS;

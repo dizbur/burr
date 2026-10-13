@@ -39,7 +39,7 @@ fn a_launch_is_refused_if_the_coin_made_is_not_the_coin_asked_for() {
 
 fn burn_coin() -> (World, Pubkey) {
     let mut w = World::new();
-    let mint = w.launch(&LaunchPlan { shares: [0, 0, 10_000, 0, 0], ..Default::default() });
+    let mint = w.launch(&LaunchPlan { shares: [0, 0, 10_000, 0], ..Default::default() });
     w.b.give_zec(&kit::authority(&mint), 50 * ZEC1);
     assert!(w.split(&mint).is_ok());
     w.b.wait(60);
@@ -95,32 +95,6 @@ fn the_stand_in_behaving_properly_is_accepted() {
 }
 
 #[test]
-fn a_king_buy_counts_only_what_really_happened() {
-    let cases = [
-        (s::BUY_TAKES_GIVES_NOTHING, "took the ZEC and gave nothing"),
-        (s::BUY_DOES_NOTHING, "did nothing"),
-        (s::BUY_GIVES_FOR_FREE, "gave coins and took no ZEC"),
-    ];
-    for (mode, what) in cases {
-        let mut w = World::new();
-        let mint = w.launch(&LaunchPlan { shares: [0, 0, 0, 0, 10_000], ..Default::default() });
-        let a = w.trader(100 * ZEC1);
-        w.b.use_standin(&PUMP, &pump::global(), mode);
-        let r = w.king_buy_curve(&a, &mint, ZEC1);
-        assert_eq!(custom_code(&r), Some(err(E::KingBadBuy)), "the buy {what}\n{}", logs(&r));
-        assert_eq!(w.ledger(&mint).king.leader, Pubkey::default(), "{what}");
-    }
-    // A buy that asks for a large size but really spends less is counted at what it spent.
-    let mut w = World::new();
-    let mint = w.launch(&LaunchPlan { shares: [0, 0, 0, 0, 10_000], ..Default::default() });
-    let a = w.trader(ZEC1 / 2);
-    w.b.use_standin(&PUMP, &pump::global(), s::BUY_TAKES_EVERYTHING);
-    let r = w.king_buy_curve(&a, &mint, 1_000 * ZEC1);
-    assert!(r.is_ok(), "{}", logs(&r));
-    assert_eq!(w.ledger(&mint).king.leader_amount, ZEC1 / 2, "the size is what left the buyer, not what was asked");
-}
-
-#[test]
 fn collect_credits_only_what_really_arrived() {
     let mut w = World::new();
     let mint = w.launch(&LaunchPlan::default());
@@ -132,7 +106,7 @@ fn collect_credits_only_what_really_arrived() {
     let r = w.collect_curve(&mint);
     assert!(r.is_ok(), "{}", logs(&r));
     let l = w.ledger(&mint);
-    assert_eq!((l.accounted, l.pots), (0, [0; 6]), "nothing arrived, so nothing was credited");
+    assert_eq!((l.accounted, l.pots), (0, [0; 5]), "nothing arrived, so nothing was credited");
 }
 
 // ---- the same on the pool ----
@@ -179,18 +153,4 @@ fn a_pool_burn_is_undone_if_the_buy_did_not_deliver() {
     assert!(w.b.mint_supply(&mint) < supply);
     assert_eq!(w.b.token_balance(&ata(&bn, &mint, &TOKEN_2022)), 0);
     w.assert_sound(&mint);
-}
-
-#[test]
-fn a_pool_king_buy_counts_only_what_really_happened() {
-    for mode in [s::BUY_TAKES_GIVES_NOTHING, s::BUY_DOES_NOTHING, s::BUY_GIVES_FOR_FREE] {
-        let mut w = World::new();
-        let mint = w.launch(&LaunchPlan { shares: [0, 0, 0, 0, 10_000], ..Default::default() });
-        w.graduate(&mint);
-        let a = w.trader(100 * ZEC1);
-        w.b.use_standin(&PUMP_AMM, &pump::amm_global_config(), mode);
-        let r = w.king_buy_pool(&a, &mint, ZEC1);
-        assert_eq!(custom_code(&r), Some(err(E::KingBadBuy)), "mode {mode}\n{}", logs(&r));
-        assert_eq!(w.ledger(&mint).king.leader, Pubkey::default());
-    }
 }

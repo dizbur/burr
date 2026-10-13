@@ -35,11 +35,10 @@ pub struct Coin {
     /// The platform's part of the fee, copied from `Config` at launch.
     pub platform_fraction_bps: u16,
     pub platform_receiver: Pubkey,
-    /// Shares of the rest, in order: creator, give, burn, vault share, king.
-    pub shares: [u16; 5],
+    /// Shares of the rest, in order: creator, give, burn, vault share.
+    pub shares: [u16; HOOKS],
     pub creator_receiver: Pubkey,
     pub give_receiver: Pubkey,
-    pub king_round_secs: u32,
     pub burn_cooldown_secs: u32,
     pub burn_price_band_bps: u16,
     pub burn_fee_allowance_bps: u16,
@@ -75,7 +74,6 @@ pub struct Ledger {
     pub pots: [u64; SINKS],
     pub burn: BurnState,
     pub vault_share: VaultShare,
-    pub king: KingState,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]
@@ -85,16 +83,6 @@ pub struct BurnState {
     pub reference: Reserves,
     pub total_spent: u64,
     pub total_burned: u64,
-}
-
-#[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]
-pub struct KingState {
-    /// The round the leader below belongs to.
-    pub round: u64,
-    /// The empty address means no leader.
-    pub leader: Pubkey,
-    /// ZEC the leader's largest single buy really spent.
-    pub leader_amount: u64,
 }
 
 /// One person's place in a coin's vault share.

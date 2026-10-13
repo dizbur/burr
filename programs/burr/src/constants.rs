@@ -43,20 +43,19 @@ pub const BURN_FEE_ALLOWANCE_BPS: u16 = 200;
 pub const BURN_SPEND_DIVISOR: u16 = 4;
 /// Vault share: seconds over which credited fee is released.
 pub const VAULT_RELEASE_SECS: u32 = 86_400;
-/// King of the hill: allowed round lengths.
-pub const KING_MIN_ROUND_SECS: u32 = 300;
-pub const KING_MAX_ROUND_SECS: u32 = 604_800;
 
 // pump.fun's limits on text, checked here so a launch fails early and clearly.
 pub const MAX_NAME_LEN: usize = 32;
 pub const MAX_SYMBOL_LEN: usize = 13;
 pub const MAX_URI_LEN: usize = 200;
 
-/// The pots of a coin, in ledger order.
-pub const SINKS: usize = 6;
+/// How many hooks a coin can choose from.
+pub const HOOKS: usize = 4;
+
+/// The pots of a coin, in ledger order: the platform's, then one per hook.
+pub const SINKS: usize = 5;
 pub const SINK_PLATFORM: usize = 0;
 pub const SINK_CREATOR: usize = 1;
 pub const SINK_GIVE: usize = 2;
 pub const SINK_BURN: usize = 3;
 pub const SINK_VAULT_SHARE: usize = 4;
-pub const SINK_KING: usize = 5;

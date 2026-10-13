@@ -26,7 +26,6 @@ fn launch_creates_the_coin_and_its_record_together() {
     assert_eq!(c.shares, plan.shares);
     assert_eq!(c.creator_receiver, plan.creator_receiver);
     assert_eq!(c.give_receiver, plan.give_receiver);
-    assert_eq!(c.king_round_secs, 3_600);
     assert_eq!(c.launcher, w.b.payer.pubkey());
 
     let l = w.ledger(&mint);
@@ -204,14 +203,12 @@ fn launch_refuses_bad_plans() {
     let cases: Vec<(LaunchPlan, E)> = vec![
         (LaunchPlan { fee_bps: 49, ..d.clone() }, E::FeeOutOfRange),
         (LaunchPlan { fee_bps: 301, ..d.clone() }, E::FeeOutOfRange),
-        (LaunchPlan { shares: [2_000, 2_000, 2_000, 2_000, 1_999], ..d.clone() }, E::SharesDoNotAddUp),
-        (LaunchPlan { shares: [2_000, 2_000, 2_000, 2_000, 2_001], ..d.clone() }, E::SharesDoNotAddUp),
-        (LaunchPlan { shares: [0; 5], ..d.clone() }, E::SharesDoNotAddUp),
-        (LaunchPlan { shares: [u16::MAX, u16::MAX, u16::MAX, u16::MAX, u16::MAX], ..d.clone() }, E::SharesDoNotAddUp),
+        (LaunchPlan { shares: [2_500, 2_500, 2_500, 2_499], ..d.clone() }, E::SharesDoNotAddUp),
+        (LaunchPlan { shares: [2_500, 2_500, 2_500, 2_501], ..d.clone() }, E::SharesDoNotAddUp),
+        (LaunchPlan { shares: [0; 4], ..d.clone() }, E::SharesDoNotAddUp),
+        (LaunchPlan { shares: [u16::MAX, u16::MAX, u16::MAX, u16::MAX], ..d.clone() }, E::SharesDoNotAddUp),
         (LaunchPlan { creator_receiver: empty, ..d.clone() }, E::MissingReceiver),
         (LaunchPlan { give_receiver: empty, ..d.clone() }, E::MissingReceiver),
-        (LaunchPlan { king_round_secs: 299, ..d.clone() }, E::RoundLengthOutOfRange),
-        (LaunchPlan { king_round_secs: 604_801, ..d.clone() }, E::RoundLengthOutOfRange),
         (LaunchPlan { name: "x".repeat(33), ..d.clone() }, E::TextTooLong),
     ];
     for (plan, want) in cases {
@@ -229,10 +226,9 @@ fn launch_accepts_the_edges_and_unused_settings() {
     w.launch(&LaunchPlan { fee_bps: 300, ..Default::default() });
     // A hook that is not chosen needs no setting.
     w.launch(&LaunchPlan {
-        shares: [0, 0, 10_000, 0, 0],
+        shares: [0, 0, 10_000, 0],
         creator_receiver: empty,
         give_receiver: empty,
-        king_round_secs: 0,
         ..Default::default()
     });
 }

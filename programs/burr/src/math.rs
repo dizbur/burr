@@ -12,7 +12,7 @@ pub const WEIGHT_TOTAL: u128 = 100_000_000;
 pub const ACC_SCALE: u128 = 1_000_000_000_000_000_000;
 
 /// The six split weights of a coin.
-pub fn weights(platform_fraction_bps: u16, shares: &[u16; 5]) -> Option<[u128; SINKS]> {
+pub fn weights(platform_fraction_bps: u16, shares: &[u16; HOOKS]) -> Option<[u128; SINKS]> {
     if platform_fraction_bps > BPS {
         return None;
     }
@@ -184,16 +184,4 @@ pub fn burn_min_out(reserves: &Reserves, spend: u64, fee_bps: u16, allowance_bps
     let ideal = reserves.ideal_out(spend)? as u128;
     let keep = (BPS as u128).checked_sub(fee_bps as u128)?.checked_sub(allowance_bps as u128)?;
     u64::try_from(ideal.checked_mul(keep)? / BPS as u128).ok()
-}
-
-/// Which round a moment falls in. Rounds are counted from launch.
-pub fn king_round(now: i64, launched_at: i64, round_secs: u32) -> Option<u64> {
-    if round_secs == 0 {
-        return None;
-    }
-    let since = now.checked_sub(launched_at)?;
-    if since < 0 {
-        return Some(0);
-    }
-    Some(since as u64 / round_secs as u64)
 }

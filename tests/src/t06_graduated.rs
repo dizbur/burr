@@ -102,7 +102,7 @@ fn payouts_work_the_same_after_graduation() {
 // ---- buy back and burn on the pool ----
 
 fn burn_plan(fee_bps: u16) -> LaunchPlan {
-    LaunchPlan { fee_bps, shares: [0, 0, 10_000, 0, 0], ..Default::default() }
+    LaunchPlan { fee_bps, shares: [0, 0, 10_000, 0], ..Default::default() }
 }
 
 fn graduated_with_burn_pot(fee_bps: u16, pot: u64) -> (World, Pubkey) {
@@ -267,7 +267,7 @@ fn burn_pool_refuses_substituted_accounts() {
 #[test]
 fn vault_share_carries_straight_through_graduation() {
     let mut w = World::new();
-    let mint = w.launch(&LaunchPlan { shares: [0, 0, 0, 10_000, 0], ..Default::default() });
+    let mint = w.launch(&LaunchPlan { shares: [0, 0, 0, 10_000], ..Default::default() });
     let h = w.trader(100 * ZEC1);
     assert!(w.buy(&h, &mint, ZEC1 / 10).is_ok());
     let coins = w.coins_of(&h.pubkey(), &mint);
@@ -290,87 +290,6 @@ fn vault_share_carries_straight_through_graduation() {
     assert!(w.stake(&t, &mint, 1_000).is_ok());
     assert!(w.unstake(&t, &mint, 1_000).is_ok());
     w.assert_sound(&mint);
-}
-
-// ---- king of the hill on the pool ----
-
-fn king_plan() -> LaunchPlan {
-    LaunchPlan { shares: [0, 0, 0, 0, 10_000], king_round_secs: 3_600, ..Default::default() }
-}
-
-#[test]
-fn king_of_the_hill_works_on_the_pool() {
-    let (mut w, mint) = graduated(&king_plan());
-    let (a, b) = (w.trader(100 * ZEC1), w.trader(100 * ZEC1));
-    let r = w.king_buy_pool(&a, &mint, ZEC1 / 10);
-    assert!(r.is_ok(), "{}", logs(&r));
-    assert!(w.coins_of(&a.pubkey(), &mint) > 0);
-    let k = w.ledger(&mint).king;
-    assert_eq!((k.leader, k.leader_amount), (a.pubkey(), ZEC1 / 10));
-    assert!(w.king_buy_pool(&b, &mint, ZEC1 / 10).is_ok());
-    assert_eq!(w.ledger(&mint).king.leader, a.pubkey(), "a tie does not pass");
-    assert!(w.king_buy_pool(&b, &mint, ZEC1 / 5).is_ok());
-    assert_eq!(w.ledger(&mint).king.leader, b.pubkey());
-
-    assert!(w.collect_curve(&mint).is_ok());
-    assert!(w.collect_pool(&mint).is_ok());
-    let pot = w.ledger(&mint).pots[5];
-    assert!(pot > 0);
-    w.b.wait(3_600);
-    let r = w.king_buy_pool(&a, &mint, ZEC1);
-    assert_eq!(custom_code(&r), Some(err(E::KingSettleFirst)));
-    let before = w.zec_of(&b.pubkey());
-    assert!(w.king_settle(&mint).is_ok());
-    assert_eq!(w.zec_of(&b.pubkey()), before + pot);
-    w.assert_sound(&mint);
-}
-
-#[test]
-fn a_round_can_span_graduation() {
-    let mut w = World::new();
-    let mint = w.launch(&king_plan());
-    let (a, b) = (w.trader(100 * ZEC1), w.trader(100 * ZEC1));
-    assert!(w.king_buy_curve(&a, &mint, ZEC1 / 10).is_ok());
-    w.graduate(&mint);
-    // Same round, now on the pool: a larger buy there takes the lead.
-    assert!(w.king_buy_pool(&b, &mint, ZEC1 / 5).is_ok());
-    assert_eq!(w.ledger(&mint).king.leader, b.pubkey());
-    assert_eq!(w.ledger(&mint).king.round, 0);
-    // The curve instruction no longer trades.
-    assert!(w.king_buy_curve(&a, &mint, ZEC1).is_err());
-}
-
-#[test]
-fn king_buy_pool_refuses_substituted_accounts() {
-    let (mut w, mint) = graduated(&king_plan());
-    let other = w.launch(&king_plan());
-    w.graduate(&other);
-    let a = w.trader(100 * ZEC1);
-    let thief_zec = ata(&w.trader(ZEC1).pubkey(), &ZEC, &TOKEN);
-    let fake = Pubkey::new_unique();
-    type Swap = fn(&mut burr::accounts::KingBuyPool, Pubkey, &Pubkey, Pubkey);
-    let swaps: Vec<(&str, Swap)> = vec![
-        ("ledger (another coin's)", |x, _, o, _| x.ledger = kit::ledger(o)),
-        ("coin (another coin's)", |x, _, o, _| x.coin = kit::coin(o)),
-        ("pool (another coin's)", |x, _, o, _| x.pool = pump::pool(o)),
-        ("pool_authority (another coin's)", |x, _, o, _| x.pool_authority = pump::pool_authority(o)),
-        ("pool_base_token_account", |x, f, _, _| x.pool_base_token_account = f),
-        ("pool_quote_token_account (a thief's)", |x, _, _, t| x.pool_quote_token_account = t),
-        ("amm_program", |x, f, _, _| x.amm_program = f),
-        ("amm_global_config", |x, f, _, _| x.amm_global_config = f),
-        ("fee_config", |x, f, _, _| x.fee_config = f),
-        ("user_volume", |x, f, _, _| x.user_volume = f),
-        ("buyback_fee_recipient (a thief's)", |x, _, _, t| x.buyback_fee_recipient = t),
-        ("buyer_zec (someone else's)", |x, _, _, t| x.buyer_zec = t),
-    ];
-    for (name, swap) in swaps {
-        let mut acc = w.king_buy_pool_accounts(&a.pubkey(), &mint);
-        swap(&mut acc, fake, &other, thief_zec);
-        let i = kit::raw(acc, burr::instruction::KingBuyPool { quote_in: ZEC1 / 10, min_out: 1 });
-        let r = w.b.send_as(Some(&a), &[i], &[]);
-        assert!(r.is_err(), "swapping {name} was accepted");
-    }
-    assert_eq!(w.ledger(&mint).king.leader, Pubkey::default());
 }
 
 #[test]

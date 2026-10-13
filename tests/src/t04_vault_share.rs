@@ -13,7 +13,7 @@ const ZEC1: u64 = 100_000_000;
 const DAY: i64 = 86_400;
 
 fn vs_plan() -> LaunchPlan {
-    LaunchPlan { shares: [0, 0, 0, 10_000, 0], ..Default::default() }
+    LaunchPlan { shares: [0, 0, 0, 10_000], ..Default::default() }
 }
 
 /// A coin whose whole fee goes to the vault share, and holders with coins.
@@ -234,7 +234,7 @@ fn nobody_takes_out_more_than_they_put_in_or_anothers_coins() {
 #[test]
 fn staking_needs_the_hook_and_a_real_amount() {
     let mut w = World::new();
-    let mint = w.launch(&LaunchPlan { shares: [10_000, 0, 0, 0, 0], ..Default::default() });
+    let mint = w.launch(&LaunchPlan { shares: [10_000, 0, 0, 0], ..Default::default() });
     let t = w.trader(10 * ZEC1);
     assert!(w.buy(&t, &mint, ZEC1 / 10).is_ok());
     let r = w.stake(&t, &mint, 10);

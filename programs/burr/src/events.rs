@@ -17,14 +17,14 @@ pub struct Launched {
     pub launcher: Pubkey,
     pub fee_bps: u16,
     pub platform_fraction_bps: u16,
-    pub shares: [u16; 5],
+    pub shares: [u16; 4],
 }
 
 #[event]
 pub struct Split {
     pub mint: Pubkey,
     pub amount: u64,
-    pub credited: [u64; 6],
+    pub credited: [u64; 5],
 }
 
 #[event]
@@ -54,22 +54,4 @@ pub struct StakeChanged {
     pub staked: u64,
     pub total_staked: u64,
     pub paid: u64,
-}
-
-#[event]
-pub struct KingBuy {
-    pub mint: Pubkey,
-    pub buyer: Pubkey,
-    pub round: u64,
-    pub spent: u64,
-    pub received: u64,
-    pub leads: bool,
-}
-
-#[event]
-pub struct KingSettled {
-    pub mint: Pubkey,
-    pub round: u64,
-    pub winner: Pubkey,
-    pub amount: u64,
 }

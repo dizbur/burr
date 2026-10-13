@@ -22,8 +22,6 @@ pub enum BurrError {
     SharesDoNotAddUp,
     #[msg("A chosen hook is missing its receiver")]
     MissingReceiver,
-    #[msg("Round length outside the allowed range")]
-    RoundLengthOutOfRange,
     #[msg("Name, ticker or link too long")]
     TextTooLong,
     #[msg("The coin pump.fun created is not what was asked for")]
@@ -60,14 +58,6 @@ pub enum BurrError {
     NotEnoughStaked,
     #[msg("The transfer did not move the expected amount")]
     TransferMismatch,
-    #[msg("The finished round must be settled first")]
-    KingSettleFirst,
-    #[msg("The round is not over, or has no leader")]
-    KingNothingToSettle,
-    #[msg("This is not the round's leader")]
-    KingWrongWinner,
-    #[msg("The buy did not go through as measured")]
-    KingBadBuy,
     #[msg("A receiver cannot be one of the coin's own program-controlled addresses")]
     ReceiverNotAllowed,
     #[msg("The platform's terms changed since this launch was prepared")]

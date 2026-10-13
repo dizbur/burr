@@ -33,14 +33,14 @@ fn collect_brings_the_fee_in_and_splits_it_exactly() {
     let l = w.ledger(&mint);
     assert_eq!(l.accounted, fee);
     assert_eq!(l.total_split, fee as u128);
-    // One eighth to the platform, the rest in five equal parts, all rounded down.
+    // One eighth to the platform, the rest in four equal parts, all rounded down.
     let platform = fee as u128 * 1_250 / 10_000;
     assert_eq!(l.pots[0] as u128, platform);
-    for i in 1..6 {
-        assert_eq!(l.pots[i] as u128, fee as u128 * (8_750 * 2_000) / 100_000_000);
+    for i in 1..5 {
+        assert_eq!(l.pots[i] as u128, fee as u128 * (8_750 * 2_500) / 100_000_000);
     }
     let pots: u64 = l.pots.iter().sum();
-    assert!(fee - pots < 6, "in = credited + a carry of under 6 units");
+    assert!(fee - pots < 5, "in = credited + a carry of under 5 units");
     w.assert_sound(&mint);
     // Nothing is left on pump.fun's side.
     assert_eq!(w.b.curve(&mint).creator_fee, 0);
@@ -94,7 +94,7 @@ fn zec_sent_straight_to_a_vault_counts_as_fee() {
 #[test]
 fn splitting_in_many_small_calls_gives_the_same_as_one() {
     let mut w = World::new();
-    let plan = LaunchPlan { shares: [3_333, 1, 3_333, 3_332, 1], ..Default::default() };
+    let plan = LaunchPlan { shares: [3_333, 1, 3_333, 3_333], ..Default::default() };
     let a = w.launch(&plan);
     let b = w.launch(&plan);
     // Coin A gets 9,999 units in one go; coin B gets them 7 at a time.
@@ -292,11 +292,10 @@ fn a_pot_cannot_be_debited_below_zero() {
         bump: 0,
         accounted: 100,
         total_split: 100,
-        credited: [0; 6],
-        pots: [10, 20, 30, 40, 0, 0],
+        credited: [0; 5],
+        pots: [10, 20, 30, 40, 0],
         burn: Default::default(),
         vault_share: Default::default(),
-        king: Default::default(),
     };
     assert!(burr::ops::debit(&mut l, 1, 21).is_err(), "more than the pot holds");
     assert!(burr::ops::debit(&mut l, 1, 20).is_ok());
@@ -347,7 +346,7 @@ fn a_coins_own_addresses_cannot_be_named_as_receivers() {
 fn an_empty_pot_pays_nothing_and_makes_no_account() {
     let mut w = World::new();
     // No give hook: its receiver is the empty address and its pot stays empty.
-    let plan = LaunchPlan { shares: [10_000, 0, 0, 0, 0], give_receiver: Pubkey::default(), ..Default::default() };
+    let plan = LaunchPlan { shares: [10_000, 0, 0, 0], give_receiver: Pubkey::default(), ..Default::default() };
     let (mint, _) = coin_with_fee(&mut w, &plan);
     assert!(w.collect_curve(&mint).is_ok());
     let r = w.pay_out(&mint, Payee::Give);
