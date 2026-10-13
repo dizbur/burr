@@ -20,6 +20,8 @@ const opts = options(["url", "admin-key", "admin", "mainnet"]);
 const [action, value] = opts._;
 const conn = await connect(opts);
 const idl = loadIdl();
+if (opts["admin-key"] && opts.admin) fail("Give --admin-key or --admin, not both.");
+if (opts._.length > 2) fail("Too many words. The form is: admin.mjs <action> [address] --options");
 const key = opts["admin-key"] ? loadKey(opts["admin-key"], "--admin-key") : null;
 const admin = key ? key.publicKey : opts.admin ? address(opts.admin, "--admin") : fail("Give --admin-key <file> or --admin <address>.");
 const config = configAddress(idl);

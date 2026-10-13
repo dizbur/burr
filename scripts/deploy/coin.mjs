@@ -8,7 +8,7 @@ import { ata, ATA_PROGRAM, BUYBACK, coinAddresses, configAddress, instruction, M
   SYSTEM, TOKEN, TOKEN_2022, ZEC } from "./lib.mjs";
 
 const pumpDisc = (name) => createHash("sha256").update("global:" + name).digest().subarray(0, 8);
-const u64 = (v) => { const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(v)); return b; };
+const u64 = (v) => { if (v === undefined) throw new Error("an amount was not given"); const b = Buffer.alloc(8); b.writeBigUInt64LE(BigInt(v)); return b; };
 const meta = (pubkey, isWritable = false, isSigner = false) => ({ pubkey, isWritable, isSigner });
 const CLOCK = new PublicKey("SysvarC1ock11111111111111111111111111111111");
 
@@ -70,12 +70,14 @@ const tradeKeys = (mint, user) => {
   ];
 };
 // pump.fun's own buy on the curve: spend `zec` units of ZEC, accept no fewer than `minCoins`.
-export const buyIx = (mint, user, zec, minCoins = 1n) => new TransactionInstruction({
+// There is no default for `minCoins`: a real buy must work it out from the
+// curve with a stated tolerance, or anyone ordering transactions can take the difference.
+export const buyIx = (mint, user, zec, minCoins) => new TransactionInstruction({
   programId: PUMP, keys: tradeKeys(mint, user),
   data: Buffer.concat([pumpDisc("buy_exact_quote_in_v3"), u64(zec), u64(minCoins), Buffer.from([0])]),
 });
 // pump.fun's own sell on the curve.
-export const sellIx = (mint, user, coins, minZec = 0n) => new TransactionInstruction({
+export const sellIx = (mint, user, coins, minZec) => new TransactionInstruction({
   programId: PUMP, keys: tradeKeys(mint, user),
   data: Buffer.concat([pumpDisc("sell_v3"), u64(coins), u64(minZec)]),
 });

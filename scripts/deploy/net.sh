@@ -1,14 +1,36 @@
 # Shared by the shell scripts: the network's address, the main-network guard,
-# and the check for a rule that would refuse this program's format.
-# The address comes from BURRPAD_RPC_URL (or --url) and is never printed.
+# the check for a rule that would refuse this program's format, and the SOL check.
+# The address comes from BURRPAD_RPC_URL (or --url). It is never printed: the
+# solana tool is only ever run through `sol`, which removes it from anything shown.
 export PATH="$HOME/.cargo/bin:$HOME/.local/share/solana/install/active_release/bin:$PATH"
 MAINNET_GENESIS="5eykt4UsFv8P8NJdTREpY1vzqKqZKvdpKuc147dw2N9d"
 OLD_FORMAT_RULE="B8JJXCy5amZyWG9r7EnUYLwzXSXTxG7GZ1qZ1qggo83g"
 HOLDING="scripts/deploy/out/upload-holding-keypair.json"
+BUILT="target/release-kit/burrpad.so"
 
-net_check() { # $1 = url, $2 = "yes" if --mainnet yes was given
-  [ -n "$1" ] || { echo "STOPPED: no network given. Set BURRPAD_RPC_URL in this terminal (export BURRPAD_RPC_URL=...), or pass --url." >&2; exit 1; }
-  genesis=$(solana genesis-hash --url "$1" 2>/dev/null) || { echo "STOPPED: the network did not answer." >&2; exit 1; }
+# Runs the solana tool against the network, hiding the network's address in
+# whatever it prints (it puts the address into its error messages).
+sol() {
+  local host="${BURRPAD_RPC_URL#*://}"; host="${host%%/*}"
+  local query=""; case "$BURRPAD_RPC_URL" in *\?*) query="${BURRPAD_RPC_URL#*\?}";; esac
+  solana "$@" --url "$BURRPAD_RPC_URL" 2>&1 | while IFS= read -r line; do
+    line="${line//"$BURRPAD_RPC_URL"/<the network address>}"
+    line="${line//"$host"/<the network>}"
+    [ -z "$query" ] || line="${line//"$query"/<hidden>}"
+    printf '%s\n' "$line"
+  done
+  return "${PIPESTATUS[0]}"
+}
+chain() { node scripts/deploy/chain.mjs "$@"; }
+
+# $1 = the address given with --url, if any; $2 = "yes" if --mainnet yes was given
+net_check() {
+  [ -z "$1" ] || BURRPAD_RPC_URL="$1"
+  [ -n "${BURRPAD_RPC_URL:-}" ] || { echo "STOPPED: no network given. Set BURRPAD_RPC_URL in this terminal (export BURRPAD_RPC_URL=...), or pass --url." >&2; exit 1; }
+  export BURRPAD_RPC_URL
+  command -v solana >/dev/null 2>&1 || { echo "STOPPED: the solana tool is not installed." >&2; exit 1; }
+  [ -d scripts/deploy/node_modules ] || { echo "STOPPED: run  (cd scripts/deploy && npm ci --ignore-scripts)  once first." >&2; exit 1; }
+  genesis=$(chain genesis) || exit 1
   if [ "$genesis" = "$MAINNET_GENESIS" ]; then
     [ "$2" = "yes" ] || { echo "STOPPED: this is the main network. Add  --mainnet yes  if that is what you mean." >&2; exit 1; }
     echo "Network: MAIN NETWORK"
@@ -17,37 +39,44 @@ net_check() { # $1 = url, $2 = "yes" if --mainnet yes was given
   fi
   # The network plans a rule (SIMD-0500) that will refuse to deploy programs
   # in the format this one is built in. Stop clearly rather than half way.
-  status=$(solana feature status "$OLD_FORMAT_RULE" --url "$1" 2>/dev/null | tail -1 || true)
-  case "$status" in
-    *inactive*|*pending*|"") ;;
-    *active*)
-      echo "STOPPED: this network no longer accepts programs in the format this one is built in." >&2
-      echo "It must be rebuilt in the newer format (cargo build-sbf --arch v3) and the whole test suite run on that build first." >&2
-      exit 1;;
-  esac
+  rule=$(chain rule "$OLD_FORMAT_RULE") || exit 1
+  if [ "$rule" = "active" ]; then
+    echo "STOPPED: this network no longer accepts programs in the format this one is built in." >&2
+    echo "It must be rebuilt in the newer format (cargo build-sbf --arch v3) and the whole test suite run on that build first." >&2
+    exit 1
+  fi
+  # What is paid on top of the base fee, in millionths of a lamport per compute unit.
+  PRIORITY="${BURRPAD_PRIORITY_FEE:-50000}"
+  case "$PRIORITY" in ''|*[!0-9]*) echo "STOPPED: BURRPAD_PRIORITY_FEE must be a whole number." >&2; exit 1;; esac
+  [ "$PRIORITY" -le 2000000 ] || { echo "STOPPED: BURRPAD_PRIORITY_FEE is $PRIORITY, far above anything sensible (the usual is 50000). It is in millionths of a lamport." >&2; exit 1; }
+}
+
+# Says which build is about to go out.
+built_check() {
+  [ -f "$BUILT" ] || { echo "STOPPED: no release build here. Run scripts/deploy/build.sh first." >&2; exit 1; }
+  echo "Release build: commit $(cut -c1-7 target/release-kit/commit.txt), $(cat target/release-kit/mode.txt 2>/dev/null || echo unknown) build, sha256 $(shasum -a 256 "$BUILT" | cut -c1-16)…"
 }
 
 # Works out what the upload needs from the network's own rent figures for the
-# file just built, prints it, and stops if the wallet behind key file $2 is
+# release build, prints it, and stops if the wallet behind key file $1 is
 # short, saying by how much. Nothing has been sent when this runs.
-#   $1 = url, $2 = key file, $3 = "deploy" or "upgrade"
+#   $1 = key file, $2 = "deploy" or "upgrade"
 balance_check() {
-  size=$(wc -c < target/release-kit/burrpad.so | tr -d ' ')
-  rent_of() { solana rent "$1" --url "$2" | head -1 | awk '{print $3}'; }
-  data=$(rent_of "$((size + 45))" "$1")      # the program's code, with its header
-  account=$(rent_of 36 "$1")                 # the small account at the program's address
-  uploads=$(( size / 1000 + 5 ))             # one transaction per thousand bytes or so
+  size=$(wc -c < "$BUILT" | tr -d ' ')
+  data=$(chain rent "$((size + 45))") || exit 1      # the program's code, with its header
+  account=$(chain rent 36) || exit 1                 # the small account at the program's address
+  uploads=$(( size / 1000 + 5 ))                     # one transaction per thousand bytes or so
   fees=$(awk -v n="$uploads" 'BEGIN { printf "%.4f", n * 0.00001 }')
   margin=0.02
-  have=$(solana balance "$(solana-keygen pubkey "$2")" --url "$1" | awk '{print $1}')
+  have=$(chain balance "$(solana-keygen pubkey "$1")") || exit 1
   held=0
-  if [ -f "$HOLDING" ]; then held=$(solana balance "$(solana-keygen pubkey "$HOLDING")" --url "$1" 2>/dev/null | awk '{print $1}'); fi
-  if awk -v h="${held:-0}" 'BEGIN { exit !(h > 0) }'; then
+  if [ -f "$HOLDING" ]; then held=$(chain balance "$(solana-keygen pubkey "$HOLDING")") || exit 1; fi
+  if awk -v h="$held" 'BEGIN { exit !(h > 0) }'; then
     # An earlier upload already paid its deposit; only fees are needed to carry on.
     need=$(awk -v b="$account" -v c="$fees" -v d="$margin" 'BEGIN { printf "%.4f", b + c + d }')
     echo "An upload started earlier already holds $held SOL of deposit."
     echo "  needed to carry on:               $need SOL"
-  elif [ "$3" = "deploy" ]; then
+  elif [ "$2" = "deploy" ]; then
     need=$(awk -v a="$data" -v b="$account" -v c="$fees" -v d="$margin" 'BEGIN { printf "%.4f", a + b + c + d }')
     echo "The program file is $size bytes."
     echo "  locked in the program for good:   $data SOL"
@@ -58,7 +87,7 @@ balance_check() {
   else
     need=$(awk -v a="$data" -v c="$fees" -v d="$margin" 'BEGIN { printf "%.4f", a + c + d }')
     echo "The new program file is $size bytes."
-    echo "  held while the new code is uploaded, returned when the upgrade lands: $data SOL"
+    echo "  held while the new code is uploaded: $data SOL"
     echo "  upload fees, about:               $fees SOL"
     echo "  spare:                            $margin SOL"
     echo "  needed to start:                  $need SOL"
@@ -78,4 +107,18 @@ holding_key() {
     solana-keygen new --no-bip39-passphrase --silent --outfile "$HOLDING" >/dev/null; fi
 }
 
+# Says what to do when an upload stops half way.
+upload_stopped() {
+  echo "" >&2
+  echo "STOPPED: the upload did not finish. Nothing is lost." >&2
+  echo "  To carry on: run the same command again. It picks up where it stopped." >&2
+  echo "  To give up and get the deposit back: ./scripts/deploy/reclaim.sh --payer <the same key file>" >&2
+  exit 1
+}
+
+# Prints "<upgrade key> <room>" for the program in the code; sets program_state to present, absent, or stops.
+program_state() {
+  set +e; shown=$(chain program "$1"); code=$?; set -e
+  case "$code" in 0) state=present;; 3) state=absent;; *) echo "STOPPED: could not check whether a program is already at $1." >&2; exit 1;; esac
+}
 code_id() { grep -o 'declare_id!("[^"]*")' programs/burrpad/src/lib.rs | cut -d'"' -f2; }

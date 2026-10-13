@@ -65,12 +65,22 @@ export function need(opts, name) {
 let secretUrl = null;
 export function fail(message) {
   // The network's address is the owner's own; it is never shown, even inside an error.
-  if (secretUrl) message = String(message).split(secretUrl).join("<the network address>");
+  message = String(message);
+  if (secretUrl) {
+    message = message.split(secretUrl).join("<the network address>");
+    try {
+      const u = new URL(secretUrl);
+      message = message.split(u.host).join("<the network>");
+      if (u.search.length > 1) message = message.split(u.search.slice(1)).join("<hidden>");
+      if (u.pathname.length > 8) message = message.split(u.pathname).join("<hidden>");
+    } catch { /* not a URL: nothing more to hide */ }
+  }
   console.error("STOPPED: " + message);
   process.exit(1);
 }
 export function address(text, what) {
-  try { return new PublicKey(text); } catch { fail(`${what} is not an address: ${text}`); }
+  // The text is not echoed back in full: something pasted by mistake might be a secret.
+  try { return new PublicKey(text); } catch { fail(`${what} is not an address (it starts "${String(text).slice(0, 4)}…", ${String(text).length} characters).`); }
 }
 // Reads a key file to sign with. Never prints it.
 export function loadKey(file, what) {
@@ -93,7 +103,8 @@ export async function connect(opts) {
   }
   console.log(mainnet ? "Network: MAIN NETWORK" : "Network: a test network");
   conn.isMainnet = mainnet;
-  conn.outName = mainnet ? "mainnet" : "test";
+  // Each network keeps its own notes, so a test network's addresses never mix with another's.
+  conn.outName = mainnet ? "mainnet" : "test-" + genesis.slice(0, 8);
   return conn;
 }
 
@@ -218,7 +229,12 @@ export async function readAccount(conn, idl, typeName, addr) {
 
 // What is paid on top of the base fee so a transaction is picked up, in
 // millionths of a lamport per compute unit. BURRPAD_PRIORITY_FEE changes it.
-const priorityFee = () => Number(process.env.BURRPAD_PRIORITY_FEE ?? 50_000);
+const priorityFee = () => {
+  const text = process.env.BURRPAD_PRIORITY_FEE || "50000";
+  if (!/^[0-9]+$/.test(text)) fail("BURRPAD_PRIORITY_FEE must be a whole number.");
+  if (Number(text) > 2_000_000) fail(`BURRPAD_PRIORITY_FEE is ${text}, far above anything sensible (the usual is 50000). It is in millionths of a lamport.`);
+  return Number(text);
+};
 
 export const link = (conn, signature) => (conn.isMainnet ? `https://solscan.io/tx/${signature}` : signature);
 
@@ -249,16 +265,29 @@ export async function send(conn, instructions, signers, { table, units = 400_000
   }
   const size = tx.serialize().length;
   const signature = await conn.sendTransaction(tx, { skipPreflight: true, maxRetries: 5 });
-  let result;
-  try {
-    result = await conn.confirmTransaction({ signature, blockhash, lastValidBlockHeight }, "confirmed");
-  } catch (e) {
-    throw new Error(`sent, but not seen to land in time: ${link(conn, signature)}\nLook it up before trying again. (${e.message})`);
+  // Wait for it by asking the network directly, until well after the
+  // transaction could no longer land. Asking, not listening: a dropped
+  // listening connection must not turn a landed transaction into "not seen".
+  let status = null, expiredAt = 0;
+  for (;;) {
+    status = (await conn.getSignatureStatuses([signature], { searchTransactionHistory: true }).catch(() => null))?.value?.[0] ?? null;
+    if (status && (status.err || status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized")) break;
+    const height = await conn.getBlockHeight("confirmed").catch(() => 0);
+    if (height > lastValidBlockHeight) {
+      if (!expiredAt) expiredAt = Date.now();
+      else if (Date.now() - expiredAt > 30_000) { status = null; break; }
+    }
+    await sleep(1000);
   }
-  if (result.value.err) {
-    const done = await conn.getTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" });
-    throw new Error(`failed on the network: ${link(conn, signature)} ${JSON.stringify(result.value.err)}\n${(done?.meta?.logMessages || []).join("\n")}`);
+  if (!status) {
+    throw new Error(`sent, but it did not land: ${link(conn, signature)}\nIt can no longer land. Check the link once to be sure, then run the command again.`);
   }
+  if (status.err) {
+    const done = await conn.getTransaction(signature, { maxSupportedTransactionVersion: 0, commitment: "confirmed" }).catch(() => null);
+    throw new Error(`failed on the network: ${link(conn, signature)} ${JSON.stringify(status.err)}\n${(done?.meta?.logMessages || []).join("\n")}`);
+  }
+  // Reads made right after this must see it, whichever server answers them.
+  for (let i = 0; i < 20 && (await conn.getSlot("confirmed").catch(() => 0)) < status.slot; i++) await sleep(500);
   return { signature, size, link: link(conn, signature) };
 }
 

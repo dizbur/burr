@@ -29,6 +29,7 @@ mkdir -p target/release-kit
 cp target/deploy/burrpad.so target/release-kit/burrpad.so
 cp target/idl/burrpad.json target/release-kit/burrpad.json
 git rev-parse HEAD > target/release-kit/commit.txt 2>/dev/null || echo none > target/release-kit/commit.txt
+if [ "$mode" = "--plain" ]; then echo plain > target/release-kit/mode.txt; else echo reproducible > target/release-kit/mode.txt; fi
 id=$(grep -o 'declare_id!("[^"]*")' programs/burrpad/src/lib.rs | cut -d'"' -f2)
 echo "PASS  built, and kept as target/release-kit/burrpad.so"
 echo "      program address in the code: $id"

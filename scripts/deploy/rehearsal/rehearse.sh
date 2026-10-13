@@ -12,6 +12,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../../.."
 export PATH="$HOME/.cargo/bin:$HOME/.local/share/solana/install/active_release/bin:$PATH"
 run="${1:?give this run a name}"
+[[ "$run" =~ ^[A-Za-z0-9_-]+$ ]] || { echo "STOPPED: the run's name may only have letters, digits, - and _." >&2; exit 1; }
 root=$(pwd)
 work="tmp/rehearsal/$run"
 port="${REHEARSAL_PORT:-8899}"   # set REHEARSAL_PORT if another validator already uses 8899
@@ -35,7 +36,7 @@ addr() { solana-keygen pubkey "$(key "$1")"; }
 echo "program $(addr program)"
 echo "deploy wallet $(addr deployer)"
 echo "stand-in for the multi-signature wallet $(addr wallet)"
-( cd "$work/src/scripts/deploy" && npm ci --no-audit --no-fund >/dev/null 2>&1 )
+( cd "$work/src/scripts/deploy" && npm ci --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 )
 kit="$work/src/scripts/deploy"
 export BURRPAD_RPC_URL="$url"
 in_copy() { ( cd "$work/src" && "$@" ); }
@@ -60,13 +61,13 @@ until solana cluster-version --url "$url" >/dev/null 2>&1; do
 done
 echo "validator up: $(solana cluster-version --url "$url")"
 solana airdrop 12 "$(addr deployer)" --url "$url" >/dev/null
-for k in wallet rewards; do solana airdrop 6 "$(addr "$k")" --url "$url" >/dev/null; done
+for k in wallet rewards platform; do solana airdrop 6 "$(addr "$k")" --url "$url" >/dev/null; done
 sol() { solana balance "$(addr "$1")" --url "$url"; }
 echo "deploy wallet starts with $(sol deployer)"
 
 # The solana tool prints twelve recovery words for a temporary account each time it uploads code. They are left out of this output.
 quiet_upload() { "$@" > "$work/upload.log" 2>&1 || { grep -vE "^[a-z]+( [a-z]+){11}$" "$work/upload.log" | tail -25; exit 1; }
-  grep -E "^(Network|Program |The program file|The new program file|The new code|Carrying on|  |PASS|FAIL|Next|Then|All items)" "$work/upload.log" || true; }
+  grep -E "^(Network|Release build|Program |An upload|The program file|The new program file|The new code|Carrying on|  |PASS|FAIL|Next|Then|All items)" "$work/upload.log" || true; }
 
 step "3. the program's address into the code, and the build"
 in_copy ./scripts/deploy/set-program-id.sh "$(addr program)"
@@ -79,7 +80,7 @@ solana-keygen new --no-bip39-passphrase --silent --outfile "$work/keys/poor.json
 solana airdrop 1 "$(addr poor)" --url "$url" >/dev/null
 if in_copy ./scripts/deploy/deploy.sh --program-key "$(key program)" --payer "$(key poor)" > "$work/again.log" 2>&1; then echo "FAIL  it started without enough SOL"; exit 1; else grep -E "needed to start|this wallet has|STOPPED" "$work/again.log"; echo "PASS  refused"; fi
 half_upload() { ( cd "$work/src" && mkdir -p scripts/deploy/out && solana-keygen new --no-bip39-passphrase --silent --outfile scripts/deploy/out/upload-holding-keypair.json >/dev/null \
-  && solana program write-buffer target/deploy/burrpad.so --url "$url" --keypair "$(key deployer)" --buffer scripts/deploy/out/upload-holding-keypair.json >/dev/null 2>&1 ); }
+  && solana program write-buffer target/release-kit/burrpad.so --url "$url" --keypair "$(key deployer)" --buffer scripts/deploy/out/upload-holding-keypair.json >/dev/null 2>&1 ); }
 echo "-- an upload left unfinished: the deposit can be taken back"
 half_upload
 echo "deploy wallet with an unfinished upload: $(sol deployer)"
@@ -93,8 +94,11 @@ echo "-- a second deploy to the same address is refused:"
 if in_copy ./scripts/deploy/deploy.sh --program-key "$(key program)" --payer "$(key deployer)" > "$work/again.log" 2>&1; then echo "FAIL  it deployed twice"; exit 1; else grep STOPPED "$work/again.log"; echo "PASS  refused"; fi
 
 step "5. initialize, in the same sitting"
+echo "-- a stranger sends SOL to the settings address first; initialize must not mistake that for done:"
+settings=$( cd "$kit" && node --input-type=module -e 'import { loadIdl, configAddress } from "./lib.mjs"; console.log(configAddress(loadIdl()).toBase58())' )
+solana airdrop 0.01 "$settings" --url "$url" >/dev/null
 node "$kit/initialize.mjs" --upgrade-key "$(key deployer)" --platform-receiver "$(addr platform)" --rewards-wallet "$(addr rewards)"
-echo "-- a second time changes nothing:"
+echo "-- a second run sends nothing and checks what is there against what was given:"
 node "$kit/initialize.mjs" --upgrade-key "$(key deployer)" --platform-receiver "$(addr platform)" --rewards-wallet "$(addr rewards)"
 
 step "6. the address table"
@@ -108,6 +112,8 @@ echo "set-up cost the deploy wallet: started with 12 SOL, now $(sol deployer)"
 step "8. the first-coin check, first half"
 before=$(sol deployer)
 node "$kit/first-coin.mjs" start --payer "$(key deployer)"
+echo "-- run again, it carries on with the same coin and launches no second one:"
+node "$kit/first-coin.mjs" start --payer "$(key deployer)" | grep -E "Carrying on|already paid|All items|FAIL"
 echo "the first half cost: from $before to $(sol deployer)"
 
 step "9. upgrade the program in place, and read it back"
@@ -140,7 +146,7 @@ if node "$kit/hand-over-upgrade.mjs" --upgrade-key "$(key deployer)" --new-autho
 else echo "PASS  refused, as it should be"; fi
 node "$kit/admin.mjs" propose-admin "$(addr wallet)" --admin-key "$(key deployer)"
 echo "-- what a multi-signature wallet would be given to approve (not sent):"
-node "$kit/admin.mjs" accept-admin --admin "$(addr wallet)" | head -4 | cut -c1-90
+node "$kit/admin.mjs" accept-admin --admin "$(addr wallet)" | sed -n '1,4p' | cut -c1-90
 node "$kit/admin.mjs" accept-admin --admin-key "$(key wallet)"
 node "$kit/hand-over-upgrade.mjs" --upgrade-key "$(key deployer)" --new-authority "$(addr wallet)"
 echo "-- the old key can no longer administer or upgrade:"
@@ -150,6 +156,12 @@ if in_copy ./scripts/deploy/upgrade.sh --plain --upgrade-key "$(key deployer)" >
 step "13. an upgrade once the wallet holds the key: upload, offer, and the wallet approves"
 quiet_upload in_copy ./scripts/deploy/upgrade.sh --plain --payer "$(key deployer)" --offer-to "$(addr wallet)"
 buffer=$(awk '/buffer address:/ {print $3}' "$work/upload.log")
+echo "-- an upload offered by a stranger, with other code in it, is told apart before anyone approves:"
+solana-keygen new --no-bip39-passphrase --silent --outfile "$work/keys/otherbuf.json" >/dev/null
+solana airdrop 8 "$(addr poor)" --url "$url" >/dev/null
+solana program write-buffer "$work/accounts/program_mayhem.so" --url "$url" --keypair "$(key poor)" --buffer "$work/keys/otherbuf.json" > "$work/other.log" 2>&1 || { tail -3 "$work/other.log"; exit 1; }
+solana program set-buffer-authority "$(addr otherbuf)" --new-buffer-authority "$(addr wallet)" --url "$url" --keypair "$(key poor)" > "$work/other.log" 2>&1 || { tail -3 "$work/other.log"; exit 1; }
+if node "$kit/verify-buffer.mjs" "$(addr otherbuf)" --authority "$(addr wallet)"; then echo "FAIL  a stranger's upload passed"; exit 1; else echo "PASS  refused"; fi
 echo "-- the wallet's part (done in its own app on the real network; here the stand-in key does it):"
 solana program deploy --buffer "$buffer" --program-id "$(addr program)" --upgrade-authority "$(key wallet)" --keypair "$(key wallet)" --url "$url" > "$work/wallet-upgrade.log" 2>&1 \
   || { tail -5 "$work/wallet-upgrade.log"; exit 1; }

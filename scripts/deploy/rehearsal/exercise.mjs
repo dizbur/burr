@@ -14,7 +14,7 @@ if (conn.isMainnet) fail("never on the main network");
 const idl = loadIdl();
 const payer = loadKey(need(opts, "payer"), "--payer");
 const rewards = loadKey(need(opts, "rewards-key"), "--rewards-key");
-const table = await loadTable(conn, address(readOut("test").table, "saved table"));
+const table = await loadTable(conn, address(readOut(conn.outName).table, "saved table"));
 const t = checker();
 
 const launch = async () => {
@@ -30,7 +30,7 @@ const refusedWith = async (what, name, attempt) => {
 };
 
 if (phase === "paused") {
-  const mint = address(readOut("test").firstCoin, "the first coin");
+  const mint = address(readOut(conn.outName).firstCoin, "the first coin");
   await refusedWith("a launch is refused while launches are paused", "LaunchesPaused", launch);
   await refusedWith("a holder release is refused while releases are paused", "HolderReleasesPaused",
     async () => send(conn, [releaseIx(idl, mint, rewards.publicKey, 1n, (await clock(conn)).slot, Buffer.alloc(32, 1))], [rewards]));

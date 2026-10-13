@@ -2,7 +2,7 @@
 // can ever change it. Safe to run again: it carries on from where it stopped.
 //   node scripts/deploy/address-table.mjs --url <network> --payer <file> [--table <address>] [--mainnet yes]
 import { AddressLookupTableProgram } from "@solana/web3.js";
-import { address, checker, connect, fixedAccounts, loadIdl, loadKey, need, options, readOut, send, sleep, writeOut } from "./lib.mjs";
+import { address, checker, connect, fail, fixedAccounts, loadIdl, loadKey, need, options, readOut, send, sleep, writeOut } from "./lib.mjs";
 
 const opts = options(["url", "payer", "table", "mainnet"]);
 const conn = await connect(opts);
@@ -11,7 +11,7 @@ const payer = loadKey(need(opts, "payer"), "--payer");
 const name = conn.outName;
 const want = fixedAccounts(idl);
 
-let table = opts.table ? address(opts.table, "--table") : readOut(name).table ? address(readOut(name).table, "saved table") : null;
+let table = opts.table === "new" ? null : opts.table ? address(opts.table, "--table") : readOut(name).table ? address(readOut(name).table, "saved table") : null;
 if (table && !(await conn.getAddressLookupTable(table)).value) table = null;
 if (!table) {
   const slot = await conn.getSlot("finalized");
@@ -31,7 +31,10 @@ if (missing.length) {
   console.log(`Added ${missing.length} addresses.`);
 }
 s = await state();
+const exact = () => s.addresses.length === want.length && s.addresses.every((x, i) => x.equals(want[i]));
+if (!exact()) fail("the table does not hold exactly the fixed accounts. It was not frozen. Give a fresh one a go: run this again with  --table new");
 if (s.authority) {
+  // Freezing cannot be undone, so it comes only after the contents were checked.
   await send(conn, [AddressLookupTableProgram.freezeLookupTable({ lookupTable: table, authority: payer.publicKey })], [payer]);
   console.log("Frozen.");
 }
