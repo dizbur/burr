@@ -11,7 +11,7 @@ pub const WEIGHT_TOTAL: u128 = 100_000_000;
 /// Fixed-point scale of the vault share's running total.
 pub const ACC_SCALE: u128 = 1_000_000_000_000_000_000;
 
-/// The six split weights of a coin.
+/// The split weights of a coin: the platform's, then one per hook.
 pub fn weights(platform_fraction_bps: u16, shares: &[u16; HOOKS]) -> Option<[u128; SINKS]> {
     if platform_fraction_bps > BPS {
         return None;

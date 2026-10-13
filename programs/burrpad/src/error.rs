@@ -34,8 +34,6 @@ pub enum BurrpadError {
     UnreadablePumpAccount,
     #[msg("This receiver is not the one in the coin's record")]
     WrongReceiver,
-    #[msg("This pot is not one that is paid out to a receiver")]
-    NotAPayoutPot,
     #[msg("Arithmetic overflow")]
     Overflow,
     #[msg("The vault holds less than the ledger says")]

@@ -211,7 +211,6 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     coin.authority_bump = ctx.bumps.authority;
     coin.burner_bump = burner_bump;
     coin.stake_authority_bump = stake_authority_bump;
-    coin.ledger_bump = ctx.bumps.ledger;
     coin.fee_bps = args.fee_bps;
     coin.platform_fraction_bps = platform_fraction_bps;
     coin.platform_receiver = platform_receiver;
