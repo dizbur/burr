@@ -22,10 +22,11 @@ pub const BPS: u16 = 10_000;
 pub const HARD_MIN_FEE_BPS: u16 = 10;
 pub const HARD_MAX_FEE_BPS: u16 = 500;
 pub const HARD_MAX_PLATFORM_FRACTION_BPS: u16 = 5_000;
-/// The platform's part can never be set below a quarter. This is what keeps
-/// trading around a buy back a loss even for a coin's own creator: a creator
-/// gets back at most three quarters of the fee they pay, and the buy back's
-/// limit leaves a gain of at most a quarter of the fees paid.
+/// The platform's part can never be set below a quarter. A creator then gets
+/// back at most three quarters of the fee they pay, and the buy back's limit
+/// hands a trader around it at most a quarter of the fees paid: so for a
+/// coin's own creator the two cancel, and pump.fun's own fee makes trading
+/// around the buy back a loss. At the starting half the loss is much larger.
 pub const HARD_MIN_PLATFORM_FRACTION_BPS: u16 = 2_500;
 
 // Starting settings.
