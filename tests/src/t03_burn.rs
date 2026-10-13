@@ -117,8 +117,9 @@ fn a_price_pushed_up_is_not_bought_at() {
     assert!(l.burn.last_time > after_first.burn.last_time, "the new price and time were recorded");
 
     // The pushed price was not taken as the new reference: it rose by one 5% step only.
-    assert_eq!(l.burn.reference.base, after_first.burn.reference.base);
-    assert_eq!(l.burn.reference.quote as u128, after_first.burn.reference.quote as u128 * 10_500 / 10_000);
+    // (The price is the ZEC figure over the coin figure; the step lowers the coin figure.)
+    assert_eq!(l.burn.reference.quote, after_first.burn.reference.quote);
+    assert_eq!(l.burn.reference.base as u128, after_first.burn.reference.base as u128 * 10_000 / 10_500);
 
     // It cannot be retried at once.
     let r = w.burn_curve(&mint);
@@ -385,8 +386,9 @@ fn pushing_the_price_for_one_call_does_not_move_the_reference_to_it() {
     // Three pushes moved the reference by three 5% steps, no more.
     let launch_price = (275_548_581u128, 1_073_000_000_000_000u128);
     let r = w.ledger(&mint).burn.reference;
-    assert_eq!(r.base as u128, launch_price.1);
-    assert!((r.quote as u128) < launch_price.0 * 116 / 100);
+    assert_eq!(r.quote as u128, launch_price.0, "the recorded reserve did not grow");
+    assert!(r.base as u128 * 116 / 100 > launch_price.1, "the price rose by three steps at most");
+    assert!((r.base as u128) < launch_price.1);
 }
 
 #[test]

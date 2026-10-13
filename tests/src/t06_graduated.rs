@@ -124,8 +124,10 @@ fn a_burn_on_the_pool_buys_and_destroys() {
     let supply = w.b.mint_supply(&mint);
     let pot = w.ledger(&mint).pots[3];
     let burned_before = w.ledger(&mint).burn.total_burned;
-    let (reserve, _) = w.pool_reserves(&mint);
-    // The reserve used is the pool's ZEC balance plus the pool's own adjustment.
+    // The limit is measured against the smaller of the pool's reserve (its
+    // ZEC balance plus the pool's own adjustment) and the reserve recorded at
+    // the last burn, which grows a step at a time.
+    let reserve = w.pool_reserves(&mint).0.min(w.ledger(&mint).burn.reference.quote);
     assert_ne!(w.pool(&mint).virtual_quote_reserves, 0);
 
     let r = w.burn_pool(&mint);
@@ -153,10 +155,12 @@ fn a_burn_on_the_pool_buys_and_destroys() {
     w.b.wait(60);
     w.burn_until_it_buys(&mint);
     assert!(w.ledger(&mint).pots[3] < before);
-    // After a burn the pool's figures at that moment are the new reference.
+    // After a burn the pool's price at that moment is the new reference.
     let (q, b) = w.pool_reserves(&mint);
     let r = w.ledger(&mint).burn.reference;
-    assert_eq!((r.quote, r.base), (q, b));
+    let (lhs, rhs) = (r.quote as u128 * b as u128, q as u128 * r.base as u128);
+    assert!(lhs.abs_diff(rhs) <= rhs / 1_000_000, "recorded price is the pool's price");
+    assert!(r.quote <= q, "the recorded reserve never exceeds the real one");
 }
 
 #[test]
@@ -339,9 +343,65 @@ fn the_pool_burn_limit_follows_the_fee_the_pool_really_charges() {
     let mut a = w.b.account(&key).unwrap();
     a.data[261..269].copy_from_slice(&50u64.to_le_bytes());
     w.b.svm.set_account(key, a).unwrap();
-    let (reserve, _) = w.pool_reserves(&mint);
+    let reserve = w.pool_reserves(&mint).0.min(w.ledger(&mint).burn.reference.quote);
     let before = w.ledger(&mint).pots[3];
     let r = w.burn_pool(&mint);
     assert!(r.is_ok(), "{}", logs(&r));
     assert_eq!(before - w.ledger(&mint).pots[3], reserve * 50 / 40_000);
+}
+
+fn lp_supply(w: &World, mint: &Pubkey) -> u64 {
+    let d = w.b.account(&pump::pool(mint)).unwrap().data;
+    u64::from_le_bytes(d[203..211].try_into().unwrap())
+}
+
+#[test]
+fn liquidity_added_at_the_end_of_a_climb_does_not_raise_the_pool_burns_limit() {
+    // After graduation the price is far above the launch reference and the
+    // burn climbs to it in steps. On the call where the climb ends, someone
+    // adds liquidity to the pool for that one transaction, hoping the spend
+    // limit follows the swollen reserve.
+    let mut w = World::new();
+    let mint = w.launch(&burn_plan(200));
+    w.graduate(&mint);
+    w.b.give_zec(&kit::authority(&mint), 2_000 * ZEC1);
+    assert!(w.split(&mint).is_ok());
+    let lp = w.trader(100_000 * ZEC1);
+    assert!(w.pool_buy(&lp, &mint, 30 * ZEC1).is_ok());
+    let mk = pump::create_ata(&lp.pubkey(), &lp.pubkey(), &pump::lp_mint(&mint), &TOKEN_2022);
+    assert!(w.b.send_as(Some(&lp), &[mk], &[]).is_ok());
+
+    for _ in 0..300 {
+        w.b.wait(60);
+        let (q, b) = w.pool_reserves(&mint);
+        let r = w.ledger(&mint).burn.reference;
+        let will_buy = q as u128 * r.base as u128 * 10_000 <= r.quote as u128 * b as u128 * 10_500;
+        if !will_buy {
+            assert!(w.burn_pool(&mint).is_ok());
+            continue;
+        }
+        // The honest limit: the pool's real reserve times a quarter of the fee.
+        let honest = q as u128 * 200 / 40_000;
+        let pot = w.ledger(&mint).pots[3];
+        let payer = w.b.payer.pubkey();
+        let ixs = [
+            // As much liquidity as the holder's coins allow.
+            pump::pool_deposit(
+                &mint,
+                &lp.pubkey(),
+                (lp_supply(&w, &mint) as u128 * w.coins_of(&lp.pubkey(), &mint) as u128 * 9 / 10 / b as u128) as u64,
+                u64::MAX,
+                u64::MAX,
+            ),
+            kit::raw(w.burn_pool_accounts(&payer, &mint), burrpad::instruction::BurnPool {}),
+        ];
+        let payer_kp = w.b.payer.insecure_clone();
+        let r = w.b.send_as(Some(&lp), &ixs, &[&payer_kp]);
+        assert!(r.is_ok(), "{}", logs(&r));
+        let spent = (pot - w.ledger(&mint).pots[3]) as u128;
+        assert!(spent > 0, "this was the call that buys");
+        assert!(spent <= honest + 1, "spent {spent}, four times the pool's real reserve would allow {honest}");
+        return;
+    }
+    panic!("the burn never reached the price");
 }

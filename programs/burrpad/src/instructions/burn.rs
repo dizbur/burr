@@ -42,9 +42,10 @@ fn plan(
     require!(now >= ready, BurrpadError::BurnTooSoon);
     if reserves.above(&b.reference, coin.burn_price_band_bps).ok_or(BurrpadError::Overflow)? {
         // Do not take the price seen now as the new reference: it may have
-        // been pushed for this one call. Raise the reference by one band
-        // only. A real rise is followed step by step, one waiting time each.
-        b.reference = b.reference.raised_by(coin.burn_price_band_bps).ok_or(BurrpadError::Overflow)?;
+        // been pushed for this one call. Raise the reference price by one
+        // band only. A real rise is followed step by step, one waiting time
+        // each. The recorded reserve does not grow here.
+        b.reference = b.reference.price_raised_by(coin.burn_price_band_bps).ok_or(BurrpadError::Overflow)?;
         b.last_time = now;
         emit!(BurnSkipped { mint: coin.mint });
         return Ok(None);

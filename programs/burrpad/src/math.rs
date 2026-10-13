@@ -144,7 +144,18 @@ impl Reserves {
         Some(lhs > rhs)
     }
 
-    /// This price raised by `band_bps`, for stepping a reference upward.
+    /// The same reserve figure at a price `band_bps` higher, for stepping a
+    /// reference price upward. Only the coin figure moves. The ZEC figure is
+    /// what the spend limit is measured against, and a refused call must
+    /// never make it larger.
+    pub fn price_raised_by(&self, band_bps: u16) -> Option<Reserves> {
+        let b = (self.base as u128).checked_mul(BPS as u128)? / (BPS as u128 + band_bps as u128);
+        let b = b.min((self.base as u128).saturating_sub(1)).max(1);
+        Some(Reserves { quote: self.quote, base: u64::try_from(b).ok()? })
+    }
+
+    /// The reserve figure raised by `band_bps`: the most a recorded reserve
+    /// may grow from one buy to the next.
     pub fn raised_by(&self, band_bps: u16) -> Option<Reserves> {
         let q = (self.quote as u128).checked_mul(BPS as u128 + band_bps as u128)? / BPS as u128;
         Some(Reserves { quote: u64::try_from(q.max(self.quote as u128 + 1)).ok()?, base: self.base })
