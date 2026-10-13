@@ -428,6 +428,7 @@ fn release_holder_rewards() {
     type A = burrpad::accounts::ReleaseHolderRewards;
     let swaps: Vec<Swap<A>> = vec![
         sw("config", |x: &mut A| x.config = fake),
+        sw("mint", |x: &mut A| x.mint = b),
         sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
         sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
         sw("authority", |x: &mut A| {

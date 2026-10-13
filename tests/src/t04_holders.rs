@@ -432,6 +432,77 @@ fn a_proposed_rewards_wallet_can_be_cancelled_or_replaced() {
 }
 
 #[test]
+fn a_wallet_change_and_a_release_cannot_be_packed_into_one_transaction() {
+    // What the wait is for: one stolen administrator key, one transaction,
+    // every open holder pot.
+    let (mut w, mint) = setup();
+    let admin = w.admin.insecure_clone();
+    let old = w.rewards_wallet.insecure_clone();
+    let thief = w.b.wallet();
+    let pot = w.ledger(&mint).pots[4];
+    let slot = w.slot();
+
+    let propose = w.admin_ix(&admin.pubkey(), burrpad::instruction::ProposeRewardsWallet { wallet: thief.pubkey() });
+    let apply = w.admin_ix(&admin.pubkey(), burrpad::instruction::ApplyRewardsWallet {});
+    let take = release_ix(&w, &thief.pubkey(), &mint, slot, [6; 32]);
+    let r = w.b.send_as(Some(&admin), &[propose.clone(), apply.clone(), take.clone()], &[&thief]);
+    assert_eq!(custom_code(&r), Some(err(E::RewardsWalletWaitNotOver)), "{}", logs(&r));
+    let r = w.b.send_as(Some(&admin), &[propose.clone(), take.clone()], &[&thief]);
+    assert_eq!(custom_code(&r), Some(err(E::NotRewardsWallet)), "{}", logs(&r));
+    assert_eq!((w.ledger(&mint).pots[4], w.zec_of(&thief.pubkey())), (pot, 0));
+    assert_eq!(w.config().pending_rewards_wallet, Pubkey::default(), "a failed transaction leaves no proposal");
+
+    // Proposed right after a release: the next release, half an hour on,
+    // still goes to the old wallet.
+    assert!(w.release_holders(&mint).is_ok());
+    assert!(w.b.send_as(Some(&admin), &[propose], &[]).is_ok());
+    fee(&mut w, &mint, ZEC1);
+    w.b.wait(HALF_HOUR);
+    let second = w.ledger(&mint).pots[4];
+    assert!(w.release_holders(&mint).is_ok());
+    assert_eq!((w.zec_of(&old.pubkey()), w.zec_of(&thief.pubkey())), (pot + second, 0));
+
+    // Once the day is over, applying and releasing in one transaction is
+    // allowed: the change was in the open all that time. The old wallet in
+    // that same transaction is already shut out.
+    fee(&mut w, &mint, ZEC1);
+    w.b.wait(DAY);
+    let third = w.ledger(&mint).pots[4];
+    let slot = w.slot();
+    let by_old = release_ix(&w, &old.pubkey(), &mint, slot, [5; 32]);
+    let r = w.b.send_as(Some(&admin), &[apply.clone(), by_old], &[&old]);
+    assert_eq!(custom_code(&r), Some(err(E::NotRewardsWallet)), "{}", logs(&r));
+    let take = release_ix(&w, &thief.pubkey(), &mint, slot, [5; 32]);
+    let r = w.b.send_as(Some(&admin), &[apply, take], &[&thief]);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert_eq!(w.zec_of(&thief.pubkey()), third);
+    w.assert_sound(&mint);
+}
+
+#[test]
+fn each_release_is_announced_with_its_run_number() {
+    let (mut w, mint) = setup();
+    for run in 1u64..=3 {
+        let pot = w.ledger(&mint).pots[4];
+        let slot = w.slot();
+        let r = w.release_holders(&mint);
+        assert!(r.is_ok(), "{}", logs(&r));
+        let said = events::<burrpad::events::HolderRewardsReleased>(&r);
+        assert_eq!(said.len(), 1);
+        let e = &said[0];
+        assert_eq!(e.len(), 32 + 32 + 8 + 8 + 8 + 32);
+        assert_eq!(e[..32], mint.to_bytes());
+        assert_eq!(e[32..64], w.rewards_wallet.pubkey().to_bytes());
+        assert_eq!(e[64..72], pot.to_le_bytes());
+        assert_eq!(e[72..80], run.to_le_bytes(), "the run number in the event");
+        assert_eq!(e[80..88], slot.to_le_bytes());
+        assert_eq!(w.ledger(&mint).holders.runs, run);
+        fee(&mut w, &mint, ZEC1);
+        w.b.wait(HALF_HOUR);
+    }
+}
+
+#[test]
 fn the_pause_stops_every_coins_release_at_once_and_nothing_else() {
     // For a stolen rewards wallet: no waiting. The pots stay where they are.
     let mut w = World::new();
