@@ -46,6 +46,14 @@ pub struct Split {
     pub credited: [u64; 5],
 }
 
+/// ZEC found in another account of the coin's authority was moved to its vault.
+#[event]
+pub struct Recovered {
+    pub mint: Pubkey,
+    pub from: Pubkey,
+    pub amount: u64,
+}
+
 #[event]
 pub struct PaidOut {
     pub mint: Pubkey,

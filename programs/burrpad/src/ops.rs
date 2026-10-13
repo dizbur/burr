@@ -35,7 +35,8 @@ pub fn debit(ledger: &mut Ledger, sink: usize, amount: u64) -> Result<()> {
     Ok(())
 }
 
-/// Moves ZEC out of a coin's vault, signed by the coin's authority.
+/// Moves ZEC out of a coin's vault (or, for `recover`, out of another ZEC
+/// account of the same authority), signed by the coin's authority.
 #[allow(clippy::too_many_arguments)]
 pub fn pay_from_vault<'info>(
     token_program: &AccountInfo<'info>,

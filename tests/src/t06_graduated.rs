@@ -73,6 +73,94 @@ fn fees_from_both_the_curve_and_the_pool_reach_the_vault() {
 }
 
 #[test]
+fn a_pool_fee_paid_into_a_side_account_can_be_brought_home_by_anyone() {
+    // PumpSwap pays a coin's fee to any ZEC account whose owner is the
+    // creator. A stranger makes one for the coin's authority and has the fee
+    // paid there. The money is the authority's, but not in the vault.
+    let (mut w, mint) = graduated(&LaunchPlan::default());
+    assert!(w.collect_curve(&mint).is_ok());
+    assert!(w.collect_pool(&mint).is_ok());
+    let t = w.trader(1_000 * ZEC1);
+    assert!(w.pool_buy(&t, &mint, 5 * ZEC1).is_ok());
+    let before = w.ledger(&mint);
+    let vault = w.vault_balance(&mint);
+
+    let side = w.divert_pool_fee(&mint);
+    let diverted = w.b.token_balance(&side);
+    assert!(diverted > 0, "the attack: the pool's fee went to the side account");
+    // The ordinary collect finds nothing, and the ledger knows nothing of it.
+    assert!(w.collect_pool(&mint).is_ok());
+    assert_eq!((w.vault_balance(&mint), w.ledger(&mint).accounted), (vault, before.accounted));
+
+    // Anyone brings it home. It lands in the vault and is split like any fee.
+    let r = w.recover(&mint, &side);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert_eq!(w.b.token_balance(&side), 0, "the diverted fee was not brought home");
+    assert_eq!(w.vault_balance(&mint), vault + diverted);
+    let l = w.ledger(&mint);
+    assert_eq!(l.accounted, before.accounted + diverted, "the recovered fee was not split");
+    assert_eq!(l.total_split, before.total_split + diverted as u128);
+    assert_eq!(l.pots[0] - before.pots[0], diverted / 2, "half to the platform, as for any fee");
+    w.assert_sound(&mint);
+
+    // Doing it again, or on an empty side account, changes nothing.
+    assert!(w.recover(&mint, &side).is_ok());
+    assert_eq!(w.ledger(&mint).accounted, l.accounted);
+    // It happens again; it is brought home again.
+    assert!(w.pool_buy(&t, &mint, ZEC1).is_ok());
+    let [sweep, collect] = pump::pool_fee_to(&mint, &t.pubkey(), &kit::authority(&mint), &side);
+    assert!(w.b.send_as(Some(&t), &[sweep, collect], &[]).is_ok());
+    let again = w.b.token_balance(&side);
+    assert!(again > 0);
+    assert!(w.recover(&mint, &side).is_ok());
+    assert_eq!(w.ledger(&mint).accounted, l.accounted + again);
+    w.assert_sound(&mint);
+}
+
+#[test]
+fn recover_moves_money_only_into_the_same_coins_vault() {
+    let (mut w, a) = graduated(&LaunchPlan::default());
+    let b = w.launch(&LaunchPlan::default());
+    let t = w.trader(1_000 * ZEC1);
+    assert!(w.pool_buy(&t, &a, 5 * ZEC1).is_ok());
+    let side = w.divert_pool_fee(&a);
+    let diverted = w.b.token_balance(&side);
+    w.b.give_zec(&kit::authority(&a), ZEC1);
+    w.b.give_zec(&kit::authority(&b), ZEC1);
+    let (va, vb) = (w.vault_balance(&a), w.vault_balance(&b));
+
+    // The vault itself is not a stray account: nothing to "recover" from it.
+    let r = w.recover(&a, &kit::vault(&a));
+    // (The framework already refuses the same writable account twice; the
+    // program's own check stands behind that.)
+    assert!(
+        matches!(custom_code(&r), Some(c) if c == 2040 || c == err(E::NotAStrayAccount)),
+        "the vault as the stray account: {}",
+        logs(&r)
+    );
+    // Someone else's ZEC account cannot be emptied this way.
+    let r = w.recover(&a, &ata(&t.pubkey(), &ZEC, &TOKEN));
+    assert!(r.is_err(), "a trader's account as the stray account");
+    // Coin A's side account cannot be recovered into coin B, nor B's vault drawn into A.
+    let r = w.recover(&b, &side);
+    assert!(r.is_err(), "another coin's stray account");
+    let r = w.recover(&a, &kit::vault(&b));
+    assert!(r.is_err(), "another coin's vault as the stray account");
+    let mut acc = w.recover_accounts(&a, &side);
+    acc.vault = kit::vault(&b);
+    assert!(
+        w.b.send(&[kit::raw(acc, burrpad::instruction::Recover {})], &[]).is_err(),
+        "another coin's vault as destination"
+    );
+
+    assert_eq!((w.vault_balance(&a), w.vault_balance(&b), w.b.token_balance(&side)), (va, vb, diverted));
+    assert!(w.recover(&a, &side).is_ok());
+    assert_eq!(w.vault_balance(&a), va + diverted);
+    w.assert_sound(&a);
+    w.assert_sound(&b);
+}
+
+#[test]
 fn collect_pool_before_graduation_is_refused() {
     let mut w = World::new();
     let mint = w.launch(&LaunchPlan::default());

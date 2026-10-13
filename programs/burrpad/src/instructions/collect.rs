@@ -6,6 +6,7 @@
 
 use crate::constants::*;
 use crate::error::BurrpadError;
+use crate::events::Recovered;
 use crate::ops;
 use crate::pump;
 use crate::state::{Coin, Ledger};
@@ -40,6 +41,67 @@ pub struct SplitOnly<'info> {
 
 pub fn handle_split(ctx: Context<SplitOnly>) -> Result<()> {
     ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount)?;
+    Ok(())
+}
+
+/// Brings home ZEC that sits in some other token account owned by a coin's
+/// authority.
+///
+/// Why it exists: PumpSwap pays a coin's pool fee to any ZEC account whose
+/// owner is the coin's creator; it does not insist on the standard one. Anyone
+/// can make such an account for a coin's authority and have the pool fee
+/// paid into it. The fee is then the authority's but not in the vault, and
+/// nothing else in this program can move it. This instruction can: from any
+/// such account, to the coin's vault, and nowhere else. So anyone may call it.
+#[derive(Accounts)]
+pub struct Recover<'info> {
+    /// CHECK: only its address is used, to derive the coin's accounts
+    pub mint: UncheckedAccount<'info>,
+    #[account(seeds = [SEED_COIN, mint.key().as_ref()], bump = coin.bump)]
+    pub coin: Box<Account<'info, Coin>>,
+    #[account(mut, seeds = [SEED_LEDGER, mint.key().as_ref()], bump = ledger.bump)]
+    pub ledger: Box<Account<'info, Ledger>>,
+    /// CHECK: the coin's authority, a derived address
+    #[account(seeds = [SEED_AUTHORITY, mint.key().as_ref()], bump = coin.authority_bump)]
+    pub authority: UncheckedAccount<'info>,
+    #[account(
+        mut,
+        associated_token::mint = zec_mint,
+        associated_token::authority = authority,
+        associated_token::token_program = token_program
+    )]
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(address = ZEC_MINT)]
+    pub zec_mint: Box<InterfaceAccount<'info, Mint>>,
+    /// A ZEC account owned by this coin's authority that is not its vault.
+    #[account(
+        mut,
+        token::mint = zec_mint,
+        token::authority = authority,
+        token::token_program = token_program,
+        constraint = stray.key() != vault.key() @ BurrpadError::NotAStrayAccount
+    )]
+    pub stray: Box<InterfaceAccount<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+}
+
+pub fn handle_recover(ctx: Context<Recover>) -> Result<()> {
+    let a = &ctx.accounts;
+    let amount = a.stray.amount;
+    ops::pay_from_vault(
+        &a.token_program.to_account_info(),
+        &a.stray.to_account_info(),
+        &a.zec_mint.to_account_info(),
+        &a.vault.to_account_info(),
+        &a.authority.to_account_info(),
+        &a.coin.mint,
+        a.coin.authority_bump,
+        amount,
+    )?;
+    // What arrived is fee like any other: split it now.
+    ctx.accounts.vault.reload()?;
+    ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount)?;
+    emit!(Recovered { mint: ctx.accounts.coin.mint, from: ctx.accounts.stray.key(), amount });
     Ok(())
 }
 

@@ -70,4 +70,6 @@ pub enum BurrpadError {
     HolderReleasesPaused,
     #[msg("The holder pot holds less than the amount asked for")]
     ReleaseAboveThePot,
+    #[msg("That account is the coin's vault, not a stray one")]
+    NotAStrayAccount,
 }

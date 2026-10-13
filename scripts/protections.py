@@ -239,6 +239,15 @@ MANUAL = [
       "    if amount == 0 {\n        return Ok(());\n    }\n    if p.destination.data_is_empty()", "    if p.destination.data_is_empty()",
       "an_empty_pot_pays_nothing_and_makes_no_account"),
 
+    # ---- recover ----
+    M("R20", "Recovered ZEC is split, not left unaccounted", COLLECT,
+      "    ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount)?;\n    emit!(Recovered", "    emit!(Recovered",
+      "a_pool_fee_paid_into_a_side_account_can_be_brought_home_by_anyone", "the recovered fee was not split"),
+    M("R21", "Recover reads the vault afresh after moving the ZEC", COLLECT,
+      "    ctx.accounts.vault.reload()?;\n    ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount)?;\n    emit!(Recovered",
+      "    ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount)?;\n    emit!(Recovered",
+      "a_pool_fee_paid_into_a_side_account_can_be_brought_home_by_anyone", "the recovered fee was not split"),
+
     # ---- holders ----
     M("H1", "Only the rewards wallet named in the settings can take a holder pot", HOLD,
       "#[account(mut, address = config.rewards_wallet @ BurrpadError::NotRewardsWallet)]", "#[account(mut)]",
@@ -407,7 +416,7 @@ MANUAL = [
 STRUCT_TEST = {
     "Launch": "launch", "SplitOnly": "split", "CollectCurve": "collect_curve", "CollectPool": "collect_pool",
     "PayOut": "pay_out", "BurnCurve": "burn_curve", "BurnPool": "burn_pool",
-    "ReleaseHolderRewards": "release_holder_rewards",
+    "ReleaseHolderRewards": "release_holder_rewards", "Recover": "recover",
 }
 CONSTRAINT_KEYS = ("seeds", "bump", "address", "associated_token::", "token::", "mint::", "has_one", "constraint")
 

@@ -95,6 +95,11 @@ pub mod burrpad {
         instructions::collect::handle_collect_pool(ctx)
     }
 
+    /// Moves ZEC from another account of the coin's authority into its vault, and splits it.
+    pub fn recover(ctx: Context<Recover>) -> Result<()> {
+        instructions::collect::handle_recover(ctx)
+    }
+
     pub fn pay_out(ctx: Context<PayOut>, payee: Payee) -> Result<()> {
         instructions::pay_out::handle_pay_out(ctx, payee)
     }

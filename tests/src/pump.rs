@@ -437,3 +437,63 @@ pub fn set_metaplex_creator(mint: &Pubkey) -> Instruction {
         data: disc("set_metaplex_creator").to_vec(),
     }
 }
+
+// ---- a pool's fee paid somewhere other than the creator's standard account ----
+
+/// Makes an ordinary ZEC token account at `account`'s address whose owner is
+/// `owner`. The token program lets anyone do this for any owner.
+pub fn make_zec_account_for(payer: &Pubkey, account: &Pubkey, owner: &Pubkey, rent: u64) -> [Instruction; 2] {
+    let mut create = vec![0u8, 0, 0, 0];
+    create.extend_from_slice(&rent.to_le_bytes());
+    create.extend_from_slice(&165u64.to_le_bytes());
+    create.extend_from_slice(TOKEN.as_ref());
+    let mut init = vec![18u8]; // InitializeAccount3
+    init.extend_from_slice(owner.as_ref());
+    [
+        Instruction { program_id: SYSTEM, accounts: vec![rws(*payer), rws(*account)], data: create },
+        Instruction { program_id: TOKEN, accounts: vec![rw(*account), ro(ZEC)], data: init },
+    ]
+}
+
+/// PumpSwap's own sweep and collect for a coin's creator, called directly,
+/// with the fee paid into `destination`. PumpSwap accepts any ZEC account
+/// whose owner is the creator.
+pub fn pool_fee_to(mint: &Pubkey, payer: &Pubkey, creator: &Pubkey, destination: &Pubkey) -> [Instruction; 2] {
+    let p = pool(mint);
+    let va = pda(&[b"creator_vault", creator.as_ref()], &PUMP_AMM);
+    let vata = ata(&va, &ZEC, &TOKEN);
+    [
+        Instruction {
+            program_id: PUMP_AMM,
+            accounts: vec![
+                rws(*payer),
+                ro(amm_global_config()),
+                rw(p),
+                ro(ZEC),
+                ro(TOKEN),
+                rw(ata(&p, &ZEC, &TOKEN)),
+                ro(va),
+                rw(vata),
+                ro(SYSTEM),
+                ro(ATA_PROGRAM),
+                ro(amm_event_authority()),
+                ro(PUMP_AMM),
+            ],
+            data: disc("sweep_creator_fee").to_vec(),
+        },
+        Instruction {
+            program_id: PUMP_AMM,
+            accounts: vec![
+                ro(ZEC),
+                ro(TOKEN),
+                ro(*creator),
+                ro(va),
+                rw(vata),
+                rw(*destination),
+                ro(amm_event_authority()),
+                ro(PUMP_AMM),
+            ],
+            data: disc("collect_coin_creator_fee").to_vec(),
+        },
+    ]
+}

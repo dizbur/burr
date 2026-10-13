@@ -419,6 +419,42 @@ fn burn_pool() {
 }
 
 #[test]
+fn recover() {
+    let Stage { mut w, c, d, user, thief, nothing, .. } = stage();
+    assert!(w.pool_buy(&user, &c, ZEC1).is_ok());
+    assert!(w.pool_buy(&user, &d, ZEC1).is_ok());
+    let side = w.divert_pool_fee(&c);
+    let other_side = w.divert_pool_fee(&d);
+    let diverted = w.b.token_balance(&side);
+    assert!(diverted > 0);
+    let payer = w.b.payer.insecure_clone();
+    let good = w.recover_accounts(&c, &side);
+    let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
+    type A = burrpad::accounts::Recover;
+    let swaps: Vec<Swap<A>> = vec![
+        sw("mint", |x: &mut A| x.mint = d),
+        sw("coin", |x: &mut A| x.coin = kit::coin(&d)),
+        sw("ledger", |x: &mut A| x.ledger = kit::ledger(&d)),
+        sw("authority", |x: &mut A| {
+            x.authority = kit::authority(&d);
+            x.vault = kit::vault(&d);
+        }),
+        sw("vault", |x: &mut A| x.vault = thief_zec),
+        sw("zec_mint", |x: &mut A| x.zec_mint = c),
+        sw("stray", |x: &mut A| x.stray = other_side),
+        sw("stray", |x: &mut A| x.stray = thief_zec),
+        sw("stray", |x: &mut A| x.stray = kit::vault(&c)),
+        sw("token_program", |x: &mut A| x.token_program = nothing),
+    ];
+    let vault = w.vault_balance(&c);
+    let r = each_refused(&mut w, &payer, &[], good, burrpad::instruction::Recover {}, swaps);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert_eq!(w.vault_balance(&c), vault + diverted);
+    assert!(w.b.token_balance(&other_side) > 0, "the other coin's side account was left alone");
+    assert_eq!(w.b.token_balance(&thief_zec), ZEC1 - ZEC1 / 100 * 4);
+}
+
+#[test]
 fn release_holder_rewards() {
     let Stage { mut w, a, b, thief, nothing, fake, .. } = stage();
     w.b.wait(1_800);
