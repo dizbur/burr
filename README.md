@@ -2,14 +2,16 @@
 
 Fee hooks for ZEC-priced pump.fun coins, as one Solana program.
 
-A coin launched through Burrpad is a real pump.fun coin, priced in ZEC, whose creator is an address only this program can sign for. Its creator fee can therefore only arrive in a vault the program controls. What happens to it is chosen once, at launch, from four hooks, and can never be changed.
+A coin launched through Burrpad is a real pump.fun coin, priced in ZEC, whose creator is an address only this program can sign for. Its creator fee can therefore only arrive in a vault the program controls. What happens to it is chosen once, at launch, from four hooks. Nothing in this program can change that choice afterwards: not the creator, not the administrator. pump.fun, whose programs this stands on, can still change a coin's fee or where it is paid.
 
 | Hook | What it does with its share of the fee |
 |---|---|
 | Creator's share | Paid to an address named at launch. |
 | Give | Paid to a second address named at launch. |
 | Buy back and burn | Buys the coin and destroys what it bought. |
-| Holders | Set aside for the coin's holders. The pot is handed to a rewards wallet, which pays holders from a published snapshot. Who gets how much is worked out off the chain. |
+| Holders | Set aside for the coin's holders. **The program does not pay holders itself.** It releases the pot to a rewards wallet that the platform's server controls, and that server pays holders from a published snapshot. Who gets how much is worked out off the chain. |
+
+The first three hooks pay by rule alone; no key decides. The holders hook is different: whoever holds the rewards wallet's key receives every coin's holder pot and is trusted to pay it on. The program limits that to the holder pot, to a stated amount no larger than the pot, at most once every 30 minutes per coin, and requires each release to name its snapshot by slot and fingerprint. The administrator can switch releases off at once, and can replace the rewards wallet only by a proposal made in the open that waits 24 hours.
 
 **Status: not audited. Not deployed. Do not use with real funds.**
 
