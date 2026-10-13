@@ -33,3 +33,5 @@ mod t12_pump_facts;
 mod t13_launch_with_buy;
 #[cfg(test)]
 mod t14_text_lengths;
+#[cfg(test)]
+mod t15_random_sequences;

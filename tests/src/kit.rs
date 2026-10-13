@@ -427,17 +427,19 @@ impl World {
     }
 
     /// As a stranger: has a graduated coin's pool fee paid into a ZEC account
-    /// made for the coin's authority that is not its vault. Returns that account.
-    pub fn divert_pool_fee(&mut self, mint: &Pubkey) -> Pubkey {
+    /// made for the coin's authority that is not its vault. Returns that
+    /// account, or nothing if pump.fun had no fee waiting to pay.
+    pub fn try_divert_pool_fee(&mut self, mint: &Pubkey) -> Option<Pubkey> {
         let stranger = self.b.wallet();
         let side = Keypair::new();
         let auth = authority(mint);
         let rent = self.b.svm.minimum_balance_for_rent_exemption(165);
         let mut ixs = pump::make_zec_account_for(&stranger.pubkey(), &side.pubkey(), &auth, rent).to_vec();
         ixs.extend(pump::pool_fee_to(mint, &stranger.pubkey(), &auth, &side.pubkey()));
-        let r = self.b.send_as(Some(&stranger), &ixs, &[&side]);
-        assert!(r.is_ok(), "{}", crate::bench::logs(&r));
-        side.pubkey()
+        self.b.send_as(Some(&stranger), &ixs, &[&side]).is_ok().then(|| side.pubkey())
+    }
+    pub fn divert_pool_fee(&mut self, mint: &Pubkey) -> Pubkey {
+        self.try_divert_pool_fee(mint).expect("the pool had a fee to divert")
     }
 
     pub fn pay_out_accounts(&self, payer: &Pubkey, mint: &Pubkey, receiver: &Pubkey) -> burrpad::accounts::PayOut {
