@@ -3,7 +3,7 @@
 use crate::bench::{custom_code, logs};
 use crate::kit::{self, err, LaunchPlan, World};
 use crate::pump::{self, ZEC};
-use burr::error::BurrError as E;
+use burrpad::error::BurrpadError as E;
 use solana_signer::Signer;
 
 #[test]
@@ -92,16 +92,16 @@ fn naming_a_key_is_not_signing_with_it() {
 
     let mut w = World::new();
     let s = w.b.wallet();
-    let mut i = w.admin_ix(&w.admin.pubkey(), burr::instruction::SetLaunchesPaused { paused: true });
+    let mut i = w.admin_ix(&w.admin.pubkey(), burrpad::instruction::SetLaunchesPaused { paused: true });
     i.accounts[0].is_signer = false;
     assert!(w.b.send_as(Some(&s), &[i], &[]).is_err(), "the administrator's address without its signature");
     assert!(!w.config().launches_paused);
 
     let next = w.b.wallet();
-    assert!(w.as_admin(burr::instruction::ProposeAdmin { new_admin: next.pubkey() }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::ProposeAdmin { new_admin: next.pubkey() }).is_ok());
     let mut i = kit::raw(
-        burr::accounts::AcceptAdmin { new_admin: next.pubkey(), config: kit::config() },
-        burr::instruction::AcceptAdmin {},
+        burrpad::accounts::AcceptAdmin { new_admin: next.pubkey(), config: kit::config() },
+        burrpad::instruction::AcceptAdmin {},
     );
     i.accounts[0].is_signer = false;
     assert!(w.b.send_as(Some(&s), &[i], &[]).is_err(), "the proposed administrator's address without its signature");
@@ -115,11 +115,11 @@ fn a_stranger_cannot_use_any_admin_instruction() {
     let mut w = World::new();
     let s = w.b.wallet();
     let tries: Vec<solana_instruction::Instruction> = vec![
-        w.admin_ix(&s.pubkey(), burr::instruction::SetPlatformFraction { fraction_bps: 0 }),
-        w.admin_ix(&s.pubkey(), burr::instruction::SetFeeRange { min_bps: 50, max_bps: 300, default_bps: 200 }),
-        w.admin_ix(&s.pubkey(), burr::instruction::SetPlatformReceiver { receiver: s.pubkey() }),
-        w.admin_ix(&s.pubkey(), burr::instruction::SetLaunchesPaused { paused: true }),
-        w.admin_ix(&s.pubkey(), burr::instruction::ProposeAdmin { new_admin: s.pubkey() }),
+        w.admin_ix(&s.pubkey(), burrpad::instruction::SetPlatformFraction { fraction_bps: 0 }),
+        w.admin_ix(&s.pubkey(), burrpad::instruction::SetFeeRange { min_bps: 50, max_bps: 300, default_bps: 200 }),
+        w.admin_ix(&s.pubkey(), burrpad::instruction::SetPlatformReceiver { receiver: s.pubkey() }),
+        w.admin_ix(&s.pubkey(), burrpad::instruction::SetLaunchesPaused { paused: true }),
+        w.admin_ix(&s.pubkey(), burrpad::instruction::ProposeAdmin { new_admin: s.pubkey() }),
     ];
     for i in tries {
         let r = w.b.send_as(Some(&s), &[i], &[]);
@@ -130,17 +130,17 @@ fn a_stranger_cannot_use_any_admin_instruction() {
 #[test]
 fn admin_settings_stay_inside_the_hard_limits() {
     let mut w = World::new();
-    let r = w.as_admin(burr::instruction::SetPlatformFraction { fraction_bps: 5_001 });
+    let r = w.as_admin(burrpad::instruction::SetPlatformFraction { fraction_bps: 5_001 });
     assert_eq!(custom_code(&r), Some(err(E::PlatformFractionTooHigh)));
-    assert!(w.as_admin(burr::instruction::SetPlatformFraction { fraction_bps: 5_000 }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::SetPlatformFraction { fraction_bps: 5_000 }).is_ok());
 
     for (min, max, def) in [(9, 300, 200), (50, 501, 200), (50, 300, 301), (50, 300, 49), (301, 300, 300)] {
-        let r = w.as_admin(burr::instruction::SetFeeRange { min_bps: min, max_bps: max, default_bps: def });
+        let r = w.as_admin(burrpad::instruction::SetFeeRange { min_bps: min, max_bps: max, default_bps: def });
         assert_eq!(custom_code(&r), Some(err(E::FeeSettingOutOfRange)), "{min} {max} {def}");
     }
-    assert!(w.as_admin(burr::instruction::SetFeeRange { min_bps: 10, max_bps: 500, default_bps: 10 }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::SetFeeRange { min_bps: 10, max_bps: 500, default_bps: 10 }).is_ok());
 
-    let r = w.as_admin(burr::instruction::SetPlatformReceiver { receiver: solana_pubkey::Pubkey::default() });
+    let r = w.as_admin(burrpad::instruction::SetPlatformReceiver { receiver: solana_pubkey::Pubkey::default() });
     assert_eq!(custom_code(&r), Some(err(E::EmptyAddress)));
 }
 
@@ -149,8 +149,8 @@ fn admin_changes_touch_only_later_launches() {
     let mut w = World::new();
     let first = w.launch(&LaunchPlan::default());
     let new_receiver = solana_pubkey::Pubkey::new_unique();
-    assert!(w.as_admin(burr::instruction::SetPlatformFraction { fraction_bps: 2_500 }).is_ok());
-    assert!(w.as_admin(burr::instruction::SetPlatformReceiver { receiver: new_receiver }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::SetPlatformFraction { fraction_bps: 2_500 }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::SetPlatformReceiver { receiver: new_receiver }).is_ok());
     let second = w.launch(&LaunchPlan::default());
 
     let a = w.coin(&first);
@@ -162,10 +162,10 @@ fn admin_changes_touch_only_later_launches() {
 #[test]
 fn pausing_stops_new_launches_only() {
     let mut w = World::new();
-    assert!(w.as_admin(burr::instruction::SetLaunchesPaused { paused: true }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::SetLaunchesPaused { paused: true }).is_ok());
     let (_, r) = w.try_launch(&LaunchPlan::default());
     assert_eq!(custom_code(&r), Some(err(E::LaunchesPaused)));
-    assert!(w.as_admin(burr::instruction::SetLaunchesPaused { paused: false }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::SetLaunchesPaused { paused: false }).is_ok());
     w.launch(&LaunchPlan::default());
 }
 
@@ -174,13 +174,13 @@ fn the_admin_role_moves_in_two_steps() {
     let mut w = World::new();
     let next = w.b.wallet();
     let other = w.b.wallet();
-    assert!(w.as_admin(burr::instruction::ProposeAdmin { new_admin: next.pubkey() }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::ProposeAdmin { new_admin: next.pubkey() }).is_ok());
     assert_eq!(w.config().admin, w.admin.pubkey(), "nothing changes until accepted");
 
     let accept = |who: &solana_pubkey::Pubkey| {
         kit::raw(
-            burr::accounts::AcceptAdmin { new_admin: *who, config: kit::config() },
-            burr::instruction::AcceptAdmin {},
+            burrpad::accounts::AcceptAdmin { new_admin: *who, config: kit::config() },
+            burrpad::instruction::AcceptAdmin {},
         )
     };
     let r = w.b.send_as(Some(&other), &[accept(&other.pubkey())], &[]);
@@ -189,7 +189,7 @@ fn the_admin_role_moves_in_two_steps() {
     assert!(r.is_ok(), "{}", logs(&r));
     assert_eq!(w.config().admin, next.pubkey());
     // The old administrator has no power left.
-    let r = w.as_admin(burr::instruction::SetLaunchesPaused { paused: true });
+    let r = w.as_admin(burrpad::instruction::SetLaunchesPaused { paused: true });
     assert_eq!(custom_code(&r), Some(err(E::NotAdmin)));
 }
 
@@ -237,7 +237,7 @@ fn launch_accepts_the_edges_and_unused_settings() {
 fn a_fee_above_what_pump_fun_takes_fails_cleanly() {
     let mut w = World::new();
     // The administrator may set up to 5.00%; pump.fun takes at most 3.00% today.
-    assert!(w.as_admin(burr::instruction::SetFeeRange { min_bps: 50, max_bps: 500, default_bps: 200 }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::SetFeeRange { min_bps: 50, max_bps: 500, default_bps: 200 }).is_ok());
     let (mint, r) = w.try_launch(&LaunchPlan { fee_bps: 400, ..Default::default() });
     assert_eq!(custom_code(&r), Some(6078), "pump.fun's CreatorFeeBpsOutOfRange\n{}", logs(&r));
     assert!(w.b.account(&kit::coin(&mint)).is_none());
@@ -270,7 +270,7 @@ fn launch_refuses_substituted_pump_accounts() {
     let payer = w.b.payer.pubkey();
     let fake = solana_pubkey::Pubkey::new_unique();
     // Each closure swaps one account for another address.
-    type Swap = fn(&mut burr::accounts::Launch, solana_pubkey::Pubkey);
+    type Swap = fn(&mut burrpad::accounts::Launch, solana_pubkey::Pubkey);
     let swaps: Vec<(&str, Swap)> = vec![
         ("pump_program", |a, f| a.pump_program = f),
         ("pump_global", |a, f| a.pump_global = f),
@@ -300,7 +300,7 @@ fn launch_refuses_substituted_pump_accounts() {
         swap(&mut accounts, fake);
         let good = w.launch_ix(&payer, &mint.pubkey(), &LaunchPlan::default());
         let i = solana_instruction::Instruction {
-            program_id: kit::BURR,
+            program_id: kit::BURRPAD,
             accounts: anchor_lang::ToAccountMetas::to_account_metas(&accounts, None),
             data: good.data,
         };
@@ -314,7 +314,7 @@ fn launch_refuses_substituted_pump_accounts() {
     std::mem::swap(&mut accounts.token_program, &mut accounts.token_2022_program);
     let good = w.launch_ix(&payer, &mint.pubkey(), &LaunchPlan::default());
     let i = solana_instruction::Instruction {
-        program_id: kit::BURR,
+        program_id: kit::BURRPAD,
         accounts: anchor_lang::ToAccountMetas::to_account_metas(&accounts, None),
         data: good.data,
     };
@@ -343,7 +343,7 @@ fn a_vault_made_early_by_someone_else_is_still_ours() {
 fn initialise_cannot_be_passed_another_programs_upgrade_record() {
     let mut w = World::bare();
     // The attacker really is the upgrade key of some other program, and
-    // passes that program's record in place of Burr's.
+    // passes that program's record in place of Burrpad's.
     let attacker = w.b.wallet();
     let loader = kit::LOADER;
     let other_program = solana_pubkey::Pubkey::new_unique();
@@ -383,17 +383,17 @@ fn a_launch_is_stopped_if_the_platforms_terms_changed_on_the_way() {
     };
     w.launch(&agreed);
 
-    assert!(w.as_admin(burr::instruction::SetPlatformFraction { fraction_bps: 5_000 }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::SetPlatformFraction { fraction_bps: 5_000 }).is_ok());
     let (mint, r) = w.try_launch(&agreed);
     assert_eq!(custom_code(&r), Some(err(E::PlatformTermsChanged)), "a higher fraction\n{}", logs(&r));
     assert!(w.b.account(&kit::coin(&mint)).is_none());
     // A lower fraction than agreed is fine.
-    assert!(w.as_admin(burr::instruction::SetPlatformFraction { fraction_bps: 1_000 }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::SetPlatformFraction { fraction_bps: 1_000 }).is_ok());
     let lower = w.launch(&agreed);
     assert_eq!(w.coin(&lower).platform_fraction_bps, 1_000);
 
     let elsewhere = solana_pubkey::Pubkey::new_unique();
-    assert!(w.as_admin(burr::instruction::SetPlatformReceiver { receiver: elsewhere }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::SetPlatformReceiver { receiver: elsewhere }).is_ok());
     let (_, r) = w.try_launch(&agreed);
     assert_eq!(custom_code(&r), Some(err(E::PlatformTermsChanged)), "another receiver\n{}", logs(&r));
 }

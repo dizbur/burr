@@ -26,8 +26,8 @@ fn a_coin_graduates_and_keeps_its_creator_and_fee() {
 use crate::bench::custom_code;
 use crate::kit::{self, err};
 use crate::pump::{self, ata, TOKEN, TOKEN_2022, ZEC};
-use burr::error::BurrError as E;
-use burr::state::Payee;
+use burrpad::error::BurrpadError as E;
+use burrpad::state::Payee;
 use solana_pubkey::Pubkey;
 
 const DAY: i64 = 86_400;
@@ -229,7 +229,7 @@ fn burn_pool_refuses_substituted_accounts() {
     let thief = w.trader(ZEC1);
     let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
     let fake = Pubkey::new_unique();
-    type Swap = fn(&mut burr::accounts::BurnPool, Pubkey, &Pubkey, Pubkey);
+    type Swap = fn(&mut burrpad::accounts::BurnPool, Pubkey, &Pubkey, Pubkey);
     let swaps: Vec<(&str, Swap)> = vec![
         ("amm_program", |a, f, _, _| a.amm_program = f),
         ("amm_program (pump.fun's other program)", |a, _, _, _| a.amm_program = pump::PUMP),
@@ -255,7 +255,7 @@ fn burn_pool_refuses_substituted_accounts() {
     for (name, swap) in swaps {
         let mut acc = w.burn_pool_accounts(&payer, &mint);
         swap(&mut acc, fake, &other, thief_zec);
-        let r = w.b.send(&[kit::raw(acc, burr::instruction::BurnPool {})], &[]);
+        let r = w.b.send(&[kit::raw(acc, burrpad::instruction::BurnPool {})], &[]);
         assert!(r.is_err(), "swapping {name} was accepted");
     }
     assert_eq!(w.b.token_balance(&thief_zec), ZEC1);
@@ -302,7 +302,7 @@ fn collect_pool_refuses_substituted_accounts() {
     assert!(w.pool_buy(&t, &other, ZEC1).is_ok());
     let payer = w.b.payer.pubkey();
     let fake = Pubkey::new_unique();
-    type Swap = fn(&mut burr::accounts::CollectPool, Pubkey, &Pubkey);
+    type Swap = fn(&mut burrpad::accounts::CollectPool, Pubkey, &Pubkey);
     let swaps: Vec<(&str, Swap)> = vec![
         ("amm_program", |a, f, _| a.amm_program = f),
         ("amm_global_config", |a, f, _| a.amm_global_config = f),
@@ -322,7 +322,7 @@ fn collect_pool_refuses_substituted_accounts() {
     for (name, swap) in swaps {
         let mut acc = w.collect_pool_accounts(&payer, &mint);
         swap(&mut acc, fake, &other);
-        let r = w.b.send(&[kit::raw(acc, burr::instruction::CollectPool {})], &[]);
+        let r = w.b.send(&[kit::raw(acc, burrpad::instruction::CollectPool {})], &[]);
         assert!(r.is_err(), "swapping {name} was accepted");
     }
     assert!(w.collect_pool(&mint).is_ok());

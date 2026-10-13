@@ -1,8 +1,8 @@
 //! The arithmetic on its own, with fixed and random inputs, and the constants
 //! that must match pump.fun's interface.
 
-use burr::constants::*;
-use burr::math::{self, Reserves, VaultShare, ACC_SCALE, WEIGHT_TOTAL};
+use burrpad::constants::*;
+use burrpad::math::{self, Reserves, VaultShare, ACC_SCALE, WEIGHT_TOTAL};
 use proptest::prelude::*;
 
 // ---- fixed cases ----
@@ -74,7 +74,7 @@ fn nothing_is_released_while_nobody_is_staked() {
 #[test]
 fn instruction_codes_match_their_names() {
     use crate::pump::disc;
-    use burr::pump as p;
+    use burrpad::pump as p;
     assert_eq!(p::IX_CREATE_V2, disc("create_v2"));
     assert_eq!(p::IX_SWEEP_CREATOR_FEE, disc("sweep_creator_fee"));
     assert_eq!(p::IX_COLLECT_CREATOR_FEE_V2, disc("collect_creator_fee_v2"));
@@ -86,7 +86,7 @@ fn instruction_codes_match_their_names() {
 
 #[test]
 fn account_codes_and_positions_match_the_real_accounts() {
-    use burr::pump as p;
+    use burrpad::pump as p;
     let b = crate::bench::Bench::new();
     let global = b.account(&crate::pump::global()).unwrap();
     assert_eq!(global.data[..8], p::ACC_GLOBAL);
@@ -113,7 +113,7 @@ fn account_codes_and_positions_match_the_real_accounts() {
     .collect();
     assert_eq!(listed(&global.data, p::GLOBAL_BUYBACK_OFFSET), known);
     assert_eq!(listed(&amm.data, p::AMM_GLOBAL_BUYBACK_OFFSET), known);
-    assert_eq!(burr::constants::ZEC_MINT, crate::pump::ZEC);
+    assert_eq!(burrpad::constants::ZEC_MINT, crate::pump::ZEC);
     assert_eq!(p::PUMP_ID, crate::pump::PUMP);
     assert_eq!(p::PUMP_AMM_ID, crate::pump::PUMP_AMM);
     assert_eq!(p::PUMP_FEES_ID, crate::pump::PUMP_FEES);

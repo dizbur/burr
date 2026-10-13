@@ -4,7 +4,7 @@
 use crate::bench::{custom_code, logs};
 use crate::kit::{self, err, LaunchPlan, World};
 use crate::pump::{ata, TOKEN_2022};
-use burr::error::BurrError as E;
+use burrpad::error::BurrpadError as E;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
@@ -212,18 +212,18 @@ fn nobody_takes_out_more_than_they_put_in_or_anothers_coins() {
     // B signs, but passes A's stake record.
     let mut acc = w.unstake_accounts(&h[1].pubkey(), &mint);
     acc.stake = kit::stake(&mint, &h[0].pubkey());
-    let r = w.b.send_as(Some(&h[1]), &[kit::raw(acc, burr::instruction::Unstake { amount: 500 })], &[]);
+    let r = w.b.send_as(Some(&h[1]), &[kit::raw(acc, burrpad::instruction::Unstake { amount: 500 })], &[]);
     assert!(r.is_err());
     // A's record with A named as owner, but A has not signed.
     let acc = w.unstake_accounts(&h[0].pubkey(), &mint);
-    let mut i = kit::raw(acc, burr::instruction::Unstake { amount: 500 });
+    let mut i = kit::raw(acc, burrpad::instruction::Unstake { amount: 500 });
     i.accounts[0].is_signer = false;
     let r = w.b.send_as(Some(&h[1]), &[i], &[]);
     assert!(r.is_err());
     // B sends A's coins to B's own account.
     let mut acc = w.unstake_accounts(&h[0].pubkey(), &mint);
     acc.owner_coin = ata(&h[1].pubkey(), &mint, &TOKEN_2022);
-    let r = w.b.send_as(Some(&h[0]), &[kit::raw(acc, burr::instruction::Unstake { amount: 500 })], &[]);
+    let r = w.b.send_as(Some(&h[0]), &[kit::raw(acc, burrpad::instruction::Unstake { amount: 500 })], &[]);
     assert!(r.is_err(), "coins may only go back to an account of the staker");
 
     assert!(w.unstake(&h[0], &mint, 500).is_ok());
@@ -256,7 +256,7 @@ fn vault_share_refuses_another_coins_accounts() {
     assert!(w.stake(&h[0], &mint, 1_000).is_ok());
     fee(&mut w, &mint, ZEC1);
     w.b.wait(DAY);
-    type Mix = fn(&mut burr::accounts::UnstakeCoins, &Pubkey, &Pubkey);
+    type Mix = fn(&mut burrpad::accounts::UnstakeCoins, &Pubkey, &Pubkey);
     let mixes: Vec<(&str, Mix)> = vec![
         ("ledger", |a, o, _| a.ledger = kit::ledger(o)),
         ("coin", |a, o, _| a.coin = kit::coin(o)),
@@ -268,7 +268,7 @@ fn vault_share_refuses_another_coins_accounts() {
     for (name, mix) in mixes {
         let mut acc = w.unstake_accounts(&h[0].pubkey(), &mint);
         mix(&mut acc, &other, &h[0].pubkey());
-        let r = w.b.send_as(Some(&h[0]), &[kit::raw(acc, burr::instruction::Unstake { amount: 1 })], &[]);
+        let r = w.b.send_as(Some(&h[0]), &[kit::raw(acc, burrpad::instruction::Unstake { amount: 1 })], &[]);
         assert!(r.is_err(), "mixing in another coin's {name} was accepted");
     }
     assert!(w.unstake(&h[0], &mint, 1_000).is_ok());
@@ -403,14 +403,14 @@ fn an_empty_stake_record_can_be_closed_by_its_owner_only() {
     assert!(w.unstake(&h[0], &mint, 1_000).is_ok());
     // Not by someone else, even naming the owner.
     let mut i = kit::raw(
-        burr::accounts::CloseStake { owner: h[0].pubkey(), mint, stake: kit::stake(&mint, &h[0].pubkey()) },
-        burr::instruction::CloseStake {},
+        burrpad::accounts::CloseStake { owner: h[0].pubkey(), mint, stake: kit::stake(&mint, &h[0].pubkey()) },
+        burrpad::instruction::CloseStake {},
     );
     i.accounts[0].is_signer = false;
     assert!(w.b.send_as(Some(&h[1]), &[i], &[]).is_err());
     let i = kit::raw(
-        burr::accounts::CloseStake { owner: h[1].pubkey(), mint, stake: kit::stake(&mint, &h[0].pubkey()) },
-        burr::instruction::CloseStake {},
+        burrpad::accounts::CloseStake { owner: h[1].pubkey(), mint, stake: kit::stake(&mint, &h[0].pubkey()) },
+        burrpad::instruction::CloseStake {},
     );
     assert!(w.b.send_as(Some(&h[1]), &[i], &[]).is_err());
     // By its owner: the rent comes back.

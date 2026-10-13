@@ -7,11 +7,11 @@ resolution = true
 skip-lint = false
 
 [programs.localnet]
-burr = "GDbkhHSpg15QWNwqws6SKyrwFMhe2AWQ59UxJciLa6Qt"
+burrpad = "GDbkhHSpg15QWNwqws6SKyrwFMhe2AWQ59UxJciLa6Qt"
 
 [provider]
 cluster = "localnet"
 wallet = "~/.config/solana/id.json"
 
 [scripts]
-test = "cargo test -p burr-tests"
+test = "cargo test -p burrpad-tests"

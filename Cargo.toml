@@ -1,5 +1,5 @@
 [workspace]
-members = ["programs/burr", "tests", "tests-standin"]
+members = ["programs/burrpad", "tests", "tests-standin"]
 resolver = "2"
 
 [workspace.package]

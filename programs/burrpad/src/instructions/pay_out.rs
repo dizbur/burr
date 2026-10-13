@@ -2,7 +2,7 @@
 //! receiver. Open to anyone: the receiver claiming is the receiver calling it.
 
 use crate::constants::*;
-use crate::error::BurrError;
+use crate::error::BurrpadError;
 use crate::events::PaidOut;
 use crate::ops;
 use crate::state::{Coin, Ledger, Payee};
@@ -36,7 +36,7 @@ pub struct PayOut<'info> {
     #[account(address = ZEC_MINT)]
     pub zec_mint: Box<InterfaceAccount<'info, Mint>>,
     /// CHECK: must be the receiver written in the coin's record for this pot
-    #[account(address = payee.receiver(&coin) @ BurrError::WrongReceiver)]
+    #[account(address = payee.receiver(&coin) @ BurrpadError::WrongReceiver)]
     pub receiver: UncheckedAccount<'info>,
     /// CHECK: the receiver's standard ZEC account, checked by address in the handler and made if missing
     #[account(mut)]

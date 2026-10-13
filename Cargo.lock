@@ -789,7 +789,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "72f5acc6cb2ba439de613abc23857ec3d78374d8ed5ac84e9d11336e87da8649"
 
 [[package]]
-name = "burr"
+name = "burrpad"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
@@ -797,12 +797,12 @@ dependencies = [
 ]
 
 [[package]]
-name = "burr-tests"
+name = "burrpad-tests"
 version = "0.1.0"
 dependencies = [
  "anchor-lang",
  "base64 0.22.1",
- "burr",
+ "burrpad",
  "litesvm",
  "proptest",
  "pump-standin",

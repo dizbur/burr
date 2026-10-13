@@ -1,13 +1,13 @@
 //! Nothing is concluded from a call into pump.fun having succeeded.
 //!
 //! Here pump.fun's programs are replaced, inside the test network, by a
-//! stand-in that reports success while doing the wrong thing. Burr must
+//! stand-in that reports success while doing the wrong thing. Burrpad must
 //! notice from the accounts and balances it reads afterwards.
 
 use crate::bench::{custom_code, logs};
 use crate::kit::{self, err, LaunchPlan, World};
 use crate::pump::{self, ata, PUMP, PUMP_AMM, TOKEN, TOKEN_2022, ZEC};
-use burr::error::BurrError as E;
+use burrpad::error::BurrpadError as E;
 use pump_standin as s;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;

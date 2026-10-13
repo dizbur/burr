@@ -2,7 +2,7 @@
 //! coin's vault.
 
 use crate::constants::*;
-use crate::error::BurrError;
+use crate::error::BurrpadError;
 use crate::events::Split;
 use crate::math;
 use crate::state::{Coin, Ledger};
@@ -14,27 +14,27 @@ use anchor_spl::token_interface::{self, TransferChecked};
 ///
 /// `vault_amount` must be the vault's balance read from the chain just now.
 pub fn split_new(coin: &Coin, ledger: &mut Ledger, vault_amount: u64, now: i64) -> Result<u64> {
-    let new = vault_amount.checked_sub(ledger.accounted).ok_or(BurrError::VaultShort)?;
+    let new = vault_amount.checked_sub(ledger.accounted).ok_or(BurrpadError::VaultShort)?;
     // Keep the vault share's clock moving even when no fee has arrived.
-    ledger.vault_share.update(now, coin.vault_release_secs).ok_or(BurrError::Overflow)?;
+    ledger.vault_share.update(now, coin.vault_release_secs).ok_or(BurrpadError::Overflow)?;
     if new == 0 {
         return Ok(0);
     }
-    let w = math::weights(coin.platform_fraction_bps, &coin.shares).ok_or(BurrError::SharesDoNotAddUp)?;
-    let credits = math::split(&mut ledger.total_split, &mut ledger.credited, &w, new).ok_or(BurrError::Overflow)?;
+    let w = math::weights(coin.platform_fraction_bps, &coin.shares).ok_or(BurrpadError::SharesDoNotAddUp)?;
+    let credits = math::split(&mut ledger.total_split, &mut ledger.credited, &w, new).ok_or(BurrpadError::Overflow)?;
     for (pot, add) in ledger.pots.iter_mut().zip(credits.iter()) {
-        *pot = pot.checked_add(*add).ok_or(BurrError::Overflow)?;
+        *pot = pot.checked_add(*add).ok_or(BurrpadError::Overflow)?;
     }
-    ledger.accounted = ledger.accounted.checked_add(new).ok_or(BurrError::Overflow)?;
-    ledger.vault_share.credit(credits[SINK_VAULT_SHARE], now, coin.vault_release_secs).ok_or(BurrError::Overflow)?;
+    ledger.accounted = ledger.accounted.checked_add(new).ok_or(BurrpadError::Overflow)?;
+    ledger.vault_share.credit(credits[SINK_VAULT_SHARE], now, coin.vault_release_secs).ok_or(BurrpadError::Overflow)?;
     emit!(Split { mint: coin.mint, amount: new, credited: credits });
     Ok(new)
 }
 
 /// Takes `amount` out of pot `sink` in the ledger. The caller then moves the ZEC.
 pub fn debit(ledger: &mut Ledger, sink: usize, amount: u64) -> Result<()> {
-    ledger.pots[sink] = ledger.pots[sink].checked_sub(amount).ok_or(BurrError::Overflow)?;
-    ledger.accounted = ledger.accounted.checked_sub(amount).ok_or(BurrError::Overflow)?;
+    ledger.pots[sink] = ledger.pots[sink].checked_sub(amount).ok_or(BurrpadError::Overflow)?;
+    ledger.accounted = ledger.accounted.checked_sub(amount).ok_or(BurrpadError::Overflow)?;
     Ok(())
 }
 
@@ -95,7 +95,7 @@ pub struct PayTo<'a, 'info> {
 /// account to someone else: the ZEC still goes to that same address.
 pub fn pay_to_standard_account(p: &PayTo, mint: &Pubkey, authority_bump: u8, amount: u64) -> Result<()> {
     let expected = get_associated_token_address_with_program_id(p.owner.key, &ZEC_MINT, p.token_program.key);
-    require_keys_eq!(*p.destination.key, expected, BurrError::WrongReceiver);
+    require_keys_eq!(*p.destination.key, expected, BurrpadError::WrongReceiver);
     if amount == 0 {
         return Ok(());
     }

@@ -1,13 +1,13 @@
 [package]
-name = "burr"
+name = "burrpad"
 version = "0.1.0"
-description = "Burr: fee hooks for ZEC-priced pump.fun coins"
+description = "Burrpad: fee hooks for ZEC-priced pump.fun coins"
 edition.workspace = true
 rust-version.workspace = true
 
 [lib]
 crate-type = ["cdylib", "lib"]
-name = "burr"
+name = "burrpad"
 
 [features]
 default = []

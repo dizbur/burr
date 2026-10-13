@@ -5,7 +5,7 @@
 
 use crate::bench::logs;
 use crate::kit::{self, LaunchPlan, World};
-use burr::state::Payee;
+use burrpad::state::Payee;
 use solana_signer::Signer;
 
 const ZEC1: u64 = 100_000_000;
@@ -24,10 +24,10 @@ fn a_coins_whole_life_and_its_record_never_changes() {
     let (a, b, c) = (w.trader(1_000 * ZEC1), w.trader(1_000 * ZEC1), w.trader(1_000 * ZEC1));
     let admin_moves = |w: &mut World| {
         // The administrator changes every setting it can, mid-life.
-        assert!(w.as_admin(burr::instruction::SetPlatformFraction { fraction_bps: 5_000 }).is_ok());
-        assert!(w.as_admin(burr::instruction::SetFeeRange { min_bps: 10, max_bps: 500, default_bps: 100 }).is_ok());
-        assert!(w.as_admin(burr::instruction::SetPlatformReceiver { receiver: w.admin.pubkey() }).is_ok());
-        assert!(w.as_admin(burr::instruction::SetLaunchesPaused { paused: true }).is_ok());
+        assert!(w.as_admin(burrpad::instruction::SetPlatformFraction { fraction_bps: 5_000 }).is_ok());
+        assert!(w.as_admin(burrpad::instruction::SetFeeRange { min_bps: 10, max_bps: 500, default_bps: 100 }).is_ok());
+        assert!(w.as_admin(burrpad::instruction::SetPlatformReceiver { receiver: w.admin.pubkey() }).is_ok());
+        assert!(w.as_admin(burrpad::instruction::SetLaunchesPaused { paused: true }).is_ok());
     };
 
     // On the curve.

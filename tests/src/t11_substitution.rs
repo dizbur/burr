@@ -1,15 +1,15 @@
 //! Every account of every instruction, swapped in turn for the most
-//! plausible wrong one. Each swap must be refused by Burr itself, before
+//! plausible wrong one. Each swap must be refused by Burrpad itself, before
 //! pump.fun's programs are reached.
 //!
 //! The label of each swap is the name of the account in the program, so the
 //! protection list (`docs/protections.md`) can say which swap holds which check.
 
-use crate::bench::{logs, refused_by_burr, TxResult};
+use crate::bench::{logs, refused_by_burrpad, TxResult};
 use crate::kit::{self, LaunchPlan, World};
 use crate::pump::{self, ata, pda, PUMP, PUMP_AMM, PUMP_FEES, TOKEN, TOKEN_2022, ZEC};
 use anchor_lang::{InstructionData, ToAccountMetas};
-use burr::state::Payee;
+use burrpad::state::Payee;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_pubkey::Pubkey;
@@ -84,7 +84,7 @@ fn sw<'x, A>(label: &'static str, f: impl Fn(&mut A) + 'x) -> Swap<'x, A> {
     (label, Box::new(f))
 }
 
-/// Sends the instruction once per swap and checks each is refused by Burr.
+/// Sends the instruction once per swap and checks each is refused by Burrpad.
 /// Then sends it unchanged and returns that result, so each test also shows
 /// the right accounts are accepted.
 fn each_refused<A: ToAccountMetas + Clone>(
@@ -99,12 +99,12 @@ fn each_refused<A: ToAccountMetas + Clone>(
     for (label, change) in swaps {
         let mut acc = good.clone();
         change(&mut acc);
-        let i = Instruction { program_id: kit::BURR, accounts: acc.to_account_metas(None), data: data.clone() };
+        let i = Instruction { program_id: kit::BURRPAD, accounts: acc.to_account_metas(None), data: data.clone() };
         let r = w.b.send_as(Some(signer), &[i], extra);
         assert!(r.is_err(), "swapping {label} was accepted");
-        assert!(refused_by_burr(&r), "swapping {label} was refused only by pump.fun, not by Burr\n{}", logs(&r));
+        assert!(refused_by_burrpad(&r), "swapping {label} was refused only by pump.fun, not by Burrpad\n{}", logs(&r));
     }
-    let i = Instruction { program_id: kit::BURR, accounts: good.to_account_metas(None), data };
+    let i = Instruction { program_id: kit::BURRPAD, accounts: good.to_account_metas(None), data };
     w.b.send_as(Some(signer), &[i], extra)
 }
 
@@ -117,8 +117,8 @@ fn launch() {
     assert!(w.b.send(&[early], &[]).is_ok());
     let good = w.launch_accounts(&payer.pubkey(), &mint.pubkey());
     let plan = LaunchPlan::default();
-    let data = burr::instruction::Launch {
-        args: burr::LaunchArgs {
+    let data = burrpad::instruction::Launch {
+        args: burrpad::LaunchArgs {
             name: plan.name.clone(),
             symbol: "TST".into(),
             uri: "https://e.co/t".into(),
@@ -131,7 +131,7 @@ fn launch() {
         },
     };
     let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
-    type A = burr::accounts::Launch;
+    type A = burrpad::accounts::Launch;
     let swaps: Vec<Swap<A>> = vec![
         sw("config", |x: &mut A| x.config = fake),
         sw("coin", |x: &mut A| x.coin = kit::coin(&a)),
@@ -175,7 +175,7 @@ fn split() {
     let Stage { mut w, a, b, thief, nothing, .. } = stage();
     w.b.give_zec(&kit::authority(&a), 1_000);
     let payer = w.b.payer.insecure_clone();
-    let good = burr::accounts::SplitOnly {
+    let good = burrpad::accounts::SplitOnly {
         mint: a,
         coin: kit::coin(&a),
         ledger: kit::ledger(&a),
@@ -185,7 +185,7 @@ fn split() {
         token_program: TOKEN,
     };
     let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
-    type A = burr::accounts::SplitOnly;
+    type A = burrpad::accounts::SplitOnly;
     let swaps: Vec<Swap<A>> = vec![
         sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
         sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
@@ -198,7 +198,7 @@ fn split() {
         sw("zec_mint", |x: &mut A| x.zec_mint = a),
         sw("token_program", |x: &mut A| x.token_program = nothing),
     ];
-    let r = each_refused(&mut w, &payer, &[], good, burr::instruction::Split {}, swaps);
+    let r = each_refused(&mut w, &payer, &[], good, burrpad::instruction::Split {}, swaps);
     assert!(r.is_ok(), "{}", logs(&r));
 }
 
@@ -209,7 +209,7 @@ fn collect_curve() {
     let payer = w.b.payer.insecure_clone();
     let good = w.collect_curve_accounts(&payer.pubkey(), &a);
     let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
-    type A = burr::accounts::CollectCurve;
+    type A = burrpad::accounts::CollectCurve;
     let swaps: Vec<Swap<A>> = vec![
         sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
         sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
@@ -238,7 +238,7 @@ fn collect_curve() {
         sw("system_program", |x: &mut A| x.system_program = nothing),
     ];
     let before = w.ledger(&a).accounted;
-    let r = each_refused(&mut w, &payer, &[], good, burr::instruction::CollectCurve {}, swaps);
+    let r = each_refused(&mut w, &payer, &[], good, burrpad::instruction::CollectCurve {}, swaps);
     assert!(r.is_ok(), "{}", logs(&r));
     assert!(w.ledger(&a).accounted > before);
 }
@@ -250,7 +250,7 @@ fn collect_pool() {
     let payer = w.b.payer.insecure_clone();
     let good = w.collect_pool_accounts(&payer.pubkey(), &c);
     let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
-    type A = burr::accounts::CollectPool;
+    type A = burrpad::accounts::CollectPool;
     let swaps: Vec<Swap<A>> = vec![
         sw("coin", |x: &mut A| x.coin = kit::coin(&d)),
         sw("ledger", |x: &mut A| x.ledger = kit::ledger(&d)),
@@ -281,7 +281,7 @@ fn collect_pool() {
         sw("system_program", |x: &mut A| x.system_program = nothing),
     ];
     let before = w.ledger(&c).accounted;
-    let r = each_refused(&mut w, &payer, &[], good, burr::instruction::CollectPool {}, swaps);
+    let r = each_refused(&mut w, &payer, &[], good, burrpad::instruction::CollectPool {}, swaps);
     assert!(r.is_ok(), "{}", logs(&r));
     assert!(w.ledger(&c).accounted > before);
 }
@@ -294,7 +294,7 @@ fn pay_out() {
     let good = w.pay_out_accounts(&payer.pubkey(), &a, &receiver);
     let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
     let thief_key = thief.pubkey();
-    type A = burr::accounts::PayOut;
+    type A = burrpad::accounts::PayOut;
     let swaps: Vec<Swap<A>> = vec![
         sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
         sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
@@ -315,7 +315,7 @@ fn pay_out() {
     ];
     let pot = w.ledger(&a).pots[1];
     assert!(pot > 0);
-    let r = each_refused(&mut w, &payer, &[], good, burr::instruction::PayOut { payee: Payee::Creator }, swaps);
+    let r = each_refused(&mut w, &payer, &[], good, burrpad::instruction::PayOut { payee: Payee::Creator }, swaps);
     assert!(r.is_ok(), "{}", logs(&r));
     assert_eq!(w.zec_of(&receiver), pot);
     assert_eq!(w.b.token_balance(&thief_zec), ZEC1 - ZEC1 / 100 * 4);
@@ -328,7 +328,7 @@ fn burn_curve() {
     let good = w.burn_curve_accounts(&payer.pubkey(), &a);
     let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
     let thief_coin = ata(&thief.pubkey(), &a, &TOKEN_2022);
-    type A = burr::accounts::BurnCurve;
+    type A = burrpad::accounts::BurnCurve;
     let swaps: Vec<Swap<A>> = vec![
         sw("mint", |x: &mut A| x.mint = b),
         sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
@@ -369,7 +369,7 @@ fn burn_curve() {
         sw("system_program", |x: &mut A| x.system_program = nothing),
     ];
     let pot = w.ledger(&a).pots[3];
-    let r = each_refused(&mut w, &payer, &[], good, burr::instruction::BurnCurve {}, swaps);
+    let r = each_refused(&mut w, &payer, &[], good, burrpad::instruction::BurnCurve {}, swaps);
     assert!(r.is_ok(), "{}", logs(&r));
     assert!(w.ledger(&a).pots[3] < pot, "with the right accounts the burn buys");
 }
@@ -381,7 +381,7 @@ fn burn_pool() {
     let good = w.burn_pool_accounts(&payer.pubkey(), &c);
     let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
     let thief_coin = ata(&thief.pubkey(), &c, &TOKEN_2022);
-    type A = burr::accounts::BurnPool;
+    type A = burrpad::accounts::BurnPool;
     let swaps: Vec<Swap<A>> = vec![
         sw("mint", |x: &mut A| x.mint = d),
         sw("coin", |x: &mut A| x.coin = kit::coin(&d)),
@@ -418,7 +418,7 @@ fn burn_pool() {
         sw("system_program", |x: &mut A| x.system_program = nothing),
     ];
     let pot = w.ledger(&c).pots[3];
-    let r = each_refused(&mut w, &payer, &[], good, burr::instruction::BurnPool {}, swaps);
+    let r = each_refused(&mut w, &payer, &[], good, burrpad::instruction::BurnPool {}, swaps);
     assert!(r.is_ok(), "{}", logs(&r));
     assert!(w.ledger(&c).pots[3] < pot, "with the right accounts the burn buys");
 }
@@ -429,7 +429,7 @@ fn stake() {
     let good = w.stake_accounts(&user.pubkey(), &a);
     let thief_coin = ata(&thief.pubkey(), &a, &TOKEN_2022);
     let thief_key = thief.pubkey();
-    type A = burr::accounts::StakeCoins;
+    type A = burrpad::accounts::StakeCoins;
     let swaps: Vec<Swap<A>> = vec![
         sw("mint", |x: &mut A| x.mint = b),
         sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
@@ -445,7 +445,7 @@ fn stake() {
         sw("associated_token_program", |x: &mut A| x.associated_token_program = nothing),
         sw("system_program", |x: &mut A| x.system_program = nothing),
     ];
-    let r = each_refused(&mut w, &user, &[], good, burr::instruction::Stake { amount: 10 }, swaps);
+    let r = each_refused(&mut w, &user, &[], good, burrpad::instruction::Stake { amount: 10 }, swaps);
     assert!(r.is_ok(), "{}", logs(&r));
     assert_eq!(w.stake_of(&a, &user.pubkey()).unwrap().amount, 1_010);
 }
@@ -460,7 +460,7 @@ fn unstake() {
     let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
     let thief_coin = ata(&thief.pubkey(), &a, &TOKEN_2022);
     let thief_key = thief.pubkey();
-    type A = burr::accounts::UnstakeCoins;
+    type A = burrpad::accounts::UnstakeCoins;
     let swaps: Vec<Swap<A>> = vec![
         sw("mint", |x: &mut A| x.mint = b),
         sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
@@ -484,7 +484,7 @@ fn unstake() {
     ];
     let thief_zec_before = w.b.token_balance(&thief_zec);
     let thief_coin_before = w.b.token_balance(&thief_coin);
-    let r = each_refused(&mut w, &user, &[], good, burr::instruction::Unstake { amount: 1_000 }, swaps);
+    let r = each_refused(&mut w, &user, &[], good, burrpad::instruction::Unstake { amount: 1_000 }, swaps);
     assert!(r.is_ok(), "{}", logs(&r));
     assert_eq!(w.b.token_balance(&thief_zec), thief_zec_before);
     assert_eq!(w.b.token_balance(&thief_coin), thief_coin_before);

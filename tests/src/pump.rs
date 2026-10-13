@@ -107,7 +107,7 @@ pub fn create_v2_accounts(mint: &Pubkey, user: &Pubkey) -> Vec<AccountMeta> {
     ]
 }
 
-/// pump.fun's `create_v2`, called directly (not through Burr).
+/// pump.fun's `create_v2`, called directly (not through Burrpad).
 pub fn create_v2(mint: &Pubkey, user: &Pubkey, creator: &Pubkey, fee_bps: u64) -> Instruction {
     let mut data = disc("create_v2").to_vec();
     data.extend(string("Test"));

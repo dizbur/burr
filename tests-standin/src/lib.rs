@@ -1,9 +1,9 @@
 //! A stand-in for pump.fun's programs, for tests only. It is loaded at
 //! pump.fun's addresses inside the test network and misbehaves in a chosen
-//! way, to prove that Burr concludes nothing from a call having succeeded.
+//! way, to prove that Burrpad concludes nothing from a call having succeeded.
 //!
 //! The way to misbehave is a single byte the test writes into pump.fun's
-//! settings account (byte 8, which Burr never reads).
+//! settings account (byte 8, which Burrpad never reads).
 
 use solana_account_info::AccountInfo;
 use solana_cpi::{invoke, invoke_signed};

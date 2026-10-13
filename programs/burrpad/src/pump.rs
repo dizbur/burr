@@ -10,7 +10,7 @@
 //! - nothing is concluded from a call having succeeded: callers read balances
 //!   and accounts again afterwards.
 
-use crate::error::BurrError;
+use crate::error::BurrpadError;
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 use anchor_lang::solana_program::program::invoke_signed;
@@ -88,9 +88,9 @@ const CURVE_MIN_LEN: usize = 125;
 /// Reads a curve account. It must be owned by pump.fun's program and carry
 /// the curve's code. The caller checks its address.
 pub fn read_curve(ai: &AccountInfo) -> Result<CurveView> {
-    require_keys_eq!(*ai.owner, PUMP_ID, BurrError::WrongPumpAccount);
+    require_keys_eq!(*ai.owner, PUMP_ID, BurrpadError::WrongPumpAccount);
     let d = ai.try_borrow_data()?;
-    require!(d.len() >= CURVE_MIN_LEN && d[..8] == ACC_BONDING_CURVE, BurrError::UnreadablePumpAccount);
+    require!(d.len() >= CURVE_MIN_LEN && d[..8] == ACC_BONDING_CURVE, BurrpadError::UnreadablePumpAccount);
     Ok(CurveView {
         virtual_token_reserves: u64_at(&d, 8),
         virtual_quote_reserves: u64_at(&d, 16),
@@ -118,9 +118,9 @@ const POOL_MIN_LEN: usize = 269;
 
 /// Reads a pool account. It must be owned by PumpSwap and carry the pool's code.
 pub fn read_pool(ai: &AccountInfo) -> Result<PoolView> {
-    require_keys_eq!(*ai.owner, PUMP_AMM_ID, BurrError::WrongPumpAccount);
+    require_keys_eq!(*ai.owner, PUMP_AMM_ID, BurrpadError::WrongPumpAccount);
     let d = ai.try_borrow_data()?;
-    require!(d.len() >= POOL_MIN_LEN && d[..8] == ACC_POOL, BurrError::UnreadablePumpAccount);
+    require!(d.len() >= POOL_MIN_LEN && d[..8] == ACC_POOL, BurrpadError::UnreadablePumpAccount);
     let mut v = [0u8; 16];
     v.copy_from_slice(&d[245..261]);
     Ok(PoolView {
@@ -134,9 +134,9 @@ pub fn read_pool(ai: &AccountInfo) -> Result<PoolView> {
 /// The reserve a pool's prices are worked from: its ZEC balance plus the
 /// pool's own adjustment. Must be positive and fit.
 pub fn effective_quote_reserves(balance: u64, virtual_quote_reserves: i128) -> Result<u64> {
-    let v = (balance as i128).checked_add(virtual_quote_reserves).ok_or(BurrError::Overflow)?;
-    require!(v > 0, BurrError::UnreadablePumpAccount);
-    u64::try_from(v).map_err(|_| BurrError::Overflow.into())
+    let v = (balance as i128).checked_add(virtual_quote_reserves).ok_or(BurrpadError::Overflow)?;
+    require!(v > 0, BurrpadError::UnreadablePumpAccount);
+    u64::try_from(v).map_err(|_| BurrpadError::Overflow.into())
 }
 
 /// True if `token_account` is a ZEC account owned by one of the eight
@@ -150,16 +150,19 @@ pub fn check_buyback_recipient(
     zec_mint: &Pubkey,
     token_program: &Pubkey,
 ) -> Result<()> {
-    require_keys_eq!(*settings.owner, *settings_owner, BurrError::WrongPumpAccount);
-    require_keys_eq!(*token_account.owner, *token_program, BurrError::WrongPumpAccount);
+    require_keys_eq!(*settings.owner, *settings_owner, BurrpadError::WrongPumpAccount);
+    require_keys_eq!(*token_account.owner, *token_program, BurrpadError::WrongPumpAccount);
     let t = token_account.try_borrow_data()?;
-    require!(t.len() == 165, BurrError::WrongPumpAccount);
-    require_keys_eq!(key_at(&t, 0), *zec_mint, BurrError::WrongPumpAccount);
+    require!(t.len() == 165, BurrpadError::WrongPumpAccount);
+    require_keys_eq!(key_at(&t, 0), *zec_mint, BurrpadError::WrongPumpAccount);
     let holder = key_at(&t, 32);
     let s = settings.try_borrow_data()?;
-    require!(s.len() >= list_offset + 32 * BUYBACK_COUNT && s[..8] == *settings_code, BurrError::UnreadablePumpAccount);
+    require!(
+        s.len() >= list_offset + 32 * BUYBACK_COUNT && s[..8] == *settings_code,
+        BurrpadError::UnreadablePumpAccount
+    );
     let listed = (0..BUYBACK_COUNT).any(|i| key_at(&s, list_offset + 32 * i) == holder);
-    require!(listed && holder != Pubkey::default(), BurrError::WrongPumpAccount);
+    require!(listed && holder != Pubkey::default(), BurrpadError::WrongPumpAccount);
     Ok(())
 }
 
@@ -169,19 +172,19 @@ pub fn check_buyback_recipient(
 /// (a transfer fee, a hook, a delegate), so it is refused.
 pub fn check_plain_coin_mint(mint: &AccountInfo, token_2022: &Pubkey) -> Result<()> {
     use crate::constants::{COIN_DECIMALS, EXT_METADATA_POINTER, EXT_TOKEN_METADATA};
-    require_keys_eq!(*mint.owner, *token_2022, BurrError::UnexpectedMint);
+    require_keys_eq!(*mint.owner, *token_2022, BurrpadError::UnexpectedMint);
     let d = mint.try_borrow_data()?;
-    require!(d.len() >= 82, BurrError::UnexpectedMint);
+    require!(d.len() >= 82, BurrpadError::UnexpectedMint);
     let mint_authority_set = d[0..4] != [0, 0, 0, 0];
     let freeze_authority_set = d[46..50] != [0, 0, 0, 0];
     require!(
         !mint_authority_set && !freeze_authority_set && d[44] == COIN_DECIMALS && d[45] == 1,
-        BurrError::UnexpectedMint
+        BurrpadError::UnexpectedMint
     );
     if d.len() > 82 {
         // Token-2022 pads the base to 165 bytes, then one byte for the kind
         // of account (1 = mint), then extensions as: kind u16, length u16, data.
-        require!(d.len() > 166 && d[165] == 1, BurrError::UnexpectedMint);
+        require!(d.len() > 166 && d[165] == 1, BurrpadError::UnexpectedMint);
         let mut o = 166;
         while o + 4 <= d.len() {
             let kind = u16::from_le_bytes([d[o], d[o + 1]]);
@@ -189,8 +192,8 @@ pub fn check_plain_coin_mint(mint: &AccountInfo, token_2022: &Pubkey) -> Result<
             if kind == 0 {
                 break;
             }
-            require!(kind == EXT_METADATA_POINTER || kind == EXT_TOKEN_METADATA, BurrError::UnexpectedMint);
-            o = o.checked_add(4 + len).ok_or(BurrError::UnexpectedMint)?;
+            require!(kind == EXT_METADATA_POINTER || kind == EXT_TOKEN_METADATA, BurrpadError::UnexpectedMint);
+            o = o.checked_add(4 + len).ok_or(BurrpadError::UnexpectedMint)?;
         }
     }
     Ok(())
@@ -214,7 +217,7 @@ fn call(
     data: Vec<u8>,
     signer_seeds: &[&[&[u8]]],
 ) -> Result<()> {
-    require_keys_eq!(*program.key, *expected, BurrError::WrongPumpAccount);
+    require_keys_eq!(*program.key, *expected, BurrpadError::WrongPumpAccount);
     let ix = Instruction { program_id: *expected, accounts, data };
     invoke_signed(&ix, infos, signer_seeds).map_err(Into::into)
 }

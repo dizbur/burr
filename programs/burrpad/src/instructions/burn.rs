@@ -7,7 +7,7 @@
 //! Only the amount set aside for one buy ever leaves the vault for the trade.
 
 use crate::constants::*;
-use crate::error::BurrError;
+use crate::error::BurrpadError;
 use crate::events::{BurnSkipped, Burned};
 use crate::math::{self, Reserves};
 use crate::ops;
@@ -33,18 +33,18 @@ fn plan(
     venue_fee_bps: u64,
     now: i64,
 ) -> Result<Option<(u64, u64)>> {
-    require!(coin.share_of(SINK_BURN) > 0, BurrError::HookNotChosen);
+    require!(coin.share_of(SINK_BURN) > 0, BurrpadError::HookNotChosen);
     // Nothing is recorded unless there is something to spend, so an empty
     // pot cannot be used to move the reference price.
-    require!(ledger.pots[SINK_BURN] > 0, BurrError::NothingToBurn);
+    require!(ledger.pots[SINK_BURN] > 0, BurrpadError::NothingToBurn);
     let b = &mut ledger.burn;
-    let ready = b.last_time.checked_add(coin.burn_cooldown_secs as i64).ok_or(BurrError::Overflow)?;
-    require!(now >= ready, BurrError::BurnTooSoon);
-    if reserves.above(&b.reference, coin.burn_price_band_bps).ok_or(BurrError::Overflow)? {
+    let ready = b.last_time.checked_add(coin.burn_cooldown_secs as i64).ok_or(BurrpadError::Overflow)?;
+    require!(now >= ready, BurrpadError::BurnTooSoon);
+    if reserves.above(&b.reference, coin.burn_price_band_bps).ok_or(BurrpadError::Overflow)? {
         // Do not take the price seen now as the new reference: it may have
         // been pushed for this one call. Raise the reference by one band
         // only. A real rise is followed step by step, one waiting time each.
-        b.reference = b.reference.raised_by(coin.burn_price_band_bps).ok_or(BurrError::Overflow)?;
+        b.reference = b.reference.raised_by(coin.burn_price_band_bps).ok_or(BurrpadError::Overflow)?;
         b.last_time = now;
         emit!(BurnSkipped { mint: coin.mint });
         return Ok(None);
@@ -59,12 +59,12 @@ fn plan(
         coin.fee_bps.min(charged),
         coin.burn_spend_divisor,
     )
-    .ok_or(BurrError::Overflow)?;
+    .ok_or(BurrpadError::Overflow)?;
     let min_out =
-        math::burn_min_out(&reserves, spend, charged, coin.burn_fee_allowance_bps).ok_or(BurrError::Overflow)?;
+        math::burn_min_out(&reserves, spend, charged, coin.burn_fee_allowance_bps).ok_or(BurrpadError::Overflow)?;
     // Zero here means nothing can be spent now (no fee is being charged, or
     // the amount is too small to buy one unit).
-    require!(min_out > 0, BurrError::NothingToBurn);
+    require!(min_out > 0, BurrpadError::NothingToBurn);
     Ok(Some((spend, min_out)))
 }
 
@@ -148,7 +148,7 @@ pub struct BurnCurve<'info> {
 pub fn handle_burn_curve(ctx: Context<BurnCurve>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let curve = pump::read_curve(&ctx.accounts.bonding_curve.to_account_info())?;
-    require!(!curve.complete && curve.quote_mint == ZEC_MINT, BurrError::WrongVenue);
+    require!(!curve.complete && curve.quote_mint == ZEC_MINT, BurrpadError::WrongVenue);
     let reserves = Reserves { quote: curve.virtual_quote_reserves, base: curve.virtual_token_reserves };
     let Some((spend, min_out)) =
         plan(&ctx.accounts.coin, &mut ctx.accounts.ledger, reserves, curve.creator_fee_bps, now)?
@@ -359,7 +359,7 @@ pub fn pool_reserves(
     quote_amount: u64,
 ) -> Result<(Reserves, u64)> {
     let p = pump::read_pool(pool)?;
-    require!(p.base_mint == *mint && p.quote_mint == ZEC_MINT, BurrError::WrongPumpAccount);
+    require!(p.base_mint == *mint && p.quote_mint == ZEC_MINT, BurrpadError::WrongPumpAccount);
     let quote = pump::effective_quote_reserves(quote_amount, p.virtual_quote_reserves)?;
     Ok((Reserves { quote, base: base_amount }, p.creator_fee_bps))
 }
@@ -486,8 +486,8 @@ pub fn handle_burn_pool(ctx: Context<BurnPool>) -> Result<()> {
 /// one. Without that bound, liquidity added around one burn would raise the
 /// limit of the next.
 fn next_reference(last: &Reserves, after: Reserves, band_bps: u16) -> Result<Reserves> {
-    let ceiling = last.raised_by(band_bps).ok_or(BurrError::Overflow)?.quote;
-    after.held_to(ceiling).ok_or(BurrError::Overflow.into())
+    let ceiling = last.raised_by(band_bps).ok_or(BurrpadError::Overflow)?.quote;
+    after.held_to(ceiling).ok_or(BurrpadError::Overflow.into())
 }
 
 /// Moves exactly `spend` from the vault to the burner. Nothing else in the
@@ -514,13 +514,13 @@ fn finish(
     zec_after: u64,
     coin_after: u64,
 ) -> Result<(u64, u64)> {
-    let spent = zec_before.checked_sub(zec_after).ok_or(BurrError::BurnOverspent)?;
-    require!(spent <= spend, BurrError::BurnOverspent);
-    let bought = coin_after.checked_sub(coin_before).ok_or(BurrError::BurnBadFill)?;
-    require!(bought >= min_out, BurrError::BurnBadFill);
+    let spent = zec_before.checked_sub(zec_after).ok_or(BurrpadError::BurnOverspent)?;
+    require!(spent <= spend, BurrpadError::BurnOverspent);
+    let bought = coin_after.checked_sub(coin_before).ok_or(BurrpadError::BurnBadFill)?;
+    require!(bought >= min_out, BurrpadError::BurnBadFill);
     ops::debit(ledger, SINK_BURN, spent)?;
-    ledger.burn.total_spent = ledger.burn.total_spent.checked_add(spent).ok_or(BurrError::Overflow)?;
-    ledger.burn.total_burned = ledger.burn.total_burned.checked_add(coin_after).ok_or(BurrError::Overflow)?;
+    ledger.burn.total_spent = ledger.burn.total_spent.checked_add(spent).ok_or(BurrpadError::Overflow)?;
+    ledger.burn.total_burned = ledger.burn.total_burned.checked_add(coin_after).ok_or(BurrpadError::Overflow)?;
     Ok((spent, coin_after))
 }
 

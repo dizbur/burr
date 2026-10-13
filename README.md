@@ -1,8 +1,8 @@
-# Burr
+# Burrpad
 
 Fee hooks for ZEC-priced pump.fun coins, as one Solana program.
 
-A coin launched through Burr is a real pump.fun coin, priced in ZEC, whose creator is an address only this program can sign for. Its creator fee can therefore only arrive in a vault the program controls. What happens to it is chosen once, at launch, from four hooks, and can never be changed.
+A coin launched through Burrpad is a real pump.fun coin, priced in ZEC, whose creator is an address only this program can sign for. Its creator fee can therefore only arrive in a vault the program controls. What happens to it is chosen once, at launch, from four hooks, and can never be changed.
 
 | Hook | What it does with its share of the fee |
 |---|---|
@@ -16,8 +16,8 @@ A coin launched through Burr is a real pump.fun coin, priced in ZEC, whose creat
 ## What is here
 
 ```
-programs/burr/          the program
-tests/                  the test bench: Burr run against real copies of pump.fun's programs
+programs/burrpad/          the program
+tests/                  the test bench: Burrpad run against real copies of pump.fun's programs
 tests-standin/          a stand-in for pump.fun that misbehaves on purpose; tests only, never deployed
 scripts/ground/         read-only checks against the main network (they send nothing)
 scripts/check.sh        format, lint, advisories, build, tests
@@ -58,7 +58,7 @@ cd ../..
 ./scripts/check.sh
 ```
 
-`check.sh` builds the program with `cargo build-sbf` and runs the whole suite. `anchor build` works too and also writes the interface file a site needs, `target/idl/burr.json`. The tests load `target/deploy/burr.so`, so the build must come first.
+`check.sh` builds the program with `cargo build-sbf` and runs the whole suite. `anchor build` works too and also writes the interface file a site needs, `target/idl/burrpad.json`. The tests load `target/deploy/burrpad.so`, so the build must come first.
 
 The tests do not use a validator. They run the program, and pump.fun's real programs, inside an in-process Solana runtime, which lets them move the clock.
 

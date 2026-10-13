@@ -5,7 +5,7 @@
 //! Everything is worked out on-chain; nobody tells the program who is owed.
 
 use crate::constants::*;
-use crate::error::BurrError;
+use crate::error::BurrpadError;
 use crate::events::StakeChanged;
 use crate::ops;
 use crate::state::{Coin, Ledger, Stake};
@@ -18,9 +18,9 @@ use anchor_spl::token_interface::{self, Mint, TokenAccount, TransferChecked};
 /// Brings the pot's running total and one person's stake up to date.
 fn settle(coin: &Coin, ledger: &mut Ledger, stake: &mut Stake, now: i64) -> Result<()> {
     let vs = &mut ledger.vault_share;
-    vs.update(now, coin.vault_release_secs).ok_or(BurrError::Overflow)?;
-    let earned = vs.earned(stake.amount, stake.acc_snapshot).ok_or(BurrError::Overflow)?;
-    stake.owed = stake.owed.checked_add(earned).ok_or(BurrError::Overflow)?;
+    vs.update(now, coin.vault_release_secs).ok_or(BurrpadError::Overflow)?;
+    let earned = vs.earned(stake.amount, stake.acc_snapshot).ok_or(BurrpadError::Overflow)?;
+    stake.owed = stake.owed.checked_add(earned).ok_or(BurrpadError::Overflow)?;
     stake.acc_snapshot = vs.acc;
     Ok(())
 }
@@ -63,8 +63,8 @@ pub struct StakeCoins<'info> {
 }
 
 pub fn handle_stake(ctx: Context<StakeCoins>, amount: u64) -> Result<()> {
-    require!(amount > 0, BurrError::ZeroAmount);
-    require!(ctx.accounts.coin.share_of(SINK_VAULT_SHARE) > 0, BurrError::HookNotChosen);
+    require!(amount > 0, BurrpadError::ZeroAmount);
+    require!(ctx.accounts.coin.share_of(SINK_VAULT_SHARE) > 0, BurrpadError::HookNotChosen);
     let now = Clock::get()?.unix_timestamp;
     let mint_key = ctx.accounts.mint.key();
 
@@ -92,12 +92,12 @@ pub fn handle_stake(ctx: Context<StakeCoins>, amount: u64) -> Result<()> {
     )?;
     ctx.accounts.stake_vault.reload()?;
     // What arrived must be exactly what was sent.
-    require!(ctx.accounts.stake_vault.amount.checked_sub(before) == Some(amount), BurrError::TransferMismatch);
+    require!(ctx.accounts.stake_vault.amount.checked_sub(before) == Some(amount), BurrpadError::TransferMismatch);
 
     let stake = &mut ctx.accounts.stake;
-    stake.amount = stake.amount.checked_add(amount).ok_or(BurrError::Overflow)?;
+    stake.amount = stake.amount.checked_add(amount).ok_or(BurrpadError::Overflow)?;
     let vs = &mut ctx.accounts.ledger.vault_share;
-    vs.total_staked = vs.total_staked.checked_add(amount).ok_or(BurrError::Overflow)?;
+    vs.total_staked = vs.total_staked.checked_add(amount).ok_or(BurrpadError::Overflow)?;
     emit!(StakeChanged {
         mint: mint_key,
         owner: stake.owner,
@@ -164,14 +164,15 @@ pub fn handle_unstake(ctx: Context<UnstakeCoins>, amount: u64) -> Result<()> {
     settle(&ctx.accounts.coin, &mut ctx.accounts.ledger, &mut ctx.accounts.stake, now)?;
 
     let stake = &mut ctx.accounts.stake;
-    require!(stake.amount >= amount, BurrError::NotEnoughStaked);
+    require!(stake.amount >= amount, BurrpadError::NotEnoughStaked);
     stake.amount -= amount;
     let pay = stake.owed;
     stake.owed = 0;
     let staked_now = stake.amount;
 
     let ledger = &mut ctx.accounts.ledger;
-    ledger.vault_share.total_staked = ledger.vault_share.total_staked.checked_sub(amount).ok_or(BurrError::Overflow)?;
+    ledger.vault_share.total_staked =
+        ledger.vault_share.total_staked.checked_sub(amount).ok_or(BurrpadError::Overflow)?;
     ops::debit(ledger, SINK_VAULT_SHARE, pay)?;
     if ledger.vault_share.total_staked == 0 {
         // Nobody is left, so nobody is owed anything: all that remains in the
@@ -180,7 +181,7 @@ pub fn handle_unstake(ctx: Context<UnstakeCoins>, amount: u64) -> Result<()> {
         // Its release starts afresh when the next staker arrives, even if
         // that is in this same second.
         ledger.vault_share.release_end =
-            now.checked_add(ctx.accounts.coin.vault_release_secs as i64).ok_or(BurrError::Overflow)?;
+            now.checked_add(ctx.accounts.coin.vault_release_secs as i64).ok_or(BurrpadError::Overflow)?;
     }
     let total_staked = ledger.vault_share.total_staked;
 
@@ -242,6 +243,6 @@ pub struct CloseStake<'info> {
 /// Closes an empty stake record and returns its rent to its owner.
 pub fn handle_close_stake(ctx: Context<CloseStake>) -> Result<()> {
     let s = &ctx.accounts.stake;
-    require!(s.amount == 0 && s.owed == 0, BurrError::StakeNotEmpty);
+    require!(s.amount == 0 && s.owed == 0, BurrpadError::StakeNotEmpty);
     Ok(())
 }

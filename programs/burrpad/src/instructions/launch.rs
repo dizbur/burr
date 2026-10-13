@@ -2,7 +2,7 @@
 //! not at all.
 
 use crate::constants::*;
-use crate::error::BurrError;
+use crate::error::BurrpadError;
 use crate::events::Launched;
 use crate::math;
 use crate::pump;
@@ -124,23 +124,23 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     let cfg = &a.config;
 
     // 1. Checks before anything is created.
-    require!(!cfg.launches_paused, BurrError::LaunchesPaused);
+    require!(!cfg.launches_paused, BurrpadError::LaunchesPaused);
     // The record is for good, so the launcher states the platform's terms they
     // saw. A change made while the launch was on its way stops it.
     require!(
         cfg.platform_fraction_bps <= args.max_platform_fraction_bps && cfg.platform_receiver == args.platform_receiver,
-        BurrError::PlatformTermsChanged
+        BurrpadError::PlatformTermsChanged
     );
-    require!(args.fee_bps >= cfg.min_fee_bps && args.fee_bps <= cfg.max_fee_bps, BurrError::FeeOutOfRange);
-    require!(math::weights(cfg.platform_fraction_bps, &args.shares).is_some(), BurrError::SharesDoNotAddUp);
+    require!(args.fee_bps >= cfg.min_fee_bps && args.fee_bps <= cfg.max_fee_bps, BurrpadError::FeeOutOfRange);
+    require!(math::weights(cfg.platform_fraction_bps, &args.shares).is_some(), BurrpadError::SharesDoNotAddUp);
     require!(
         args.shares[SINK_CREATOR - 1] == 0 || args.creator_receiver != Pubkey::default(),
-        BurrError::MissingReceiver
+        BurrpadError::MissingReceiver
     );
-    require!(args.shares[SINK_GIVE - 1] == 0 || args.give_receiver != Pubkey::default(), BurrError::MissingReceiver);
+    require!(args.shares[SINK_GIVE - 1] == 0 || args.give_receiver != Pubkey::default(), BurrpadError::MissingReceiver);
     require!(
         args.name.len() <= MAX_NAME_LEN && args.symbol.len() <= MAX_SYMBOL_LEN && args.uri.len() <= MAX_URI_LEN,
-        BurrError::TextTooLong
+        BurrpadError::TextTooLong
     );
 
     let mint_key = a.mint.key();
@@ -149,7 +149,7 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     // A receiver may not be one of this coin's own program-controlled
     // addresses: a payout to the authority would land back in the vault.
     for r in [args.creator_receiver, args.give_receiver, cfg.platform_receiver] {
-        require!(r != authority_key && r != burner_key, BurrError::ReceiverNotAllowed);
+        require!(r != authority_key && r != burner_key, BurrpadError::ReceiverNotAllowed);
     }
 
     // 2. Create the coin on pump.fun, with our authority as its creator.
@@ -193,7 +193,7 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
             && !curve.is_cashback_coin
             && !curve.is_mayhem_mode
             && !curve.complete,
-        BurrError::CurveMismatch
+        BurrpadError::CurveMismatch
     );
     pump::check_plain_coin_mint(&a.mint.to_account_info(), &a.token_2022_program.key())?;
 

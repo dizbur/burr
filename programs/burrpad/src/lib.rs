@@ -1,4 +1,4 @@
-//! Burr: fee hooks for ZEC-priced pump.fun coins.
+//! Burrpad: fee hooks for ZEC-priced pump.fun coins.
 //!
 //! A coin launched through this program is a real pump.fun coin whose creator
 //! is an address only this program can sign for. Its creator fee can
@@ -23,7 +23,7 @@ pub use state::*;
 declare_id!("GDbkhHSpg15QWNwqws6SKyrwFMhe2AWQ59UxJciLa6Qt");
 
 #[program]
-pub mod burr {
+pub mod burrpad {
     use super::*;
 
     // ---- the administrator ----

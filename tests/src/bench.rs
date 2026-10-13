@@ -236,8 +236,8 @@ pub fn logs(r: &TxResult) -> String {
 }
 
 /// True if a transaction failed without pump.fun's programs ever being
-/// called: that is, Burr itself refused it.
-pub fn refused_by_burr(r: &TxResult) -> bool {
+/// called: that is, Burrpad itself refused it.
+pub fn refused_by_burrpad(r: &TxResult) -> bool {
     match r {
         Ok(_) => false,
         Err(f) => !f.meta.logs.iter().any(|l| {

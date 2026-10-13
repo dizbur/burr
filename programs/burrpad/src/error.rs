@@ -1,7 +1,7 @@
 use anchor_lang::prelude::*;
 
 #[error_code]
-pub enum BurrError {
+pub enum BurrpadError {
     #[msg("Only the program's upgrade key may initialise")]
     NotUpgradeAuthority,
     #[msg("Only the administrator may do this")]

@@ -1,4 +1,4 @@
-//! Test bench. Runs Burr against real copies of pump.fun's programs, taken
+//! Test bench. Runs Burrpad against real copies of pump.fun's programs, taken
 //! from the main network by reading (see `scripts/ground/07-fetch-fixtures.mjs`).
 
 pub mod bench;

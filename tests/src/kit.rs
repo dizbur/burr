@@ -1,36 +1,36 @@
-//! Helpers to drive Burr on the bench: one function per instruction, each
+//! Helpers to drive Burrpad on the bench: one function per instruction, each
 //! building the instruction from the program's own account lists.
 
 use crate::bench::{Bench, TxResult};
 use crate::pump::{self, ata, pda, ATA_PROGRAM, BUYBACK, PUMP, PUMP_AMM, PUMP_FEES, SYSTEM, TOKEN, TOKEN_2022, ZEC};
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
-use burr::state::{Coin, Config, Ledger, Payee, Stake};
+use burrpad::state::{Coin, Config, Ledger, Payee, Stake};
 use solana_account::Account;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
 use solana_pubkey::{pubkey, Pubkey};
 use solana_signer::Signer;
 
-pub const BURR: Pubkey = burr::ID;
+pub const BURRPAD: Pubkey = burrpad::ID;
 pub const LOADER: Pubkey = pubkey!("BPFLoaderUpgradeab1e11111111111111111111111");
 
 pub fn config() -> Pubkey {
-    pda(&[b"config"], &BURR)
+    pda(&[b"config"], &BURRPAD)
 }
 pub fn coin(mint: &Pubkey) -> Pubkey {
-    pda(&[b"coin", mint.as_ref()], &BURR)
+    pda(&[b"coin", mint.as_ref()], &BURRPAD)
 }
 pub fn ledger(mint: &Pubkey) -> Pubkey {
-    pda(&[b"ledger", mint.as_ref()], &BURR)
+    pda(&[b"ledger", mint.as_ref()], &BURRPAD)
 }
 pub fn authority(mint: &Pubkey) -> Pubkey {
-    pda(&[b"authority", mint.as_ref()], &BURR)
+    pda(&[b"authority", mint.as_ref()], &BURRPAD)
 }
 pub fn burner(mint: &Pubkey) -> Pubkey {
-    pda(&[b"burner", mint.as_ref()], &BURR)
+    pda(&[b"burner", mint.as_ref()], &BURRPAD)
 }
 pub fn stake(mint: &Pubkey, owner: &Pubkey) -> Pubkey {
-    pda(&[b"stake", mint.as_ref(), owner.as_ref()], &BURR)
+    pda(&[b"stake", mint.as_ref(), owner.as_ref()], &BURRPAD)
 }
 pub fn vault(mint: &Pubkey) -> Pubkey {
     ata(&authority(mint), &ZEC, &TOKEN)
@@ -39,11 +39,11 @@ pub fn stake_vault(mint: &Pubkey) -> Pubkey {
     ata(&authority(mint), mint, &TOKEN_2022)
 }
 pub fn program_data() -> Pubkey {
-    pda(&[BURR.as_ref()], &LOADER)
+    pda(&[BURRPAD.as_ref()], &LOADER)
 }
 
 fn ix(accounts: impl ToAccountMetas, data: impl InstructionData) -> Instruction {
-    Instruction { program_id: BURR, accounts: accounts.to_account_metas(None), data: data.data() }
+    Instruction { program_id: BURRPAD, accounts: accounts.to_account_metas(None), data: data.data() }
 }
 
 /// What a launch asks for. Shares in order: creator, give, burn, vault share.
@@ -73,7 +73,7 @@ impl Default for LaunchPlan {
     }
 }
 
-/// The bench with Burr loaded and initialised.
+/// The bench with Burrpad loaded and initialised.
 pub struct World {
     pub b: Bench,
     pub upgrade_key: Keypair,
@@ -88,13 +88,13 @@ impl Default for World {
 }
 
 impl World {
-    /// Burr loaded but not initialised.
+    /// Burrpad loaded but not initialised.
     pub fn bare() -> Self {
         let mut b = Bench::new();
         let upgrade_key = b.wallet();
         let admin = b.wallet();
-        let so = std::fs::read(crate::bench::root().join("target/deploy/burr.so"))
-            .expect("build the program first: cargo build-sbf --manifest-path programs/burr/Cargo.toml");
+        let so = std::fs::read(crate::bench::root().join("target/deploy/burrpad.so"))
+            .expect("build the program first: cargo build-sbf --manifest-path programs/burrpad/Cargo.toml");
         // Loaded the way a real deployment is: a program account pointing at
         // its code, with an upgrade key recorded.
         let mut data = vec![3, 0, 0, 0];
@@ -113,7 +113,7 @@ impl World {
         p.extend_from_slice(program_data().as_ref());
         b.svm
             .set_account(
-                BURR,
+                BURRPAD,
                 Account { lamports: 1_000_000_000, data: p, owner: LOADER, executable: true, rent_epoch: u64::MAX },
             )
             .unwrap();
@@ -129,14 +129,14 @@ impl World {
 
     pub fn initialize_ix(&self, signer: &Pubkey, admin: Pubkey, receiver: Pubkey) -> Instruction {
         ix(
-            burr::accounts::Initialize {
+            burrpad::accounts::Initialize {
                 upgrade_authority: *signer,
                 config: config(),
-                program: BURR,
+                program: BURRPAD,
                 program_data: program_data(),
                 system_program: SYSTEM,
             },
-            burr::instruction::Initialize { admin, platform_receiver: receiver },
+            burrpad::instruction::Initialize { admin, platform_receiver: receiver },
         )
     }
 
@@ -147,7 +147,7 @@ impl World {
     }
 
     pub fn admin_ix(&self, admin: &Pubkey, data: impl InstructionData) -> Instruction {
-        ix(burr::accounts::AdminOnly { admin: *admin, config: config() }, data)
+        ix(burrpad::accounts::AdminOnly { admin: *admin, config: config() }, data)
     }
 
     pub fn as_admin(&mut self, data: impl InstructionData) -> TxResult {
@@ -156,10 +156,10 @@ impl World {
         self.b.send_as(Some(&k), &[i], &[])
     }
 
-    pub fn launch_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burr::accounts::Launch {
+    pub fn launch_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burrpad::accounts::Launch {
         let curve = pump::curve(mint);
         let sol_vault = pda(&[b"sol-vault"], &pump::MAYHEM);
-        burr::accounts::Launch {
+        burrpad::accounts::Launch {
             payer: *payer,
             mint: *mint,
             config: config(),
@@ -193,8 +193,8 @@ impl World {
         let cfg = self.config();
         ix(
             self.launch_accounts(payer, mint),
-            burr::instruction::Launch {
-                args: burr::LaunchArgs {
+            burrpad::instruction::Launch {
+                args: burrpad::LaunchArgs {
                     name: plan.name.clone(),
                     symbol: "TST".into(),
                     uri: "https://e.co/t".into(),
@@ -335,7 +335,7 @@ impl World {
 
     pub fn split_ix(&self, mint: &Pubkey) -> Instruction {
         ix(
-            burr::accounts::SplitOnly {
+            burrpad::accounts::SplitOnly {
                 mint: *mint,
                 coin: coin(mint),
                 ledger: ledger(mint),
@@ -344,7 +344,7 @@ impl World {
                 zec_mint: ZEC,
                 token_program: TOKEN,
             },
-            burr::instruction::Split {},
+            burrpad::instruction::Split {},
         )
     }
     pub fn split(&mut self, mint: &Pubkey) -> TxResult {
@@ -352,10 +352,10 @@ impl World {
         self.b.send(&[i], &[])
     }
 
-    pub fn collect_curve_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burr::accounts::CollectCurve {
+    pub fn collect_curve_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burrpad::accounts::CollectCurve {
         let curve = pump::curve(mint);
         let cv = pump::creator_vault(&authority(mint));
-        burr::accounts::CollectCurve {
+        burrpad::accounts::CollectCurve {
             payer: *payer,
             mint: *mint,
             coin: coin(mint),
@@ -376,14 +376,14 @@ impl World {
         }
     }
     pub fn collect_curve(&mut self, mint: &Pubkey) -> TxResult {
-        let i = ix(self.collect_curve_accounts(&self.b.payer.pubkey(), mint), burr::instruction::CollectCurve {});
+        let i = ix(self.collect_curve_accounts(&self.b.payer.pubkey(), mint), burrpad::instruction::CollectCurve {});
         self.b.send(&[i], &[])
     }
 
-    pub fn collect_pool_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burr::accounts::CollectPool {
+    pub fn collect_pool_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burrpad::accounts::CollectPool {
         let pool = pump::pool(mint);
         let va = pda(&[b"creator_vault", authority(mint).as_ref()], &PUMP_AMM);
-        burr::accounts::CollectPool {
+        burrpad::accounts::CollectPool {
             payer: *payer,
             mint: *mint,
             coin: coin(mint),
@@ -405,12 +405,12 @@ impl World {
         }
     }
     pub fn collect_pool(&mut self, mint: &Pubkey) -> TxResult {
-        let i = ix(self.collect_pool_accounts(&self.b.payer.pubkey(), mint), burr::instruction::CollectPool {});
+        let i = ix(self.collect_pool_accounts(&self.b.payer.pubkey(), mint), burrpad::instruction::CollectPool {});
         self.b.send(&[i], &[])
     }
 
-    pub fn pay_out_accounts(&self, payer: &Pubkey, mint: &Pubkey, receiver: &Pubkey) -> burr::accounts::PayOut {
-        burr::accounts::PayOut {
+    pub fn pay_out_accounts(&self, payer: &Pubkey, mint: &Pubkey, receiver: &Pubkey) -> burrpad::accounts::PayOut {
+        burrpad::accounts::PayOut {
             payer: *payer,
             mint: *mint,
             coin: coin(mint),
@@ -427,16 +427,17 @@ impl World {
     }
     pub fn pay_out(&mut self, mint: &Pubkey, payee: Payee) -> TxResult {
         let receiver = payee.receiver(&self.coin(mint));
-        let i = ix(self.pay_out_accounts(&self.b.payer.pubkey(), mint, &receiver), burr::instruction::PayOut { payee });
+        let i =
+            ix(self.pay_out_accounts(&self.b.payer.pubkey(), mint, &receiver), burrpad::instruction::PayOut { payee });
         self.b.send(&[i], &[])
     }
 
     // ---- buy back and burn ----
 
-    pub fn burn_curve_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burr::accounts::BurnCurve {
+    pub fn burn_curve_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burrpad::accounts::BurnCurve {
         let curve = pump::curve(mint);
         let bn = burner(mint);
-        burr::accounts::BurnCurve {
+        burrpad::accounts::BurnCurve {
             payer: *payer,
             mint: *mint,
             coin: coin(mint),
@@ -463,14 +464,14 @@ impl World {
         }
     }
     pub fn burn_curve(&mut self, mint: &Pubkey) -> TxResult {
-        let i = ix(self.burn_curve_accounts(&self.b.payer.pubkey(), mint), burr::instruction::BurnCurve {});
+        let i = ix(self.burn_curve_accounts(&self.b.payer.pubkey(), mint), burrpad::instruction::BurnCurve {});
         self.b.send(&[i], &[])
     }
 
-    pub fn burn_pool_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burr::accounts::BurnPool {
+    pub fn burn_pool_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burrpad::accounts::BurnPool {
         let pool = pump::pool(mint);
         let bn = burner(mint);
-        burr::accounts::BurnPool {
+        burrpad::accounts::BurnPool {
             payer: *payer,
             mint: *mint,
             coin: coin(mint),
@@ -498,7 +499,7 @@ impl World {
         }
     }
     pub fn burn_pool(&mut self, mint: &Pubkey) -> TxResult {
-        let i = ix(self.burn_pool_accounts(&self.b.payer.pubkey(), mint), burr::instruction::BurnPool {});
+        let i = ix(self.burn_pool_accounts(&self.b.payer.pubkey(), mint), burrpad::instruction::BurnPool {});
         self.b.send(&[i], &[])
     }
 
@@ -520,16 +521,16 @@ impl World {
 
     pub fn close_stake(&mut self, owner: &Keypair, mint: &Pubkey) -> TxResult {
         let i = ix(
-            burr::accounts::CloseStake { owner: owner.pubkey(), mint: *mint, stake: stake(mint, &owner.pubkey()) },
-            burr::instruction::CloseStake {},
+            burrpad::accounts::CloseStake { owner: owner.pubkey(), mint: *mint, stake: stake(mint, &owner.pubkey()) },
+            burrpad::instruction::CloseStake {},
         );
         self.b.send_as(Some(owner), &[i], &[])
     }
 
     // ---- vault share ----
 
-    pub fn stake_accounts(&self, owner: &Pubkey, mint: &Pubkey) -> burr::accounts::StakeCoins {
-        burr::accounts::StakeCoins {
+    pub fn stake_accounts(&self, owner: &Pubkey, mint: &Pubkey) -> burrpad::accounts::StakeCoins {
+        burrpad::accounts::StakeCoins {
             owner: *owner,
             mint: *mint,
             coin: coin(mint),
@@ -544,15 +545,15 @@ impl World {
         }
     }
     pub fn stake_ix(&self, owner: &Pubkey, mint: &Pubkey, amount: u64) -> Instruction {
-        ix(self.stake_accounts(owner, mint), burr::instruction::Stake { amount })
+        ix(self.stake_accounts(owner, mint), burrpad::instruction::Stake { amount })
     }
     pub fn stake(&mut self, owner: &Keypair, mint: &Pubkey, amount: u64) -> TxResult {
         let i = self.stake_ix(&owner.pubkey(), mint, amount);
         self.b.send_as(Some(owner), &[i], &[])
     }
 
-    pub fn unstake_accounts(&self, owner: &Pubkey, mint: &Pubkey) -> burr::accounts::UnstakeCoins {
-        burr::accounts::UnstakeCoins {
+    pub fn unstake_accounts(&self, owner: &Pubkey, mint: &Pubkey) -> burrpad::accounts::UnstakeCoins {
+        burrpad::accounts::UnstakeCoins {
             owner: *owner,
             mint: *mint,
             coin: coin(mint),
@@ -571,7 +572,7 @@ impl World {
         }
     }
     pub fn unstake_ix(&self, owner: &Pubkey, mint: &Pubkey, amount: u64) -> Instruction {
-        ix(self.unstake_accounts(owner, mint), burr::instruction::Unstake { amount })
+        ix(self.unstake_accounts(owner, mint), burrpad::instruction::Unstake { amount })
     }
     pub fn unstake(&mut self, owner: &Keypair, mint: &Pubkey, amount: u64) -> TxResult {
         let i = self.unstake_ix(&owner.pubkey(), mint, amount);
@@ -579,14 +580,14 @@ impl World {
     }
 }
 
-/// Builds a Burr instruction from an account list and its data. For tests
+/// Builds a Burrpad instruction from an account list and its data. For tests
 /// that need to pass a wrong account on purpose.
 pub fn raw(accounts: impl ToAccountMetas, data: impl InstructionData) -> Instruction {
     ix(accounts, data)
 }
 
-/// Burr's own error number for a named error.
-pub fn err(e: burr::error::BurrError) -> u32 {
+/// Burrpad's own error number for a named error.
+pub fn err(e: burrpad::error::BurrpadError) -> u32 {
     e as u32 + 6000
 }
 
@@ -614,7 +615,7 @@ pub fn mint_with_plain_bumps() -> Keypair {
         let m = k.pubkey();
         let all_top = [&b"coin"[..], b"ledger", b"authority", b"burner"]
             .iter()
-            .all(|seed| Pubkey::find_program_address(&[seed, m.as_ref()], &BURR).1 == 255);
+            .all(|seed| Pubkey::find_program_address(&[seed, m.as_ref()], &BURRPAD).1 == 255);
         if all_top {
             return k;
         }

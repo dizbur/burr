@@ -24,7 +24,7 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
-SRC = "programs/burr/src"
+SRC = "programs/burrpad/src"
 WORK = ROOT / "tmp" / "mut"
 
 # ---------------------------------------------------------------------------
@@ -64,7 +64,7 @@ MANUAL = [
       "pub struct AdminOnly<'info> {\n    /// CHECK: switched off\n    pub admin: UncheckedAccount<'info>,",
       "naming_a_key_is_not_signing_with_it", "administrator's address"),
     M("A7", "The platform fraction can never be set above half", ADMIN,
-      "require!(fraction_bps <= HARD_MAX_PLATFORM_FRACTION_BPS, BurrError::PlatformFractionTooHigh);", "",
+      "require!(fraction_bps <= HARD_MAX_PLATFORM_FRACTION_BPS, BurrpadError::PlatformFractionTooHigh);", "",
       "admin_settings_stay_inside_the_hard_limits"),
     M("A8", "The lowest fee setting can never go below 0.10%", ADMIN,
       "min_bps >= HARD_MIN_FEE_BPS", "true", "admin_settings_stay_inside_the_hard_limits", "9 300 200"),
@@ -75,7 +75,7 @@ MANUAL = [
     M("A11", "The first-offered fee cannot be above the highest", ADMIN,
       "default_bps <= max_bps", "true", "admin_settings_stay_inside_the_hard_limits", "50 300 301"),
     M("A12", "The platform receiver cannot be set to the empty address", ADMIN,
-      "require!(receiver != Pubkey::default(), BurrError::EmptyAddress);", "",
+      "require!(receiver != Pubkey::default(), BurrpadError::EmptyAddress);", "",
       "admin_settings_stay_inside_the_hard_limits"),
     M("A13", "Only the proposed administrator can accept the role", ADMIN,
       "constraint = config.pending_admin == new_admin.key() @", "constraint = true @",
@@ -86,13 +86,13 @@ MANUAL = [
 
     # ---- launch ----
     M("L1", "No launch while launches are switched off", LAUNCH,
-      "require!(!cfg.launches_paused, BurrError::LaunchesPaused);", "", "pausing_stops_new_launches_only"),
+      "require!(!cfg.launches_paused, BurrpadError::LaunchesPaused);", "", "pausing_stops_new_launches_only"),
     M("L2", "A coin's fee cannot be below the lowest allowed", LAUNCH,
       "args.fee_bps >= cfg.min_fee_bps && ", "", "launch_refuses_bad_plans"),
     M("L3", "A coin's fee cannot be above the highest allowed", LAUNCH,
       " && args.fee_bps <= cfg.max_fee_bps", "", "launch_refuses_bad_plans"),
     M("L4", "Hook shares must add up to exactly the whole", LAUNCH,
-      "require!(math::weights(cfg.platform_fraction_bps, &args.shares).is_some(), BurrError::SharesDoNotAddUp);", "",
+      "require!(math::weights(cfg.platform_fraction_bps, &args.shares).is_some(), BurrpadError::SharesDoNotAddUp);", "",
       "launch_refuses_bad_plans"),
     M("L5", "A chosen creator's share needs a receiver", LAUNCH,
       "args.shares[SINK_CREATOR - 1] == 0 || args.creator_receiver != Pubkey::default()", "true",
@@ -146,7 +146,7 @@ MANUAL = [
 
     # ---- the coin's mint ----
     M("N1", "A coin's mint must belong to Token-2022", "pump.rs",
-      "require_keys_eq!(*mint.owner, *token_2022, BurrError::UnexpectedMint);", "",
+      "require_keys_eq!(*mint.owner, *token_2022, BurrpadError::UnexpectedMint);", "",
       "a_mint_that_is_not_the_plain_kind_is_refused"),
     M("N2", "Nobody may be able to mint more of a coin", "pump.rs",
       "!mint_authority_set && !freeze_authority_set", "!freeze_authority_set",
@@ -159,52 +159,52 @@ MANUAL = [
     M("N5", "A coin's mint must be initialised", "pump.rs", "&& d[45] == 1,", ",",
       "a_mint_that_is_not_the_plain_kind_is_refused"),
     M("N6", "The account must be a mint, not another Token-2022 account", "pump.rs",
-      "require!(d.len() > 166 && d[165] == 1, BurrError::UnexpectedMint);",
-      "require!(d.len() > 166, BurrError::UnexpectedMint);", "a_mint_that_is_not_the_plain_kind_is_refused"),
+      "require!(d.len() > 166 && d[165] == 1, BurrpadError::UnexpectedMint);",
+      "require!(d.len() > 166, BurrpadError::UnexpectedMint);", "a_mint_that_is_not_the_plain_kind_is_refused"),
     M("N7", "A coin's mint may carry no extension but its metadata", "pump.rs",
-      "require!(kind == EXT_METADATA_POINTER || kind == EXT_TOKEN_METADATA, BurrError::UnexpectedMint);", "",
+      "require!(kind == EXT_METADATA_POINTER || kind == EXT_TOKEN_METADATA, BurrpadError::UnexpectedMint);", "",
       "a_mint_that_is_not_the_plain_kind_is_refused", "was accepted"),
 
     # ---- reading pump.fun's accounts ----
     M("R1", "A curve account must be owned by pump.fun's program", "pump.rs",
-      "require_keys_eq!(*ai.owner, PUMP_ID, BurrError::WrongPumpAccount);", "",
+      "require_keys_eq!(*ai.owner, PUMP_ID, BurrpadError::WrongPumpAccount);", "",
       "the_curve_reader_checks_owner_code_and_length"),
     M("R2", "A curve account must be long enough and carry the curve's code", "pump.rs",
-      "require!(d.len() >= CURVE_MIN_LEN && d[..8] == ACC_BONDING_CURVE, BurrError::UnreadablePumpAccount);",
-      "require!(d.len() >= CURVE_MIN_LEN, BurrError::UnreadablePumpAccount);",
+      "require!(d.len() >= CURVE_MIN_LEN && d[..8] == ACC_BONDING_CURVE, BurrpadError::UnreadablePumpAccount);",
+      "require!(d.len() >= CURVE_MIN_LEN, BurrpadError::UnreadablePumpAccount);",
       "the_curve_reader_checks_owner_code_and_length"),
     M("R3", "A pool account must be owned by PumpSwap", "pump.rs",
-      "require_keys_eq!(*ai.owner, PUMP_AMM_ID, BurrError::WrongPumpAccount);", "",
+      "require_keys_eq!(*ai.owner, PUMP_AMM_ID, BurrpadError::WrongPumpAccount);", "",
       "the_pool_reader_checks_owner_code_and_length"),
     M("R4", "A pool account must be long enough and carry the pool's code", "pump.rs",
-      "require!(d.len() >= POOL_MIN_LEN && d[..8] == ACC_POOL, BurrError::UnreadablePumpAccount);",
-      "require!(d.len() >= POOL_MIN_LEN, BurrError::UnreadablePumpAccount);",
+      "require!(d.len() >= POOL_MIN_LEN && d[..8] == ACC_POOL, BurrpadError::UnreadablePumpAccount);",
+      "require!(d.len() >= POOL_MIN_LEN, BurrpadError::UnreadablePumpAccount);",
       "the_pool_reader_checks_owner_code_and_length"),
     M("R5", "A pool's price reserve must be positive", "pump.rs",
-      "require!(v > 0, BurrError::UnreadablePumpAccount);", "",
+      "require!(v > 0, BurrpadError::UnreadablePumpAccount);", "",
       "the_pools_price_reserve_must_be_positive_and_fit"),
     M("R6", "The settings account must be owned by pump.fun's program", "pump.rs",
-      "require_keys_eq!(*settings.owner, *settings_owner, BurrError::WrongPumpAccount);", "",
+      "require_keys_eq!(*settings.owner, *settings_owner, BurrpadError::WrongPumpAccount);", "",
       "only_a_listed_buy_back_receivers_zec_account_is_accepted"),
     M("R7", "A buy-back receiver's account must belong to the classic token program", "pump.rs",
-      "require_keys_eq!(*token_account.owner, *token_program, BurrError::WrongPumpAccount);", "",
+      "require_keys_eq!(*token_account.owner, *token_program, BurrpadError::WrongPumpAccount);", "",
       "only_a_listed_buy_back_receivers_zec_account_is_accepted"),
     M("R8", "A buy-back receiver's account must be a ZEC account", "pump.rs",
-      "require_keys_eq!(key_at(&t, 0), *zec_mint, BurrError::WrongPumpAccount);", "",
+      "require_keys_eq!(key_at(&t, 0), *zec_mint, BurrpadError::WrongPumpAccount);", "",
       "only_a_listed_buy_back_receivers_zec_account_is_accepted"),
     M("R9", "A buy-back receiver must be on pump.fun's own list", "pump.rs",
-      "require!(listed && holder != Pubkey::default(), BurrError::WrongPumpAccount);",
-      "require!(holder != Pubkey::default(), BurrError::WrongPumpAccount);",
+      "require!(listed && holder != Pubkey::default(), BurrpadError::WrongPumpAccount);",
+      "require!(holder != Pubkey::default(), BurrpadError::WrongPumpAccount);",
       "only_a_listed_buy_back_receivers_zec_account_is_accepted"),
     M("R10", "The empty address is never a buy-back receiver", "pump.rs",
-      "require!(listed && holder != Pubkey::default(), BurrError::WrongPumpAccount);",
-      "require!(listed, BurrError::WrongPumpAccount);",
+      "require!(listed && holder != Pubkey::default(), BurrpadError::WrongPumpAccount);",
+      "require!(listed, BurrpadError::WrongPumpAccount);",
       "only_a_listed_buy_back_receivers_zec_account_is_accepted"),
     M("R11", "The settings account must carry the settings' code and be long enough", "pump.rs",
       "s.len() >= list_offset + 32 * BUYBACK_COUNT && s[..8] == *settings_code", "s.len() >= list_offset + 32 * BUYBACK_COUNT",
       "only_a_listed_buy_back_receivers_zec_account_is_accepted"),
     M("R12", "Calls go only to the exact pump.fun program addresses", "pump.rs",
-      "require_keys_eq!(*program.key, *expected, BurrError::WrongPumpAccount);", "",
+      "require_keys_eq!(*program.key, *expected, BurrpadError::WrongPumpAccount);", "",
       "t11_substitution", "swapping (pump_program|amm_program)"),
 
     # ---- collect and split ----
@@ -213,9 +213,9 @@ MANUAL = [
     M("C2", "The vault is read again after pump.fun's collect, on the pool side", COLLECT,
       "ctx.accounts.vault.reload()?;", "", "fees_from_both_the_curve_and_the_pool_reach_the_vault", nth=1),
     M("C3", "Collecting from a pool that does not exist yet is refused clearly", COLLECT,
-      "require!(!a.pool.data_is_empty(), BurrError::WrongVenue);", "", "collect_pool_before_graduation_is_refused"),
+      "require!(!a.pool.data_is_empty(), BurrpadError::WrongVenue);", "", "collect_pool_before_graduation_is_refused"),
     M("C4", "A vault holding less than the ledger says stops the split", "ops.rs",
-      "vault_amount.checked_sub(ledger.accounted).ok_or(BurrError::VaultShort)?", "vault_amount.saturating_sub(ledger.accounted)",
+      "vault_amount.checked_sub(ledger.accounted).ok_or(BurrpadError::VaultShort)?", "vault_amount.saturating_sub(ledger.accounted)",
       "a_vault_holding_less_than_the_ledger_says_stops_the_split"),
     M("C5", "Dues are worked out on the running total, so call pattern cannot tilt the split", "math.rs",
       "let total = total_split.checked_add(new as u128)?;",
@@ -224,15 +224,15 @@ MANUAL = [
     M("C6", "A pot is credited only the difference between its due and what it already had", "math.rs",
       "let add = due.checked_sub(credited[i])?;", "let add = due;", "the_split_does_not_depend_on_how_it_is_called"),
     M("C7", "A pot cannot be debited below zero", "ops.rs",
-      "ledger.pots[sink] = ledger.pots[sink].checked_sub(amount).ok_or(BurrError::Overflow)?;",
+      "ledger.pots[sink] = ledger.pots[sink].checked_sub(amount).ok_or(BurrpadError::Overflow)?;",
       "ledger.pots[sink] = ledger.pots[sink].wrapping_sub(amount);", "a_pot_cannot_be_debited_below_zero",
       "more than the pot"),
     M("C8", "The ledger's total cannot be debited below zero", "ops.rs",
-      "ledger.accounted = ledger.accounted.checked_sub(amount).ok_or(BurrError::Overflow)?;",
+      "ledger.accounted = ledger.accounted.checked_sub(amount).ok_or(BurrpadError::Overflow)?;",
       "ledger.accounted = ledger.accounted.wrapping_sub(amount);", "a_pot_cannot_be_debited_below_zero",
       "more than the ledger"),
     M("C9", "The vault share's credit is queued for release, not paid at once", "ops.rs",
-      "ledger.vault_share.credit(credits[SINK_VAULT_SHARE], now, coin.vault_release_secs).ok_or(BurrError::Overflow)?;",
+      "ledger.vault_share.credit(credits[SINK_VAULT_SHARE], now, coin.vault_release_secs).ok_or(BurrpadError::Overflow)?;",
       "", "stakers_share_by_amount"),
 
     # ---- payouts ----
@@ -240,7 +240,7 @@ MANUAL = [
       "ops::debit(&mut ctx.accounts.ledger, sink, amount)?;", "", "each_payout_pot_goes_whole_to_its_fixed_receiver"),
 
     M("P2", "A payout goes only to the receiver's standard ZEC account, fixed by its address", "ops.rs",
-      "require_keys_eq!(*p.destination.key, expected, BurrError::WrongReceiver);", "",
+      "require_keys_eq!(*p.destination.key, expected, BurrpadError::WrongReceiver);", "",
       "t11_substitution", "swapping (receiver_zec|owner_zec)"),
     M("P3", "An empty pot pays nothing and makes no account", "ops.rs",
       "    if amount == 0 {\n        return Ok(());\n    }\n    if p.destination.data_is_empty()", "    if p.destination.data_is_empty()",
@@ -248,15 +248,15 @@ MANUAL = [
 
     # ---- buy back and burn ----
     M("B1", "A coin without the burn hook cannot burn", BURN,
-      "require!(coin.share_of(SINK_BURN) > 0, BurrError::HookNotChosen);", "", "a_coin_without_the_hook_cannot_burn"),
+      "require!(coin.share_of(SINK_BURN) > 0, BurrpadError::HookNotChosen);", "", "a_coin_without_the_hook_cannot_burn"),
     M("B2", "Burns wait between calls", BURN,
-      "require!(now >= ready, BurrError::BurnTooSoon);", "", "burns_wait_between_calls"),
+      "require!(now >= ready, BurrpadError::BurnTooSoon);", "", "burns_wait_between_calls"),
     M("B3", "A price well above the last recorded one is not bought at", BURN,
-      "if reserves.above(&b.reference, coin.burn_price_band_bps).ok_or(BurrError::Overflow)? {",
-      "if false && reserves.above(&b.reference, coin.burn_price_band_bps).ok_or(BurrError::Overflow)? {",
+      "if reserves.above(&b.reference, coin.burn_price_band_bps).ok_or(BurrpadError::Overflow)? {",
+      "if false && reserves.above(&b.reference, coin.burn_price_band_bps).ok_or(BurrpadError::Overflow)? {",
       "a_price_pushed_up_is_not_bought_at"),
     M("B4", "When the price check refuses, the reference rises by one step, not to the price seen", BURN,
-      "b.reference = b.reference.raised_by(coin.burn_price_band_bps).ok_or(BurrError::Overflow)?;",
+      "b.reference = b.reference.raised_by(coin.burn_price_band_bps).ok_or(BurrpadError::Overflow)?;",
       "b.reference = reserves;", "pushing_the_price_for_one_call_does_not_move_the_reference_to_it"),
     M("B25", "When the price check refuses, the time is recorded, so it cannot be retried at once", BURN,
       "        b.last_time = now;\n        emit!(BurnSkipped", "        emit!(BurnSkipped", "a_price_pushed_up_is_not_bought_at"),
@@ -270,13 +270,13 @@ MANUAL = [
       "Some(pot.min(u64::try_from(cap).ok()?))", "let _ = pot;\n    Some(u64::try_from(cap).ok()?)",
       "the_spend_never_passes_the_pot_or_the_limit"),
     M("B9", "With an empty pot nothing is recorded and nothing is spent", BURN,
-      "require!(ledger.pots[SINK_BURN] > 0, BurrError::NothingToBurn);", "",
+      "require!(ledger.pots[SINK_BURN] > 0, BurrpadError::NothingToBurn);", "",
       "an_empty_pot_cannot_be_used_to_move_the_reference"),
     M("B23", "The limit is measured against the smaller of the reserve now and the reserve last recorded", BURN,
       "reserves.quote.min(b.reference.quote),", "reserves.quote,",
       "liquidity_added_just_for_one_call_does_not_raise_the_limit"),
     M("B24", "If nothing can be bought (no fee charged, or too little), the burn stops", BURN,
-      "require!(min_out > 0, BurrError::NothingToBurn);", "", "the_limit_follows_the_fee_pump_fun_really_charges"),
+      "require!(min_out > 0, BurrpadError::NothingToBurn);", "", "the_limit_follows_the_fee_pump_fun_really_charges"),
     M("B10", "The curve burn works only while the curve is trading", BURN,
       "!curve.complete && curve.quote_mint == ZEC_MINT", "curve.quote_mint == ZEC_MINT",
       "each_burn_instruction_only_works_on_its_own_venue"),
@@ -287,9 +287,9 @@ MANUAL = [
       "pump::check_buyback_recipient(\n        &a.amm_global_config.to_account_info(),\n        &pump::PUMP_AMM_ID,\n        &pump::ACC_AMM_GLOBAL_CONFIG,\n        pump::AMM_GLOBAL_BUYBACK_OFFSET,\n        &a.buyback_fee_recipient.to_account_info(),\n        &ZEC_MINT,\n        &a.token_program.key(),\n    )?;",
       "", "t11_substitution::burn_pool", "swapping buyback_fee_recipient"),
     M("B13", "The buy may not take more ZEC than was set aside", BURN,
-      "require!(spent <= spend, BurrError::BurnOverspent);", "", "a_buy_cannot_take_more_than_was_set_aside"),
+      "require!(spent <= spend, BurrpadError::BurnOverspent);", "", "a_buy_cannot_take_more_than_was_set_aside"),
     M("B14", "The buy must deliver at least the least-coins-out, checked from balances", BURN,
-      "require!(bought >= min_out, BurrError::BurnBadFill);", "", "a_burn_is_undone_if_the_buy_did_not_deliver"),
+      "require!(bought >= min_out, BurrpadError::BurnBadFill);", "", "a_burn_is_undone_if_the_buy_did_not_deliver"),
     M("B15", "What was spent is taken off the burn pot", BURN,
       "ops::debit(ledger, SINK_BURN, spent)?;", "", "a_burn_buys_the_coin_and_destroys_it"),
     M("B16", "Every coin bought is burned", BURN,
@@ -297,7 +297,7 @@ MANUAL = [
     M("B17", "ZEC left with the burner goes back to the vault", BURN,
       "if zec_left > 0 {", "if false && zec_left > 0 {", "gifts_to_the_burner_do_not_confuse_it"),
     M("B18", "After a burn the pool's price right after it becomes the reference", BURN,
-      "after.held_to(ceiling).ok_or(BurrError::Overflow.into())", "let _ = (after, ceiling);\n    Ok(*last)",
+      "after.held_to(ceiling).ok_or(BurrpadError::Overflow.into())", "let _ = (after, ceiling);\n    Ok(*last)",
       "a_burn_buys_the_coin_and_destroys_it"),
     M("B19", "After a curve burn the time is recorded", BURN,
       "        band,\n    )?;\n    b.last_time = now;", "        band,\n    )?;", "burns_wait_between_calls"),
@@ -305,7 +305,7 @@ MANUAL = [
       "    b.reference = next_reference(&b.reference, after, band)?;\n    b.last_time = now;",
       "    b.reference = next_reference(&b.reference, after, band)?;", "a_burn_on_the_pool_buys_and_destroys"),
     M("B26", "The reserve recorded after a burn can grow by one step at most", BURN,
-      "after.held_to(ceiling).ok_or(BurrError::Overflow.into())", "let _ = ceiling;\n    Ok(after)",
+      "after.held_to(ceiling).ok_or(BurrpadError::Overflow.into())", "let _ = ceiling;\n    Ok(after)",
       "liquidity_added_just_for_one_call_does_not_raise_the_limit"),
     M("B20", "A pool's price uses its ZEC balance plus the pool's own adjustment", BURN,
       "let quote = pump::effective_quote_reserves(quote_amount, p.virtual_quote_reserves)?;",
@@ -315,10 +315,10 @@ MANUAL = [
       "a_burn_is_undone_if_the_buy_did_not_deliver", "a crumb"),
 
     # ---- vault share ----
-    M("V1", "Staking nothing is refused", VS, "require!(amount > 0, BurrError::ZeroAmount);", "",
+    M("V1", "Staking nothing is refused", VS, "require!(amount > 0, BurrpadError::ZeroAmount);", "",
       "staking_needs_the_hook_and_a_real_amount"),
     M("V2", "A coin without the vault share hook takes no stakes", VS,
-      "require!(ctx.accounts.coin.share_of(SINK_VAULT_SHARE) > 0, BurrError::HookNotChosen);", "",
+      "require!(ctx.accounts.coin.share_of(SINK_VAULT_SHARE) > 0, BurrpadError::HookNotChosen);", "",
       "staking_needs_the_hook_and_a_real_amount"),
     M("V3", "A stake is settled before it grows", VS,
       "    settle(&ctx.accounts.coin, &mut ctx.accounts.ledger, stake, now)?;\n", "",
@@ -327,7 +327,7 @@ MANUAL = [
       "    settle(&ctx.accounts.coin, &mut ctx.accounts.ledger, &mut ctx.accounts.stake, now)?;\n", "",
       "stakers_share_by_amount"),
     M("V5", "Nobody takes out more coins than they put in", VS,
-      "    require!(stake.amount >= amount, BurrError::NotEnoughStaked);\n    stake.amount -= amount;",
+      "    require!(stake.amount >= amount, BurrpadError::NotEnoughStaked);\n    stake.amount -= amount;",
       "    stake.amount = stake.amount.saturating_sub(amount);",
       "nobody_takes_out_more_than_they_put_in_or_anothers_coins"),
     M("V6", "The staker must sign to take coins out", VS,
@@ -356,10 +356,10 @@ MANUAL = [
       "the_vault_share_never_owes_more_than_it_was_given"),
 
     M("V14", "What the last staker leaves starts its release afresh", VS,
-      "        ledger.vault_share.release_end =\n            now.checked_add(ctx.accounts.coin.vault_release_secs as i64).ok_or(BurrError::Overflow)?;\n", "",
+      "        ledger.vault_share.release_end =\n            now.checked_add(ctx.accounts.coin.vault_release_secs as i64).ok_or(BurrpadError::Overflow)?;\n", "",
       "what_the_last_staker_leaves_starts_its_release_afresh"),
     M("V15", "A stake record can be closed only when it is empty", VS,
-      "require!(s.amount == 0 && s.owed == 0, BurrError::StakeNotEmpty);", "",
+      "require!(s.amount == 0 && s.owed == 0, BurrpadError::StakeNotEmpty);", "",
       "an_empty_stake_record_can_be_closed_by_its_owner_only"),
 ]
 
@@ -493,10 +493,10 @@ def prepare(n):
 
 
 def build_and_test(w):
-    code, out = run(["cargo", "build-sbf", "--manifest-path", "programs/burr/Cargo.toml"], w)
+    code, out = run(["cargo", "build-sbf", "--manifest-path", "programs/burrpad/Cargo.toml"], w)
     if code != 0:
         return "does not build", out[-3000:]
-    code, out = run(["cargo", "test", "-p", "burr-tests"], w)
+    code, out = run(["cargo", "test", "-p", "burrpad-tests"], w)
     return ("fails" if code != 0 else "passes"), out
 
 

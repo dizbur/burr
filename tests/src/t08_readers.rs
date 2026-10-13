@@ -5,7 +5,7 @@ use crate::bench::Bench;
 use crate::kit::{LaunchPlan, World};
 use crate::pump::{self, ata, PUMP, PUMP_AMM, TOKEN, TOKEN_2022, ZEC};
 use anchor_lang::prelude::AccountInfo;
-use burr::pump as p;
+use burrpad::pump as p;
 use solana_pubkey::Pubkey;
 
 /// Runs `f` on an account built from the given parts.

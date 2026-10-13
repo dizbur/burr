@@ -3,8 +3,8 @@
 use crate::bench::{custom_code, logs};
 use crate::kit::{self, err, LaunchPlan, World};
 use crate::pump::{self, ata, TOKEN, ZEC};
-use burr::error::BurrError as E;
-use burr::state::Payee;
+use burrpad::error::BurrpadError as E;
+use burrpad::state::Payee;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 
@@ -62,7 +62,7 @@ fn collect_with_nothing_waiting_is_harmless() {
 }
 
 #[test]
-fn collect_can_be_called_by_a_stranger_and_done_outside_burr() {
+fn collect_can_be_called_by_a_stranger_and_done_outside_burrpad() {
     let mut w = World::new();
     let (mint, fee) = coin_with_fee(&mut w, &LaunchPlan::default());
     // A stranger calls pump.fun's own instructions directly.
@@ -123,7 +123,7 @@ fn two_coins_never_share_money() {
 
     // Every way of mixing coin A's accounts into a call for coin B is refused.
     let payer = w.b.payer.pubkey();
-    type Mix = fn(&mut burr::accounts::SplitOnly, &Pubkey);
+    type Mix = fn(&mut burrpad::accounts::SplitOnly, &Pubkey);
     let mixes: Vec<(&str, Mix)> = vec![
         ("coin", |x, a| x.coin = kit::coin(a)),
         ("ledger", |x, a| x.ledger = kit::ledger(a)),
@@ -131,7 +131,7 @@ fn two_coins_never_share_money() {
         ("vault", |x, a| x.vault = kit::vault(a)),
     ];
     for (name, mix) in mixes {
-        let mut acc = burr::accounts::SplitOnly {
+        let mut acc = burrpad::accounts::SplitOnly {
             mint: b,
             coin: kit::coin(&b),
             ledger: kit::ledger(&b),
@@ -141,18 +141,18 @@ fn two_coins_never_share_money() {
             token_program: TOKEN,
         };
         mix(&mut acc, &a);
-        let r = w.b.send(&[kit::raw(acc, burr::instruction::Split {})], &[]);
+        let r = w.b.send(&[kit::raw(acc, burrpad::instruction::Split {})], &[]);
         assert!(r.is_err(), "mixing in coin A's {name} was accepted");
     }
     // The same for a payout: coin A's vault cannot pay coin B's creator.
     let receiver = w.coin(&b).creator_receiver;
     let mut acc = w.pay_out_accounts(&payer, &b, &receiver);
     acc.vault = kit::vault(&a);
-    let r = w.b.send(&[kit::raw(acc, burr::instruction::PayOut { payee: Payee::Creator })], &[]);
+    let r = w.b.send(&[kit::raw(acc, burrpad::instruction::PayOut { payee: Payee::Creator })], &[]);
     assert!(r.is_err());
     let mut acc = w.pay_out_accounts(&payer, &b, &receiver);
     acc.ledger = kit::ledger(&a);
-    let r = w.b.send(&[kit::raw(acc, burr::instruction::PayOut { payee: Payee::Creator })], &[]);
+    let r = w.b.send(&[kit::raw(acc, burrpad::instruction::PayOut { payee: Payee::Creator })], &[]);
     assert!(r.is_err());
     assert_eq!(w.vault_balance(&a), fee_a);
 }
@@ -164,7 +164,7 @@ fn collect_refuses_substituted_accounts() {
     let (other, _) = coin_with_fee(&mut w, &LaunchPlan::default());
     let payer = w.b.payer.pubkey();
     let fake = Pubkey::new_unique();
-    type Swap = fn(&mut burr::accounts::CollectCurve, Pubkey, &Pubkey);
+    type Swap = fn(&mut burrpad::accounts::CollectCurve, Pubkey, &Pubkey);
     let swaps: Vec<(&str, Swap)> = vec![
         ("pump_program", |a, f, _| a.pump_program = f),
         ("pump_global", |a, f, _| a.pump_global = f),
@@ -180,7 +180,7 @@ fn collect_refuses_substituted_accounts() {
     for (name, swap) in swaps {
         let mut acc = w.collect_curve_accounts(&payer, &mint);
         swap(&mut acc, fake, &other);
-        let r = w.b.send(&[kit::raw(acc, burr::instruction::CollectCurve {})], &[]);
+        let r = w.b.send(&[kit::raw(acc, burrpad::instruction::CollectCurve {})], &[]);
         assert!(r.is_err(), "swapping {name} was accepted");
     }
     assert!(w.collect_curve(&mint).is_ok());
@@ -225,19 +225,19 @@ fn a_payout_cannot_be_pointed_anywhere_else() {
 
     // The thief names themselves as receiver.
     let acc = w.pay_out_accounts(&payer, &mint, &thief.pubkey());
-    let r = w.b.send(&[kit::raw(acc, burr::instruction::PayOut { payee: Payee::Creator })], &[]);
+    let r = w.b.send(&[kit::raw(acc, burrpad::instruction::PayOut { payee: Payee::Creator })], &[]);
     assert_eq!(custom_code(&r), Some(err(E::WrongReceiver)));
 
     // The right receiver, but the thief's ZEC account as destination.
     w.b.give_zec(&thief.pubkey(), 1);
     let mut acc = w.pay_out_accounts(&payer, &mint, &plan.creator_receiver);
     acc.receiver_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
-    let r = w.b.send(&[kit::raw(acc, burr::instruction::PayOut { payee: Payee::Creator })], &[]);
+    let r = w.b.send(&[kit::raw(acc, burrpad::instruction::PayOut { payee: Payee::Creator })], &[]);
     assert!(r.is_err());
 
     // The give receiver cannot take the creator's pot, nor the reverse.
     let acc = w.pay_out_accounts(&payer, &mint, &plan.give_receiver);
-    let r = w.b.send(&[kit::raw(acc, burr::instruction::PayOut { payee: Payee::Creator })], &[]);
+    let r = w.b.send(&[kit::raw(acc, burrpad::instruction::PayOut { payee: Payee::Creator })], &[]);
     assert_eq!(custom_code(&r), Some(err(E::WrongReceiver)));
     assert_eq!(w.zec_of(&thief.pubkey()), 1);
 }
@@ -252,11 +252,11 @@ fn the_administrator_cannot_move_a_coins_money() {
     // administrator as receiver, is refused like anyone else's.
     let acc = w.pay_out_accounts(&admin.pubkey(), &mint, &admin.pubkey());
     for payee in [Payee::Platform, Payee::Creator, Payee::Give] {
-        let r = w.b.send_as(Some(&admin), &[kit::raw(acc, burr::instruction::PayOut { payee })], &[]);
+        let r = w.b.send_as(Some(&admin), &[kit::raw(acc, burrpad::instruction::PayOut { payee })], &[]);
         assert_eq!(custom_code(&r), Some(err(E::WrongReceiver)));
     }
     // Changing the platform receiver afterwards does not redirect this coin.
-    assert!(w.as_admin(burr::instruction::SetPlatformReceiver { receiver: admin.pubkey() }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::SetPlatformReceiver { receiver: admin.pubkey() }).is_ok());
     assert!(w.pay_out(&mint, Payee::Platform).is_ok());
     assert_eq!(w.zec_of(&admin.pubkey()), 0);
     assert!(w.zec_of(&w.platform_receiver) > 0);
@@ -287,7 +287,7 @@ fn a_vault_holding_less_than_the_ledger_says_stops_the_split() {
 
 #[test]
 fn a_pot_cannot_be_debited_below_zero() {
-    let mut l = burr::state::Ledger {
+    let mut l = burrpad::state::Ledger {
         mint: Pubkey::default(),
         bump: 0,
         accounted: 100,
@@ -297,11 +297,11 @@ fn a_pot_cannot_be_debited_below_zero() {
         burn: Default::default(),
         vault_share: Default::default(),
     };
-    assert!(burr::ops::debit(&mut l, 1, 21).is_err(), "more than the pot holds");
-    assert!(burr::ops::debit(&mut l, 1, 20).is_ok());
+    assert!(burrpad::ops::debit(&mut l, 1, 21).is_err(), "more than the pot holds");
+    assert!(burrpad::ops::debit(&mut l, 1, 20).is_ok());
     assert_eq!((l.pots[1], l.accounted), (0, 80));
     l.accounted = 5;
-    assert!(burr::ops::debit(&mut l, 2, 30).is_err(), "more than the ledger's total");
+    assert!(burrpad::ops::debit(&mut l, 2, 30).is_err(), "more than the ledger's total");
 }
 
 #[test]
@@ -359,7 +359,7 @@ fn the_platforms_receiver_cannot_be_a_coins_own_address_either() {
     let mut w = World::new();
     let mint = solana_keypair::Keypair::new();
     let own = kit::authority(&mint.pubkey());
-    assert!(w.as_admin(burr::instruction::SetPlatformReceiver { receiver: own }).is_ok());
+    assert!(w.as_admin(burrpad::instruction::SetPlatformReceiver { receiver: own }).is_ok());
     let payer = w.b.payer.pubkey();
     let i = w.launch_ix(&payer, &mint.pubkey(), &LaunchPlan::default());
     let r = w.b.send(&[i], &[&mint]);

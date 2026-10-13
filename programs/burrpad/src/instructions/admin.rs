@@ -2,7 +2,7 @@
 //! new launches off and on. It cannot touch any coin or any money.
 
 use crate::constants::*;
-use crate::error::BurrError;
+use crate::error::BurrpadError;
 use crate::events::ConfigChanged;
 use crate::state::Config;
 use anchor_lang::prelude::*;
@@ -20,15 +20,15 @@ pub struct Initialize<'info> {
         bump
     )]
     pub config: Account<'info, Config>,
-    #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ BurrError::NotUpgradeAuthority)]
-    pub program: Program<'info, crate::program::Burr>,
-    #[account(constraint = program_data.upgrade_authority_address == Some(upgrade_authority.key()) @ BurrError::NotUpgradeAuthority)]
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ BurrpadError::NotUpgradeAuthority)]
+    pub program: Program<'info, crate::program::Burrpad>,
+    #[account(constraint = program_data.upgrade_authority_address == Some(upgrade_authority.key()) @ BurrpadError::NotUpgradeAuthority)]
     pub program_data: Account<'info, ProgramData>,
     pub system_program: Program<'info, System>,
 }
 
 pub fn handle_initialize(ctx: Context<Initialize>, admin: Pubkey, platform_receiver: Pubkey) -> Result<()> {
-    require!(admin != Pubkey::default() && platform_receiver != Pubkey::default(), BurrError::EmptyAddress);
+    require!(admin != Pubkey::default() && platform_receiver != Pubkey::default(), BurrpadError::EmptyAddress);
     let c = &mut ctx.accounts.config;
     c.admin = admin;
     c.pending_admin = Pubkey::default();
@@ -50,13 +50,13 @@ pub struct AdminOnly<'info> {
         mut,
         seeds = [SEED_CONFIG],
         bump = config.bump,
-        constraint = config.admin == admin.key() @ BurrError::NotAdmin
+        constraint = config.admin == admin.key() @ BurrpadError::NotAdmin
     )]
     pub config: Account<'info, Config>,
 }
 
 pub fn handle_set_platform_fraction(ctx: Context<AdminOnly>, fraction_bps: u16) -> Result<()> {
-    require!(fraction_bps <= HARD_MAX_PLATFORM_FRACTION_BPS, BurrError::PlatformFractionTooHigh);
+    require!(fraction_bps <= HARD_MAX_PLATFORM_FRACTION_BPS, BurrpadError::PlatformFractionTooHigh);
     ctx.accounts.config.platform_fraction_bps = fraction_bps;
     announce(&ctx.accounts.config);
     Ok(())
@@ -65,7 +65,7 @@ pub fn handle_set_platform_fraction(ctx: Context<AdminOnly>, fraction_bps: u16) 
 pub fn handle_set_fee_range(ctx: Context<AdminOnly>, min_bps: u16, max_bps: u16, default_bps: u16) -> Result<()> {
     require!(
         min_bps >= HARD_MIN_FEE_BPS && max_bps <= HARD_MAX_FEE_BPS && min_bps <= default_bps && default_bps <= max_bps,
-        BurrError::FeeSettingOutOfRange
+        BurrpadError::FeeSettingOutOfRange
     );
     let c = &mut ctx.accounts.config;
     c.min_fee_bps = min_bps;
@@ -76,7 +76,7 @@ pub fn handle_set_fee_range(ctx: Context<AdminOnly>, min_bps: u16, max_bps: u16,
 }
 
 pub fn handle_set_platform_receiver(ctx: Context<AdminOnly>, receiver: Pubkey) -> Result<()> {
-    require!(receiver != Pubkey::default(), BurrError::EmptyAddress);
+    require!(receiver != Pubkey::default(), BurrpadError::EmptyAddress);
     ctx.accounts.config.platform_receiver = receiver;
     announce(&ctx.accounts.config);
     Ok(())
@@ -101,7 +101,7 @@ pub struct AcceptAdmin<'info> {
         mut,
         seeds = [SEED_CONFIG],
         bump = config.bump,
-        constraint = config.pending_admin == new_admin.key() @ BurrError::NotPendingAdmin
+        constraint = config.pending_admin == new_admin.key() @ BurrpadError::NotPendingAdmin
     )]
     pub config: Account<'info, Config>,
 }

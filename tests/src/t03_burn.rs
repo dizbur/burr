@@ -3,7 +3,7 @@
 use crate::bench::{custom_code, logs};
 use crate::kit::{self, err, LaunchPlan, World};
 use crate::pump::{self, ata, TOKEN, TOKEN_2022, ZEC};
-use burr::error::BurrError as E;
+use burrpad::error::BurrpadError as E;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 
@@ -221,7 +221,7 @@ fn burn_refuses_substituted_accounts() {
     let thief = w.trader(ZEC1);
     let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
     let fake = Pubkey::new_unique();
-    type Swap = fn(&mut burr::accounts::BurnCurve, Pubkey, &Pubkey, Pubkey);
+    type Swap = fn(&mut burrpad::accounts::BurnCurve, Pubkey, &Pubkey, Pubkey);
     let swaps: Vec<(&str, Swap)> = vec![
         ("pump_program", |a, f, _, _| a.pump_program = f),
         ("pump_global", |a, f, _, _| a.pump_global = f),
@@ -246,7 +246,7 @@ fn burn_refuses_substituted_accounts() {
     for (name, swap) in swaps {
         let mut acc = w.burn_curve_accounts(&payer, &mint);
         swap(&mut acc, fake, &other, thief_zec);
-        let r = w.b.send(&[kit::raw(acc, burr::instruction::BurnCurve {})], &[]);
+        let r = w.b.send(&[kit::raw(acc, burrpad::instruction::BurnCurve {})], &[]);
         assert!(r.is_err(), "swapping {name} was accepted");
     }
     assert_eq!(w.b.token_balance(&thief_zec), ZEC1);
@@ -335,13 +335,13 @@ fn the_limit_follows_the_fee_pump_fun_really_charges() {
     set_curve_fee(&mut w, &mint, 0);
     let r = w.burn_curve(&mint);
     assert_eq!(custom_code(&r), Some(err(E::NothingToBurn)));
-    // pump.fun has an error with the same number, so check it was Burr that
+    // pump.fun has an error with the same number, so check it was Burrpad that
     // stopped, before pump.fun was ever called.
-    assert!(crate::bench::refused_by_burr(&r), "{}", logs(&r));
+    assert!(crate::bench::refused_by_burrpad(&r), "{}", logs(&r));
 }
 
 /// Prints the worked figures quoted in the note for the auditor.
-/// Run with: cargo test -p burr-tests print_sandwich_figures -- --ignored --nocapture
+/// Run with: cargo test -p burrpad-tests print_sandwich_figures -- --ignored --nocapture
 #[test]
 #[ignore = "prints figures; not a check"]
 fn print_sandwich_figures() {
@@ -375,7 +375,7 @@ fn pushing_the_price_for_one_call_does_not_move_the_reference_to_it() {
     for round in 0..3 {
         assert!(w.buy(&pusher, &mint, 2 * ZEC1).is_ok());
         let pot = w.ledger(&mint).pots[3];
-        let i = kit::raw(w.burn_curve_accounts(&payer, &mint), burr::instruction::BurnCurve {});
+        let i = kit::raw(w.burn_curve_accounts(&payer, &mint), burrpad::instruction::BurnCurve {});
         assert!(w.b.send(&[i], &[]).is_ok());
         assert_eq!(w.ledger(&mint).pots[3], pot, "round {round}: bought at a pushed price");
         let coins = w.coins_of(&pusher.pubkey(), &mint);

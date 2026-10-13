@@ -5,7 +5,7 @@
 //! that made the call: they read the vault and split what is new.
 
 use crate::constants::*;
-use crate::error::BurrError;
+use crate::error::BurrpadError;
 use crate::ops;
 use crate::pump;
 use crate::state::{Coin, Ledger};
@@ -195,7 +195,7 @@ pub struct CollectPool<'info> {
 pub fn handle_collect_pool(ctx: Context<CollectPool>) -> Result<()> {
     let a = &ctx.accounts;
     // The pool exists only after graduation.
-    require!(!a.pool.data_is_empty(), BurrError::WrongVenue);
+    require!(!a.pool.data_is_empty(), BurrpadError::WrongVenue);
     pump::sweep_creator_fee_pool(
         &a.amm_program.to_account_info(),
         &a.payer.to_account_info(),
