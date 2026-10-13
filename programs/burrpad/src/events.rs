@@ -24,14 +24,14 @@ pub struct Launched {
     pub launcher: Pubkey,
     pub fee_bps: u16,
     pub platform_fraction_bps: u16,
-    pub shares: [u16; 4],
+    pub shares: [u16; 3],
 }
 
 #[event]
 pub struct Split {
     pub mint: Pubkey,
     pub amount: u64,
-    pub credited: [u64; 5],
+    pub credited: [u64; 4],
 }
 
 #[event]
@@ -52,13 +52,4 @@ pub struct Burned {
 #[event]
 pub struct BurnSkipped {
     pub mint: Pubkey,
-}
-
-#[event]
-pub struct StakeChanged {
-    pub mint: Pubkey,
-    pub owner: Pubkey,
-    pub staked: u64,
-    pub total_staked: u64,
-    pub paid: u64,
 }

@@ -10,7 +10,7 @@ use solana_signer::Signer;
 const ZEC1: u64 = 100_000_000;
 
 fn burn_plan(fee_bps: u16) -> LaunchPlan {
-    LaunchPlan { fee_bps, shares: [0, 0, 10_000, 0], ..Default::default() }
+    LaunchPlan { fee_bps, shares: [0, 0, 10_000], ..Default::default() }
 }
 
 /// A coin whose whole fee goes to buy back and burn, with `pot` units ready.
@@ -206,7 +206,7 @@ fn a_large_push_before_a_burn_just_makes_it_skip() {
 #[test]
 fn a_coin_without_the_hook_cannot_burn() {
     let mut w = World::new();
-    let mint = w.launch(&LaunchPlan { shares: [10_000, 0, 0, 0], ..Default::default() });
+    let mint = w.launch(&LaunchPlan { shares: [10_000, 0, 0], ..Default::default() });
     w.b.give_zec(&kit::authority(&mint), ZEC1);
     assert!(w.split(&mint).is_ok());
     let r = w.burn_curve(&mint);

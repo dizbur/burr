@@ -39,8 +39,7 @@ pub struct SplitOnly<'info> {
 }
 
 pub fn handle_split(ctx: Context<SplitOnly>) -> Result<()> {
-    let now = Clock::get()?.unix_timestamp;
-    ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount, now)?;
+    ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount)?;
     Ok(())
 }
 
@@ -128,8 +127,7 @@ pub fn handle_collect_curve(ctx: Context<CollectCurve>) -> Result<()> {
         )?;
     }
     ctx.accounts.vault.reload()?;
-    let now = Clock::get()?.unix_timestamp;
-    ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount, now)?;
+    ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount)?;
     Ok(())
 }
 
@@ -223,7 +221,6 @@ pub fn handle_collect_pool(ctx: Context<CollectPool>) -> Result<()> {
         )?;
     }
     ctx.accounts.vault.reload()?;
-    let now = Clock::get()?.unix_timestamp;
-    ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount, now)?;
+    ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount)?;
     Ok(())
 }

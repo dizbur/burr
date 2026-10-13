@@ -50,16 +50,8 @@ pub enum BurrpadError {
     BurnOverspent,
     #[msg("The coin has not graduated to a pool, or has already left the curve")]
     WrongVenue,
-    #[msg("Amount must be above zero")]
-    ZeroAmount,
-    #[msg("Not enough staked")]
-    NotEnoughStaked,
-    #[msg("The transfer did not move the expected amount")]
-    TransferMismatch,
     #[msg("A receiver cannot be one of the coin's own program-controlled addresses")]
     ReceiverNotAllowed,
     #[msg("The platform's terms changed since this launch was prepared")]
     PlatformTermsChanged,
-    #[msg("A stake can be closed only when it is empty")]
-    StakeNotEmpty,
 }

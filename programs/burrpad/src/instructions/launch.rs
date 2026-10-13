@@ -20,7 +20,7 @@ pub struct LaunchArgs {
     pub uri: String,
     /// The coin's fee, in hundredths of a percent.
     pub fee_bps: u16,
-    /// Shares in order: creator, give, burn, vault share. They add to 10,000.
+    /// Shares in order: creator, give, burn. They add to 10,000.
     pub shares: [u16; HOOKS],
     pub creator_receiver: Pubkey,
     pub give_receiver: Pubkey,
@@ -148,10 +148,8 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     let (burner_key, burner_bump) = Pubkey::find_program_address(&[SEED_BURNER, mint_key.as_ref()], ctx.program_id);
     // A receiver may not be one of this coin's own program-controlled
     // addresses: a payout to the authority would land back in the vault.
-    let (stake_authority_key, stake_authority_bump) =
-        Pubkey::find_program_address(&[SEED_STAKE_AUTHORITY, mint_key.as_ref()], ctx.program_id);
     for r in [args.creator_receiver, args.give_receiver, cfg.platform_receiver] {
-        require!(r != authority_key && r != burner_key && r != stake_authority_key, BurrpadError::ReceiverNotAllowed);
+        require!(r != authority_key && r != burner_key, BurrpadError::ReceiverNotAllowed);
     }
 
     // 2. Create the coin on pump.fun, with our authority as its creator.
@@ -210,7 +208,6 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     coin.bump = ctx.bumps.coin;
     coin.authority_bump = ctx.bumps.authority;
     coin.burner_bump = burner_bump;
-    coin.stake_authority_bump = stake_authority_bump;
     coin.fee_bps = args.fee_bps;
     coin.platform_fraction_bps = platform_fraction_bps;
     coin.platform_receiver = platform_receiver;
@@ -221,7 +218,6 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     coin.burn_price_band_bps = BURN_PRICE_BAND_BPS;
     coin.burn_fee_allowance_bps = BURN_FEE_ALLOWANCE_BPS;
     coin.burn_spend_divisor = BURN_SPEND_DIVISOR;
-    coin.vault_release_secs = VAULT_RELEASE_SECS;
     coin.launched_at = now;
     coin.launcher = ctx.accounts.payer.key();
 
@@ -229,7 +225,6 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     ledger.version = LAYOUT_VERSION;
     ledger.mint = mint_key;
     ledger.bump = ctx.bumps.ledger;
-    ledger.vault_share.last_update = now;
     // The price at launch is the first reference for buy back and burn, so
     // even the first buy is checked against a price nobody could have pushed.
     ledger.burn.reference = math::Reserves { quote: curve.virtual_quote_reserves, base: curve.virtual_token_reserves };

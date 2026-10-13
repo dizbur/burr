@@ -13,10 +13,8 @@ use anchor_spl::token_interface::{self, TransferChecked};
 /// Splits whatever ZEC has arrived in the vault since the last split.
 ///
 /// `vault_amount` must be the vault's balance read from the chain just now.
-pub fn split_new(coin: &Coin, ledger: &mut Ledger, vault_amount: u64, now: i64) -> Result<u64> {
+pub fn split_new(coin: &Coin, ledger: &mut Ledger, vault_amount: u64) -> Result<u64> {
     let new = vault_amount.checked_sub(ledger.accounted).ok_or(BurrpadError::VaultShort)?;
-    // Keep the vault share's clock moving even when no fee has arrived.
-    ledger.vault_share.update(now, coin.vault_release_secs).ok_or(BurrpadError::Overflow)?;
     if new == 0 {
         return Ok(0);
     }
@@ -26,7 +24,6 @@ pub fn split_new(coin: &Coin, ledger: &mut Ledger, vault_amount: u64, now: i64) 
         *pot = pot.checked_add(*add).ok_or(BurrpadError::Overflow)?;
     }
     ledger.accounted = ledger.accounted.checked_add(new).ok_or(BurrpadError::Overflow)?;
-    ledger.vault_share.credit(credits[SINK_VAULT_SHARE], now, coin.vault_release_secs).ok_or(BurrpadError::Overflow)?;
     emit!(Split { mint: coin.mint, amount: new, credited: credits });
     Ok(new)
 }

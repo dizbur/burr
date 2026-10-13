@@ -4,7 +4,7 @@
 use crate::bench::{Bench, TxResult};
 use crate::pump::{self, ata, pda, ATA_PROGRAM, BUYBACK, PUMP, PUMP_AMM, PUMP_FEES, SYSTEM, TOKEN, TOKEN_2022, ZEC};
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
-use burrpad::state::{Coin, Config, Ledger, Payee, Stake};
+use burrpad::state::{Coin, Config, Ledger, Payee};
 use solana_account::Account;
 use solana_instruction::Instruction;
 use solana_keypair::Keypair;
@@ -29,17 +29,8 @@ pub fn authority(mint: &Pubkey) -> Pubkey {
 pub fn burner(mint: &Pubkey) -> Pubkey {
     pda(&[b"burner", mint.as_ref()], &BURRPAD)
 }
-pub fn stake(mint: &Pubkey, owner: &Pubkey) -> Pubkey {
-    pda(&[b"stake", mint.as_ref(), owner.as_ref()], &BURRPAD)
-}
 pub fn vault(mint: &Pubkey) -> Pubkey {
     ata(&authority(mint), &ZEC, &TOKEN)
-}
-pub fn stake_authority(mint: &Pubkey) -> Pubkey {
-    pda(&[b"stake-authority", mint.as_ref()], &BURRPAD)
-}
-pub fn stake_vault(mint: &Pubkey) -> Pubkey {
-    ata(&stake_authority(mint), mint, &TOKEN_2022)
 }
 pub fn program_data() -> Pubkey {
     pda(&[BURRPAD.as_ref()], &LOADER)
@@ -49,11 +40,11 @@ fn ix(accounts: impl ToAccountMetas, data: impl InstructionData) -> Instruction 
     Instruction { program_id: BURRPAD, accounts: accounts.to_account_metas(None), data: data.data() }
 }
 
-/// What a launch asks for. Shares in order: creator, give, burn, vault share.
+/// What a launch asks for. Shares in order: creator, give, burn.
 #[derive(Clone)]
 pub struct LaunchPlan {
     pub fee_bps: u16,
-    pub shares: [u16; 4],
+    pub shares: [u16; 3],
     pub creator_receiver: Pubkey,
     pub give_receiver: Pubkey,
     pub name: String,
@@ -68,7 +59,7 @@ impl Default for LaunchPlan {
     fn default() -> Self {
         Self {
             fee_bps: 200,
-            shares: [2_500, 2_500, 2_500, 2_500],
+            shares: [3_334, 3_333, 3_333],
             creator_receiver: Pubkey::new_unique(),
             give_receiver: Pubkey::new_unique(),
             name: "Test".into(),
@@ -249,10 +240,6 @@ impl World {
         let a = self.b.account(&ledger(mint)).expect("ledger");
         Ledger::try_deserialize(&mut a.data.as_slice()).unwrap()
     }
-    pub fn stake_of(&self, mint: &Pubkey, owner: &Pubkey) -> Option<Stake> {
-        let a = self.b.account(&stake(mint, owner))?;
-        Stake::try_deserialize(&mut a.data.as_slice()).ok()
-    }
     pub fn vault_balance(&self, mint: &Pubkey) -> u64 {
         self.b.token_balance(&vault(mint))
     }
@@ -270,9 +257,9 @@ impl World {
         let pots: u128 = l.pots.iter().map(|p| *p as u128).sum();
         assert!(self.vault_balance(mint) >= l.accounted, "vault below accounted");
         assert!(pots <= l.accounted as u128, "pots above accounted");
-        assert!(l.accounted as u128 - pots < 5, "carry too large");
+        assert!(l.accounted as u128 - pots < 4, "carry too large");
         let credited: u128 = l.credited.iter().sum();
-        assert!(credited <= l.total_split && l.total_split - credited < 5, "credited does not match total");
+        assert!(credited <= l.total_split && l.total_split - credited < 4, "credited does not match total");
     }
 
     // ---- trades made straight on pump.fun, as an ordinary trader would ----
@@ -524,67 +511,6 @@ impl World {
         }
         panic!("the burn never bought");
     }
-
-    pub fn close_stake(&mut self, owner: &Keypair, mint: &Pubkey) -> TxResult {
-        let i = ix(
-            burrpad::accounts::CloseStake { owner: owner.pubkey(), mint: *mint, stake: stake(mint, &owner.pubkey()) },
-            burrpad::instruction::CloseStake {},
-        );
-        self.b.send_as(Some(owner), &[i], &[])
-    }
-
-    // ---- vault share ----
-
-    pub fn stake_accounts(&self, owner: &Pubkey, mint: &Pubkey) -> burrpad::accounts::StakeCoins {
-        burrpad::accounts::StakeCoins {
-            owner: *owner,
-            mint: *mint,
-            coin: coin(mint),
-            ledger: ledger(mint),
-            stake_authority: stake_authority(mint),
-            stake: stake(mint, owner),
-            stake_vault: stake_vault(mint),
-            owner_coin: ata(owner, mint, &TOKEN_2022),
-            token_2022_program: TOKEN_2022,
-            associated_token_program: ATA_PROGRAM,
-            system_program: SYSTEM,
-        }
-    }
-    pub fn stake_ix(&self, owner: &Pubkey, mint: &Pubkey, amount: u64) -> Instruction {
-        ix(self.stake_accounts(owner, mint), burrpad::instruction::Stake { amount })
-    }
-    pub fn stake(&mut self, owner: &Keypair, mint: &Pubkey, amount: u64) -> TxResult {
-        let i = self.stake_ix(&owner.pubkey(), mint, amount);
-        self.b.send_as(Some(owner), &[i], &[])
-    }
-
-    pub fn unstake_accounts(&self, owner: &Pubkey, mint: &Pubkey) -> burrpad::accounts::UnstakeCoins {
-        burrpad::accounts::UnstakeCoins {
-            owner: *owner,
-            mint: *mint,
-            coin: coin(mint),
-            ledger: ledger(mint),
-            authority: authority(mint),
-            stake_authority: stake_authority(mint),
-            stake: stake(mint, owner),
-            stake_vault: stake_vault(mint),
-            owner_coin: ata(owner, mint, &TOKEN_2022),
-            vault: vault(mint),
-            zec_mint: ZEC,
-            owner_zec: ata(owner, &ZEC, &TOKEN),
-            token_program: TOKEN,
-            token_2022_program: TOKEN_2022,
-            associated_token_program: ATA_PROGRAM,
-            system_program: SYSTEM,
-        }
-    }
-    pub fn unstake_ix(&self, owner: &Pubkey, mint: &Pubkey, amount: u64) -> Instruction {
-        ix(self.unstake_accounts(owner, mint), burrpad::instruction::Unstake { amount })
-    }
-    pub fn unstake(&mut self, owner: &Keypair, mint: &Pubkey, amount: u64) -> TxResult {
-        let i = self.unstake_ix(&owner.pubkey(), mint, amount);
-        self.b.send_as(Some(owner), &[i], &[])
-    }
 }
 
 /// Builds a Burrpad instruction from an account list and its data. For tests
@@ -612,7 +538,7 @@ pub fn give_token_account_away(account: &Pubkey, owner: &Pubkey, new_owner: &Pub
     }
 }
 
-/// A new mint key whose coin's five derived addresses all have the same
+/// A new mint key whose coin's four derived addresses all have the same
 /// (highest) bump. Coins made from such keys differ only in their addresses,
 /// so a test that swaps one coin's account for another's is stopped by the
 /// address check alone and by nothing incidental.
@@ -620,7 +546,7 @@ pub fn mint_with_plain_bumps() -> Keypair {
     loop {
         let k = Keypair::new();
         let m = k.pubkey();
-        let all_top = [&b"coin"[..], b"ledger", b"authority", b"burner", b"stake-authority"]
+        let all_top = [&b"coin"[..], b"ledger", b"authority", b"burner"]
             .iter()
             .all(|seed| Pubkey::find_program_address(&[seed, m.as_ref()], &BURRPAD).1 == 255);
         if all_top {

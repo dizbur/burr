@@ -10,11 +10,6 @@ pub const SEED_COIN: &[u8] = b"coin";
 pub const SEED_LEDGER: &[u8] = b"ledger";
 pub const SEED_AUTHORITY: &[u8] = b"authority";
 pub const SEED_BURNER: &[u8] = b"burner";
-pub const SEED_STAKE: &[u8] = b"stake";
-/// Holds the coins people place for the vault share. Kept apart from the
-/// coin's authority, which is the coin's creator on pump.fun, so that placed
-/// coins never look like the creator's own holdings.
-pub const SEED_STAKE_AUTHORITY: &[u8] = b"stake-authority";
 
 /// The layout version written into every account this program makes. A
 /// later version that needs a different layout can tell old accounts apart.
@@ -49,8 +44,6 @@ pub const BURN_PRICE_BAND_BPS: u16 = 500;
 pub const BURN_FEE_ALLOWANCE_BPS: u16 = 200;
 /// Buy back and burn: spend per call is at most `reserve * fee_bps / (BPS * this)`.
 pub const BURN_SPEND_DIVISOR: u16 = 4;
-/// Vault share: seconds over which credited fee is released.
-pub const VAULT_RELEASE_SECS: u32 = 86_400;
 
 // pump.fun's limits on text, checked here so a launch fails early and clearly.
 pub const MAX_NAME_LEN: usize = 32;
@@ -60,12 +53,11 @@ pub const MAX_SYMBOL_LEN: usize = 13;
 pub const MAX_URI_LEN: usize = 100;
 
 /// How many hooks a coin can choose from.
-pub const HOOKS: usize = 4;
+pub const HOOKS: usize = 3;
 
 /// The pots of a coin, in ledger order: the platform's, then one per hook.
-pub const SINKS: usize = 5;
+pub const SINKS: usize = 4;
 pub const SINK_PLATFORM: usize = 0;
 pub const SINK_CREATOR: usize = 1;
 pub const SINK_GIVE: usize = 2;
 pub const SINK_BURN: usize = 3;
-pub const SINK_VAULT_SHARE: usize = 4;

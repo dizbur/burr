@@ -8,9 +8,6 @@ use anchor_lang::prelude::*;
 /// is `(10_000 - fraction) * share`. They add to exactly this.
 pub const WEIGHT_TOTAL: u128 = 100_000_000;
 
-/// Fixed-point scale of the vault share's running total.
-pub const ACC_SCALE: u128 = 1_000_000_000_000_000_000;
-
 /// The split weights of a coin: the platform's, then one per hook.
 pub fn weights(platform_fraction_bps: u16, shares: &[u16; HOOKS]) -> Option<[u128; SINKS]> {
     if platform_fraction_bps > BPS {
@@ -54,88 +51,6 @@ pub fn split(
     }
     *total_split = total;
     Some(out)
-}
-
-/// Vault share: the running-total reward method, with credited fee released
-/// evenly over time.
-#[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Debug, Default, PartialEq, Eq)]
-pub struct VaultShare {
-    /// Coins placed in the vault, all stakers together.
-    pub total_staked: u64,
-    /// ZEC credited to this pot and not yet released to stakers.
-    pub queued: u64,
-    /// When the figures below were last brought up to date.
-    pub last_update: i64,
-    /// When the queue will be fully released.
-    pub release_end: i64,
-    /// Running total of released ZEC per staked coin, times `ACC_SCALE`.
-    pub acc: u128,
-}
-
-impl VaultShare {
-    /// Brings the running total up to `now`.
-    ///
-    /// While nobody is staked nothing is released: the queue waits, and its
-    /// release period starts afresh when the first staker arrives.
-    pub fn update(&mut self, now: i64, release_secs: u32) -> Option<()> {
-        if now <= self.last_update {
-            return Some(());
-        }
-        if self.total_staked == 0 {
-            if self.queued > 0 {
-                self.release_end = now.checked_add(release_secs as i64)?;
-            }
-            self.last_update = now;
-            return Some(());
-        }
-        if self.queued > 0 {
-            let release = if now >= self.release_end {
-                self.queued
-            } else {
-                let elapsed = now.checked_sub(self.last_update)? as u128;
-                let window = self.release_end.checked_sub(self.last_update)? as u128;
-                // elapsed < window here, so the result is below `queued`.
-                ((self.queued as u128).checked_mul(elapsed)? / window) as u64
-            };
-            let add = (release as u128).checked_mul(ACC_SCALE)? / self.total_staked as u128;
-            self.acc = self.acc.checked_add(add)?;
-            self.queued = self.queued.checked_sub(release)?;
-        }
-        self.last_update = now;
-        Some(())
-    }
-
-    /// New fee for this pot. Call `update` first.
-    ///
-    /// The new amount is due over the full release time; what is already
-    /// queued keeps the time it had left. The queue has one end time, so it
-    /// is set to the average of the two, weighted by amount. A small credit
-    /// therefore moves the end by very little: it cannot be used to hold back
-    /// a large queue, and a busy coin is not slowed by its own trading.
-    pub fn credit(&mut self, amount: u64, now: i64, release_secs: u32) -> Option<()> {
-        if amount == 0 {
-            return Some(());
-        }
-        let left = if self.queued == 0 { 0 } else { self.release_end.checked_sub(now)?.max(0) as u128 };
-        let old = self.queued as u128;
-        let new = amount as u128;
-        let window =
-            old.checked_mul(left)?.checked_add(new.checked_mul(release_secs as u128)?)? / old.checked_add(new)?;
-        self.queued = self.queued.checked_add(amount)?;
-        self.release_end = now.checked_add(i64::try_from(window).ok()?)?;
-        Some(())
-    }
-
-    /// What `staked` coins have earned since the snapshot `since`, rounded down.
-    ///
-    /// Cannot overflow: over any stretch in which a stake is unchanged it is
-    /// part of `total_staked`, so `staked * growth <= released * ACC_SCALE`,
-    /// and `released` is a u64.
-    pub fn earned(&self, staked: u64, since: u128) -> Option<u64> {
-        let growth = self.acc.checked_sub(since)?;
-        let v = (staked as u128).checked_mul(growth)? / ACC_SCALE;
-        u64::try_from(v).ok()
-    }
 }
 
 /// The price of a coin as the pool's two reserve figures, quote over base.

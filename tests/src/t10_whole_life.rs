@@ -33,9 +33,6 @@ fn a_coins_whole_life_and_its_record_never_changes() {
     // On the curve.
     assert!(w.buy(&a, &mint, ZEC1 / 2).is_ok());
     assert!(w.buy(&b, &mint, ZEC1 / 4).is_ok());
-    let staked = w.coins_of(&a.pubkey(), &mint) / 2;
-    assert!(w.stake(&a, &mint, staked).is_ok());
-    check(&w, "stake");
     assert!(w.collect_curve(&mint).is_ok());
     check(&w, "collect on the curve");
     admin_moves(&mut w);
@@ -72,10 +69,6 @@ fn a_coins_whole_life_and_its_record_never_changes() {
     for p in [Payee::Platform, Payee::Creator, Payee::Give] {
         assert!(w.pay_out(&mint, p).is_ok());
     }
-    w.b.wait(86_400);
-    let before = w.zec_of(&a.pubkey());
-    assert!(w.unstake(&a, &mint, staked).is_ok());
-    assert!(w.zec_of(&a.pubkey()) > before, "the staker was paid from both curve and pool fees");
     check(&w, "the end");
 
     // What is left in the vault is only what the ledger says is still owed.

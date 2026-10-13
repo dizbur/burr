@@ -30,8 +30,6 @@ use burrpad::error::BurrpadError as E;
 use burrpad::state::Payee;
 use solana_pubkey::Pubkey;
 
-const DAY: i64 = 86_400;
-
 /// A graduated coin with all five hooks, and some trading on its pool.
 fn graduated(plan: &LaunchPlan) -> (World, Pubkey) {
     let mut w = World::new();
@@ -102,7 +100,7 @@ fn payouts_work_the_same_after_graduation() {
 // ---- buy back and burn on the pool ----
 
 fn burn_plan(fee_bps: u16) -> LaunchPlan {
-    LaunchPlan { fee_bps, shares: [0, 0, 10_000, 0], ..Default::default() }
+    LaunchPlan { fee_bps, shares: [0, 0, 10_000], ..Default::default() }
 }
 
 fn graduated_with_burn_pot(fee_bps: u16, pot: u64) -> (World, Pubkey) {
@@ -264,36 +262,6 @@ fn burn_pool_refuses_substituted_accounts() {
     }
     assert_eq!(w.b.token_balance(&thief_zec), ZEC1);
     assert!(w.burn_pool(&mint).is_ok());
-}
-
-// ---- vault share after graduation ----
-
-#[test]
-fn vault_share_carries_straight_through_graduation() {
-    let mut w = World::new();
-    let mint = w.launch(&LaunchPlan { shares: [0, 0, 0, 10_000], ..Default::default() });
-    let h = w.trader(100 * ZEC1);
-    assert!(w.buy(&h, &mint, ZEC1 / 10).is_ok());
-    let coins = w.coins_of(&h.pubkey(), &mint);
-    assert!(w.stake(&h, &mint, coins).is_ok());
-    w.graduate(&mint);
-    // Fee from the pool is shared with the same staker, who never moved.
-    let t = w.trader(100 * ZEC1);
-    assert!(w.pool_buy(&t, &mint, 2 * ZEC1).is_ok());
-    assert!(w.collect_curve(&mint).is_ok());
-    assert!(w.collect_pool(&mint).is_ok());
-    let pot = w.ledger(&mint).pots[4];
-    assert!(pot > 0);
-    w.b.wait(DAY);
-    let before = w.zec_of(&h.pubkey());
-    let r = w.unstake(&h, &mint, coins);
-    assert!(r.is_ok(), "{}", logs(&r));
-    assert!(pot - (w.zec_of(&h.pubkey()) - before) <= 1);
-    assert_eq!(w.coins_of(&h.pubkey(), &mint), coins);
-    // A newcomer can stake after graduation too.
-    assert!(w.stake(&t, &mint, 1_000).is_ok());
-    assert!(w.unstake(&t, &mint, 1_000).is_ok());
-    w.assert_sound(&mint);
 }
 
 #[test]

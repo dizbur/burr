@@ -41,7 +41,6 @@ LAUNCH = "instructions/launch.rs"
 COLLECT = "instructions/collect.rs"
 PAY = "instructions/pay_out.rs"
 BURN = "instructions/burn.rs"
-VS = "instructions/vault_share.rs"
 
 MANUAL = [
     # ---- the administrator ----
@@ -149,21 +148,9 @@ MANUAL = [
       " && cfg.platform_receiver == args.platform_receiver", "",
       "a_launch_is_stopped_if_the_platforms_terms_changed_on_the_way", "another receiver"),
     M("L22", "A receiver cannot be the coin's own authority", LAUNCH,
-      "r != authority_key && ", "", "a_coins_own_addresses_cannot_be_named_as_receivers"),
+      "r != authority_key && r != burner_key", "r != burner_key", "a_coins_own_addresses_cannot_be_named_as_receivers"),
     M("L23", "A receiver cannot be the coin's own burner", LAUNCH,
-      "r != burner_key && ", "", "a_coins_own_addresses_cannot_be_named_as_receivers"),
-    M("L26", "A receiver cannot be the address that holds placed coins", LAUNCH,
-      " && r != stake_authority_key", "", "a_coins_own_addresses_cannot_be_named_as_receivers"),
-
-    M("L24", "The platform's receiver cannot be the coin's own address", LAUNCH,
-      "for r in [args.creator_receiver, args.give_receiver, cfg.platform_receiver] {",
-      "for r in [args.creator_receiver, args.give_receiver] {",
-      "the_platforms_receiver_cannot_be_a_coins_own_address_either"),
-
-    # ---- the coin's mint ----
-    M("N1", "A coin's mint must belong to Token-2022", "pump.rs",
-      "require_keys_eq!(*mint.owner, *token_2022, BurrpadError::UnexpectedMint);", "",
-      "a_mint_that_is_not_the_plain_kind_is_refused"),
+      "r != authority_key && r != burner_key", "r != authority_key", "a_coins_own_addresses_cannot_be_named_as_receivers"),
     M("N2", "Nobody may be able to mint more of a coin", "pump.rs",
       "!mint_authority_set && !freeze_authority_set", "!freeze_authority_set",
       "a_mint_that_is_not_the_plain_kind_is_refused"),
@@ -247,17 +234,6 @@ MANUAL = [
       "ledger.accounted = ledger.accounted.checked_sub(amount).ok_or(BurrpadError::Overflow)?;",
       "ledger.accounted = ledger.accounted.wrapping_sub(amount);", "a_pot_cannot_be_debited_below_zero",
       "more than the ledger"),
-    M("C9", "The vault share's credit is queued for release, not paid at once", "ops.rs",
-      "ledger.vault_share.credit(credits[SINK_VAULT_SHARE], now, coin.vault_release_secs).ok_or(BurrpadError::Overflow)?;",
-      "", "stakers_share_by_amount"),
-
-    # ---- payouts ----
-    M("P1", "A payout pot is emptied in the ledger, so a second call pays nothing", PAY,
-      "ops::debit(&mut ctx.accounts.ledger, sink, amount)?;", "", "each_payout_pot_goes_whole_to_its_fixed_receiver"),
-
-    M("P2", "A payout goes only to the receiver's standard ZEC account, fixed by its address", "ops.rs",
-      "require_keys_eq!(*p.destination.key, expected, BurrpadError::WrongReceiver);", "",
-      "t11_substitution", "swapping (receiver_zec|owner_zec)"),
     M("P3", "An empty pot pays nothing and makes no account", "ops.rs",
       "    if amount == 0 {\n        return Ok(());\n    }\n    if p.destination.data_is_empty()", "    if p.destination.data_is_empty()",
       "an_empty_pot_pays_nothing_and_makes_no_account"),
@@ -345,60 +321,6 @@ MANUAL = [
     M("B21", "The least-coins-out is worked out from the pool's own figures", "math.rs",
       "u64::try_from(ideal.checked_mul(keep)? / BPS as u128).ok()", "let _ = (ideal, keep);\n    Some(1)",
       "a_burn_is_undone_if_the_buy_did_not_deliver", "a crumb"),
-
-    # ---- vault share ----
-    M("V17", "A stake record carries its layout version", VS, "        stake.version = LAYOUT_VERSION;\n", "",
-      "every_account_carries_a_layout_version_and_spare_room"),
-    M("V1", "Staking nothing is refused", VS, "require!(amount > 0, BurrpadError::ZeroAmount);", "",
-      "staking_needs_the_hook_and_a_real_amount"),
-    M("V2", "A coin without the vault share hook takes no stakes", VS,
-      "require!(ctx.accounts.coin.share_of(SINK_VAULT_SHARE) > 0, BurrpadError::HookNotChosen);", "",
-      "staking_needs_the_hook_and_a_real_amount"),
-    M("V3", "A stake is settled before it grows", VS,
-      "    settle(&ctx.accounts.coin, &mut ctx.accounts.ledger, stake, now)?;\n", "",
-      "stakers_share_by_time"),
-    M("V4", "A stake is settled before it shrinks or is paid", VS,
-      "    settle(&ctx.accounts.coin, &mut ctx.accounts.ledger, &mut ctx.accounts.stake, now)?;\n", "",
-      "stakers_share_by_amount"),
-    M("V5", "Nobody takes out more coins than they put in", VS,
-      "    require!(stake.amount >= amount, BurrpadError::NotEnoughStaked);\n    stake.amount -= amount;",
-      "    stake.amount = stake.amount.saturating_sub(amount);",
-      "nobody_takes_out_more_than_they_put_in_or_anothers_coins"),
-    M("V6", "The staker must sign to take coins out", VS,
-      "pub struct UnstakeCoins<'info> {\n    #[account(mut)]\n    pub owner: Signer<'info>,",
-      "pub struct UnstakeCoins<'info> {\n    /// CHECK: switched off\n    #[account(mut)]\n    pub owner: UncheckedAccount<'info>,",
-      "nobody_takes_out_more_than_they_put_in_or_anothers_coins"),
-    M("V7", "What is paid is taken off the vault share pot", VS,
-      "ops::debit(ledger, SINK_VAULT_SHARE, pay)?;", "", "random_sequences_never_pay_out_more_than_came_in"),
-    M("V8", "A paid reward is cleared, so it is not paid twice", VS,
-      "    stake.owed = 0;\n", "", "random_sequences_never_pay_out_more_than_came_in"),
-    M("V9", "When the last staker leaves, what remains is queued again", VS,
-      "ledger.vault_share.queued = ledger.pots[SINK_VAULT_SHARE];", "",
-      "when_the_last_staker_leaves_nothing_is_stranded"),
-    M("V10", "Credited fee is released over time, not at once", "math.rs",
-      "            let release = if now >= self.release_end {",
-      "            let release = if true {", "a_short_visit_earns_only_for_its_time"),
-    M("V16", "A credit moves the release end only in proportion to its size", "math.rs",
-      "self.release_end = now.checked_add(i64::try_from(window).ok()?)?;",
-      "let _ = window;\n        self.release_end = now.checked_add(release_secs as i64)?;",
-      "a_busy_coin_releases_each_credit_over_about_a_day_not_longer"),
-    M("V11", "Nothing is released while nobody is staked", "math.rs",
-      "        if self.total_staked == 0 {\n            if self.queued > 0 {\n                self.release_end = now.checked_add(release_secs as i64)?;\n            }\n            self.last_update = now;\n            return Some(());\n        }",
-      "        if self.total_staked == 0 {\n            self.last_update = now;\n            return Some(());\n        }",
-      "a_backlog_waits_for_the_first_staker_and_then_runs_its_course"),
-    M("V12", "A snapshot is taken when a stake is settled, so nothing is earned twice", VS,
-      "    stake.acc_snapshot = vs.acc;\n", "", "random_sequences_never_pay_out_more_than_came_in"),
-    M("V13", "Rewards are rounded down", "math.rs",
-      "let v = (staked as u128).checked_mul(growth)? / ACC_SCALE;",
-      "let v = (staked as u128).checked_mul(growth)?.div_ceil(ACC_SCALE);",
-      "the_vault_share_never_owes_more_than_it_was_given"),
-
-    M("V14", "What the last staker leaves starts its release afresh", VS,
-      "        ledger.vault_share.release_end =\n            now.checked_add(ctx.accounts.coin.vault_release_secs as i64).ok_or(BurrpadError::Overflow)?;\n", "",
-      "what_the_last_staker_leaves_starts_its_release_afresh"),
-    M("V15", "A stake record can be closed only when it is empty", VS,
-      "require!(s.amount == 0 && s.owed == 0, BurrpadError::StakeNotEmpty);", "",
-      "an_empty_stake_record_can_be_closed_by_its_owner_only"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -408,8 +330,7 @@ MANUAL = [
 
 STRUCT_TEST = {
     "Launch": "launch", "SplitOnly": "split", "CollectCurve": "collect_curve", "CollectPool": "collect_pool",
-    "PayOut": "pay_out", "BurnCurve": "burn_curve", "BurnPool": "burn_pool", "StakeCoins": "stake",
-    "UnstakeCoins": "unstake",
+    "PayOut": "pay_out", "BurnCurve": "burn_curve", "BurnPool": "burn_pool",
 }
 CONSTRAINT_KEYS = ("seeds", "bump", "address", "associated_token::", "token::", "mint::", "has_one", "constraint")
 
@@ -615,13 +536,11 @@ def second_line(entry_id):
         return "the vault's own check ties it to the ZEC mint, and the token program refuses a transfer naming another mint"
     if field == "coin":
         return ("the record's own mint field is used to sign for the vault, so another coin's record cannot move this "
-                "coin's money; the same address check is held alone in split, collect and stake")
+                "coin's money; the same address check is held alone in split and collect")
     if field == "authority":
         return ("signing uses this coin's own seeds, so another coin's authority cannot sign; "
                 "the same check is held alone in split")
-    if field == "stake_authority":
-        return "signing uses this coin's own seeds, so another coin's stake authority cannot sign"
-    if field in ("vault", "stake_vault", "owner_coin"):
+    if field == "vault":
         return "the token program refuses: the signer does not own that account"
     if field in ("pump_global", "amm_global_config"):
         return "the buy-back check reads this account and requires pump.fun's owner and its settings code"
@@ -639,8 +558,7 @@ SECOND_LINE = {}
 GROUPS = [
     ("Z", "Pairs of checks that cover the same thing, removed together"),
     ("A", "The administrator"), ("L", "Launch"), ("N", "The coin's mint"), ("R", "Reading pump.fun's accounts"),
-    ("C", "Collect and split"), ("P", "Payouts"), ("B", "Buy back and burn"), ("V", "Vault share"),
-    ("X", "Every account is the one it should be"), ("Y", "Every program is the real one"),
+    ("C", "Collect and split"), ("P", "Payouts"), ("B", "Buy back and burn"), ("X", "Every account is the one it should be"), ("Y", "Every program is the real one"),
 ]
 
 

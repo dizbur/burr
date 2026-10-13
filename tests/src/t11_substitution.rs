@@ -18,7 +18,7 @@ use solana_signer::Signer;
 const ZEC1: u64 = 100_000_000;
 
 /// The stage: two coins on the curve (`a`, `b`), two graduated (`c`, `d`),
-/// all with every hook, fee collected and a staker; a thief with accounts of the right kinds; and a program that accepts
+/// all with every hook and fee collected; a thief with accounts of the right kinds; and a program that accepts
 /// any call and does nothing.
 struct Stage {
     w: World,
@@ -45,19 +45,14 @@ fn stage() -> Stage {
         // accounts that exist.
         let mint = kit::mint_with_plain_bumps();
         let m = mint.pubkey();
-        let (auth, bn, sa) = (kit::authority(&m), kit::burner(&m), kit::stake_authority(&m));
+        let (auth, bn) = (kit::authority(&m), kit::burner(&m));
         assert!(w.b.send(&[pump::create_ata(&payer, &auth, &ZEC, &TOKEN)], &[]).is_ok());
         let r = w.launch_with_mint(&mint, &plan);
         assert!(r.is_ok(), "{}", logs(&r));
-        let made = [
-            pump::create_ata(&payer, &sa, &m, &TOKEN_2022),
-            pump::create_ata(&payer, &bn, &ZEC, &TOKEN),
-            pump::create_ata(&payer, &bn, &m, &TOKEN_2022),
-        ];
+        let made = [pump::create_ata(&payer, &bn, &ZEC, &TOKEN), pump::create_ata(&payer, &bn, &m, &TOKEN_2022)];
         assert!(w.b.send(&made, &[]).is_ok());
         assert!(w.buy(&user, &m, ZEC1 / 4).is_ok());
         assert!(w.buy(&thief, &m, ZEC1 / 100).is_ok());
-        assert!(w.stake(&user, &m, 1_000).is_ok());
         if graduated {
             w.graduate(&m);
             assert!(w.pool_buy(&user, &m, ZEC1).is_ok());
@@ -421,74 +416,4 @@ fn burn_pool() {
     let r = each_refused(&mut w, &payer, &[], good, burrpad::instruction::BurnPool {}, swaps);
     assert!(r.is_ok(), "{}", logs(&r));
     assert!(w.ledger(&c).pots[3] < pot, "with the right accounts the burn buys");
-}
-
-#[test]
-fn stake() {
-    let Stage { mut w, a, b, user, thief, nothing, .. } = stage();
-    let good = w.stake_accounts(&user.pubkey(), &a);
-    let thief_coin = ata(&thief.pubkey(), &a, &TOKEN_2022);
-    let thief_key = thief.pubkey();
-    type A = burrpad::accounts::StakeCoins;
-    let swaps: Vec<Swap<A>> = vec![
-        sw("mint", |x: &mut A| x.mint = b),
-        sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
-        sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
-        sw("stake_authority", |x: &mut A| {
-            x.stake_authority = kit::stake_authority(&b);
-            x.stake_vault = kit::stake_vault(&b);
-        }),
-        sw("stake", |x: &mut A| x.stake = kit::stake(&a, &thief_key)),
-        sw("stake_vault", |x: &mut A| x.stake_vault = thief_coin),
-        sw("owner_coin", |x: &mut A| x.owner_coin = thief_coin),
-        sw("token_2022_program", |x: &mut A| x.token_2022_program = nothing),
-        sw("associated_token_program", |x: &mut A| x.associated_token_program = nothing),
-        sw("system_program", |x: &mut A| x.system_program = nothing),
-    ];
-    let r = each_refused(&mut w, &user, &[], good, burrpad::instruction::Stake { amount: 10 }, swaps);
-    assert!(r.is_ok(), "{}", logs(&r));
-    assert_eq!(w.stake_of(&a, &user.pubkey()).unwrap().amount, 1_010);
-}
-
-#[test]
-fn unstake() {
-    let Stage { mut w, a, b, user, thief, nothing, .. } = stage();
-    // The thief has a stake of their own, to offer in place of the user's.
-    assert!(w.stake(&thief, &a, 5).is_ok());
-    w.b.wait(3_600);
-    let good = w.unstake_accounts(&user.pubkey(), &a);
-    let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
-    let thief_coin = ata(&thief.pubkey(), &a, &TOKEN_2022);
-    let thief_key = thief.pubkey();
-    type A = burrpad::accounts::UnstakeCoins;
-    let swaps: Vec<Swap<A>> = vec![
-        sw("mint", |x: &mut A| x.mint = b),
-        sw("coin", |x: &mut A| x.coin = kit::coin(&b)),
-        sw("ledger", |x: &mut A| x.ledger = kit::ledger(&b)),
-        sw("authority", |x: &mut A| {
-            x.authority = kit::authority(&b);
-            x.vault = kit::vault(&b);
-        }),
-        sw("stake_authority", |x: &mut A| {
-            x.stake_authority = kit::stake_authority(&b);
-            x.stake_vault = kit::stake_vault(&b);
-        }),
-        sw("stake", |x: &mut A| x.stake = kit::stake(&a, &thief_key)),
-        sw("stake (the same person's in another coin)", |x: &mut A| x.stake = kit::stake(&b, &x.owner)),
-        sw("stake_vault", |x: &mut A| x.stake_vault = kit::stake_vault(&b)),
-        sw("owner_coin", |x: &mut A| x.owner_coin = thief_coin),
-        sw("vault", |x: &mut A| x.vault = kit::vault(&b)),
-        sw("zec_mint", |x: &mut A| x.zec_mint = a),
-        sw("owner_zec", |x: &mut A| x.owner_zec = thief_zec),
-        sw("token_program", |x: &mut A| x.token_program = nothing),
-        sw("token_2022_program", |x: &mut A| x.token_2022_program = nothing),
-        sw("associated_token_program", |x: &mut A| x.associated_token_program = nothing),
-        sw("system_program", |x: &mut A| x.system_program = nothing),
-    ];
-    let thief_zec_before = w.b.token_balance(&thief_zec);
-    let thief_coin_before = w.b.token_balance(&thief_coin);
-    let r = each_refused(&mut w, &user, &[], good, burrpad::instruction::Unstake { amount: 1_000 }, swaps);
-    assert!(r.is_ok(), "{}", logs(&r));
-    assert_eq!(w.b.token_balance(&thief_zec), thief_zec_before);
-    assert_eq!(w.b.token_balance(&thief_coin), thief_coin_before);
 }

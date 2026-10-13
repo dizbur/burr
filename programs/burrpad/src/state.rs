@@ -1,5 +1,5 @@
 use crate::constants::*;
-use crate::math::{Reserves, VaultShare};
+use crate::math::Reserves;
 use anchor_lang::prelude::*;
 
 /// The program's settings. One account.
@@ -35,13 +35,12 @@ pub struct Coin {
     pub bump: u8,
     pub authority_bump: u8,
     pub burner_bump: u8,
-    pub stake_authority_bump: u8,
     /// The coin's fee, as set on pump.fun.
     pub fee_bps: u16,
     /// The platform's part of the fee, copied from `Config` at launch.
     pub platform_fraction_bps: u16,
     pub platform_receiver: Pubkey,
-    /// Shares of the rest, in order: creator, give, burn, vault share.
+    /// Shares of the rest, in order: creator, give, burn.
     pub shares: [u16; HOOKS],
     pub creator_receiver: Pubkey,
     pub give_receiver: Pubkey,
@@ -49,7 +48,6 @@ pub struct Coin {
     pub burn_price_band_bps: u16,
     pub burn_fee_allowance_bps: u16,
     pub burn_spend_divisor: u16,
-    pub vault_release_secs: u32,
     pub launched_at: i64,
     pub launcher: Pubkey,
     /// Unused. Room for fields a later version may add without moving the account.
@@ -83,7 +81,6 @@ pub struct Ledger {
     /// What each pot holds now.
     pub pots: [u64; SINKS],
     pub burn: BurnState,
-    pub vault_share: VaultShare,
     /// Unused. Room for fields a later version may add without moving the account.
     pub reserved: [u8; 128],
 }
@@ -95,24 +92,6 @@ pub struct BurnState {
     pub reference: Reserves,
     pub total_spent: u64,
     pub total_burned: u64,
-}
-
-/// One person's place in a coin's vault share.
-#[account]
-#[derive(InitSpace)]
-pub struct Stake {
-    /// Layout version of this account.
-    pub version: u8,
-    pub mint: Pubkey,
-    pub owner: Pubkey,
-    pub amount: u64,
-    /// The running total when this stake was last settled.
-    pub acc_snapshot: u128,
-    /// Earned and not yet paid.
-    pub owed: u64,
-    pub bump: u8,
-    /// Unused. Room for fields a later version may add without moving the account.
-    pub reserved: [u8; 32],
 }
 
 /// The pots that are simply paid out to a fixed receiver.

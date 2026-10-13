@@ -2,26 +2,26 @@
 //! that must match pump.fun's interface.
 
 use burrpad::constants::*;
-use burrpad::math::{self, Reserves, VaultShare, ACC_SCALE, WEIGHT_TOTAL};
+use burrpad::math::{self, Reserves, WEIGHT_TOTAL};
 use proptest::prelude::*;
 
 // ---- fixed cases ----
 
 #[test]
 fn weights_always_add_to_the_whole() {
-    let w = math::weights(1_250, &[2_500, 2_500, 2_500, 2_500]).unwrap();
+    let w = math::weights(1_250, &[2_500, 2_500, 5_000]).unwrap();
     assert_eq!(w.iter().sum::<u128>(), WEIGHT_TOTAL);
     assert_eq!(w[0], 12_500_000);
     assert_eq!(w[1], 21_875_000);
-    assert!(math::weights(1_250, &[2_500, 2_500, 2_500, 2_499]).is_none());
-    assert!(math::weights(10_001, &[10_000, 0, 0, 0]).is_none());
-    assert!(math::weights(0, &[u16::MAX; 4]).is_none());
+    assert!(math::weights(1_250, &[2_500, 2_500, 4_999]).is_none());
+    assert!(math::weights(10_001, &[10_000, 0, 0]).is_none());
+    assert!(math::weights(0, &[u16::MAX; 3]).is_none());
 }
 
 #[test]
 fn the_examples_in_the_brief_come_out_right() {
     // One eighth of the fee: on a 2.00% coin, 0.25% to the platform and 1.75% to the hooks.
-    let w = math::weights(1_250, &[10_000, 0, 0, 0]).unwrap();
+    let w = math::weights(1_250, &[10_000, 0, 0]).unwrap();
     let (mut total, mut credited) = (0u128, [0u128; SINKS]);
     // 2.00% of a 1,000,000-unit trade is 20,000 units of fee.
     let c = math::split(&mut total, &mut credited, &w, 20_000).unwrap();
@@ -50,23 +50,6 @@ fn the_price_band() {
     // The largest figures do not overflow.
     let big = Reserves { quote: u64::MAX, base: u64::MAX };
     assert!(big.above(&big, 500).is_none() || big.above(&big, 500) == Some(false));
-}
-
-#[test]
-fn nothing_is_released_while_nobody_is_staked() {
-    let mut v = VaultShare::default();
-    v.credit(1_000, 0, 100).unwrap();
-    v.update(1_000_000, 100).unwrap();
-    assert_eq!((v.queued, v.acc), (1_000, 0));
-    // The release period starts when someone arrives.
-    assert_eq!(v.release_end, 1_000_100);
-    v.total_staked = 10;
-    v.update(1_000_050, 100).unwrap();
-    assert_eq!(v.queued, 500);
-    assert_eq!(v.earned(10, 0), Some(500));
-    v.update(1_000_100, 100).unwrap();
-    assert_eq!(v.queued, 0);
-    assert_eq!(v.earned(10, 0), Some(1_000));
 }
 
 // ---- constants against pump.fun's interface ----
@@ -121,12 +104,12 @@ fn account_codes_and_positions_match_the_real_accounts() {
 
 // ---- random inputs ----
 
-fn shares() -> impl Strategy<Value = [u16; 4]> {
-    // Four shares that add to 10,000, some possibly zero.
-    proptest::collection::vec(0u32..=10_000, 3).prop_map(|mut cuts| {
+fn shares() -> impl Strategy<Value = [u16; 3]> {
+    // Three shares that add to 10,000, some possibly zero.
+    proptest::collection::vec(0u32..=10_000, 2).prop_map(|mut cuts| {
         cuts.sort();
-        let p = [0, cuts[0], cuts[1], cuts[2], 10_000];
-        [(p[1] - p[0]) as u16, (p[2] - p[1]) as u16, (p[3] - p[2]) as u16, (p[4] - p[3]) as u16]
+        let p = [0, cuts[0], cuts[1], 10_000];
+        [(p[1] - p[0]) as u16, (p[2] - p[1]) as u16, (p[3] - p[2]) as u16]
     })
 }
 
@@ -134,7 +117,7 @@ proptest! {
     #![proptest_config(ProptestConfig { cases: 2_000, ..ProptestConfig::default() })]
 
     /// However the same money is cut into calls, every pot ends the same,
-    /// nothing is invented, and under five units are ever left over.
+    /// nothing is invented, and under four units are ever left over.
     #[test]
     fn the_split_does_not_depend_on_how_it_is_called(
         fraction in 0u16..=5_000,
@@ -173,7 +156,7 @@ proptest! {
             prop_assert_eq!(pots[i], money_in * w[i] / WEIGHT_TOTAL);
         }
         // A hook with no share gets nothing.
-        for i in 0..4 {
+        for i in 0..3 {
             if sh[i] == 0 { prop_assert_eq!(pots[i + 1], 0); }
         }
     }
@@ -206,188 +189,4 @@ proptest! {
         let lhs = (quote as u128 + spend as u128) * 40_000;
         prop_assert!(lhs <= quote as u128 * (40_000 + fee as u128));
     }
-}
-
-/// One step in the life of a vault share.
-#[derive(Debug, Clone)]
-enum Step {
-    Stake(usize, u64),
-    Unstake(usize, u64),
-    Credit(u64),
-    Wait(u32),
-    Claim(usize),
-}
-
-fn step() -> impl Strategy<Value = Step> {
-    prop_oneof![
-        (0usize..5, 1u64..=1_000_000_000_000_000).prop_map(|(w, a)| Step::Stake(w, a)),
-        (0usize..5, 0u64..=1_000_000_000_000_000).prop_map(|(w, a)| Step::Unstake(w, a)),
-        (0u64..=50_000_000_000_000).prop_map(Step::Credit),
-        (0u32..=200_000).prop_map(Step::Wait),
-        (0usize..5).prop_map(Step::Claim),
-    ]
-}
-
-proptest! {
-    #![proptest_config(ProptestConfig { cases: 1_500, ..ProptestConfig::default() })]
-
-    /// A model of the vault share driven by random steps, mirroring what the
-    /// instructions do. At every step: what has been paid plus what is owed
-    /// never exceeds what was credited, and nobody earns without time passing.
-    #[test]
-    fn the_vault_share_never_owes_more_than_it_was_given(steps in proptest::collection::vec(step(), 1..80)) {
-        const RELEASE: u32 = 86_400;
-        let mut v = VaultShare::default();
-        let mut now = 0i64;
-        let mut pot = 0u128;      // the ledger's pot for this hook
-        let mut credited = 0u128;
-        let mut paid = 0u128;
-        let mut staked = [0u64; 5];
-        let mut snap = [0u128; 5];
-        let mut owed = [0u64; 5];
-
-        for s in steps {
-            let acc_before = v.acc;
-            match s {
-                Step::Wait(t) => { now += t as i64; }
-                Step::Credit(a) => {
-                    v.update(now, RELEASE).unwrap();
-                    v.credit(a, now, RELEASE).unwrap();
-                    pot += a as u128;
-                    credited += a as u128;
-                }
-                Step::Stake(i, a) => {
-                    if v.total_staked.checked_add(a).is_none() { continue; }
-                    v.update(now, RELEASE).unwrap();
-                    owed[i] += v.earned(staked[i], snap[i]).unwrap();
-                    snap[i] = v.acc;
-                    staked[i] += a;
-                    v.total_staked += a;
-                }
-                Step::Unstake(..) | Step::Claim(..) => {
-                    let (i, a) = match s {
-                        Step::Unstake(i, a) => (i, a.min(staked[i])),
-                        Step::Claim(i) => (i, 0),
-                        _ => unreachable!(),
-                    };
-                    v.update(now, RELEASE).unwrap();
-                    owed[i] += v.earned(staked[i], snap[i]).unwrap();
-                    snap[i] = v.acc;
-                    staked[i] -= a;
-                    v.total_staked -= a;
-                    let pay = owed[i] as u128;
-                    owed[i] = 0;
-                    prop_assert!(pay <= pot, "a payment larger than the pot");
-                    pot -= pay;
-                    paid += pay;
-                    if v.total_staked == 0 { v.queued = pot as u64; }
-                }
-            }
-            // The running total never goes down.
-            prop_assert!(v.acc >= acc_before);
-            // The queue is always part of the pot.
-            prop_assert!(v.queued as u128 <= pot);
-            // Everything still owed is covered by what is in the pot and released.
-            let mut pending = 0u128;
-            for i in 0..5 {
-                pending += owed[i] as u128 + v.earned(staked[i], snap[i]).unwrap() as u128;
-            }
-            prop_assert!(pending + v.queued as u128 <= pot, "owed {} + queued {} > pot {}", pending, v.queued, pot);
-            prop_assert_eq!(paid + pot, credited);
-            prop_assert_eq!(v.total_staked, staked.iter().sum::<u64>());
-        }
-    }
-
-    /// Arriving, having the fee credited and leaving at the same moment earns nothing.
-    #[test]
-    fn no_time_no_reward(others in 0u64..=1_000_000_000_000, mine in 1u64..=1_000_000_000_000_000, fee in 0u64..=u64::MAX / 4, t in 0i64..=10_000_000) {
-        let mut v = VaultShare { total_staked: others, last_update: t, ..Default::default() };
-        v.update(t, 86_400).unwrap();
-        let snap = v.acc;
-        v.total_staked += mine;
-        v.update(t, 86_400).unwrap();
-        v.credit(fee, t, 86_400).unwrap();
-        v.update(t, 86_400).unwrap();
-        prop_assert_eq!(v.earned(mine, snap), Some(0));
-    }
-
-    /// A stake earns no more than its proportion of what was released while it was in.
-    #[test]
-    fn a_stake_earns_at_most_its_proportion(others in 1u64..=1_000_000_000_000_000, mine in 1u64..=1_000_000_000_000_000, fee in 1u64..=1_000_000_000_000_000, dt in 0u32..=200_000) {
-        let mut v = VaultShare { total_staked: others + mine, ..Default::default() };
-        v.credit(fee, 0, 86_400).unwrap();
-        v.update(dt as i64, 86_400).unwrap();
-        let released = fee - v.queued;
-        let got = v.earned(mine, 0).unwrap() as u128;
-        prop_assert!(got * (others as u128 + mine as u128) <= released as u128 * mine as u128);
-        prop_assert!(v.acc <= (fee as u128) * ACC_SCALE);
-    }
-}
-
-proptest! {
-    #![proptest_config(ProptestConfig { cases: 2_000, ..ProptestConfig::default() })]
-
-    /// A credit moves the end of the release to the amount-weighted average
-    /// of the time the queue had left and the full release time. So: a tiny
-    /// credit moves it by a tiny amount, in either direction; the end is
-    /// never later than a full release time from now; and never earlier than
-    /// the sooner of the two.
-    #[test]
-    fn a_credit_moves_the_release_end_only_in_proportion(
-        queued in 1u64..=1_000_000_000_000_000, left in 1i64..=86_400, amount in 1u64..=1_000_000_000_000_000, now in 0i64..=2_000_000_000,
-    ) {
-        const D: i64 = 86_400;
-        let mut v = VaultShare { total_staked: 1, queued, last_update: now, release_end: now + left, ..Default::default() };
-        v.credit(amount, now, D as u32).unwrap();
-        let window = v.release_end - now;
-        prop_assert_eq!(v.queued, queued + amount);
-        prop_assert!(window <= D);
-        prop_assert!(window >= left.min(D));
-        // The shift is at most the credit's own proportion of a full release time.
-        let shift = (window - left) as i128;
-        let bound = (amount as i128 * D as i128) / (queued as i128 + amount as i128) + 1;
-        prop_assert!(shift <= bound, "end moved {} for a credit of {} onto {}", shift, amount, queued);
-    }
-
-    /// Dust credited every second cannot hold a queue back: after the time
-    /// the queue had left, plus a sliver, nearly all of it is out.
-    #[test]
-    fn dust_cannot_delay_a_queue(queued in 1_000_000u64..=1_000_000_000_000, left in 60i64..=86_400) {
-        const D: u32 = 86_400;
-        let mut v = VaultShare { total_staked: 1_000, queued, last_update: 0, release_end: left, ..Default::default() };
-        let mut dust = 0u64;
-        // One unit of dust every second for the whole time the queue had left.
-        let step = (left / 200).max(1);
-        let mut now = 0;
-        while now < left {
-            now += step;
-            v.update(now, D).unwrap();
-            v.credit(1, now, D).unwrap();
-            dust += 1;
-        }
-        // By one tenth of a percent of a day past its time, with dust still
-        // arriving, all but the dust's own share is released.
-        v.update(left + 90, D).unwrap();
-        prop_assert!(v.queued <= dust + queued / 100, "still queued: {} of {}", v.queued, queued);
-    }
-}
-
-#[test]
-fn a_busy_coin_releases_each_credit_over_about_a_day_not_longer() {
-    // Equal fee every hour for ten days. Under the old rule (every credit
-    // restarts the day for the whole queue) the queue never drains below
-    // about a day's worth. Here, what is queued settles at half a day's fee.
-    const D: u32 = 86_400;
-    let mut v = VaultShare { total_staked: 1, ..Default::default() };
-    let mut now = 0i64;
-    for _ in 0..240 {
-        now += 3_600;
-        v.update(now, D).unwrap();
-        v.credit(1_000_000, now, D).unwrap();
-    }
-    let per_day = 24 * 1_000_000u64;
-    assert!(v.queued > per_day * 4 / 10 && v.queued < per_day * 6 / 10, "queued {} against {per_day} a day", v.queued);
-    // And when fee stops, the rest is out within a day.
-    v.update(now + D as i64, D).unwrap();
-    assert_eq!(v.queued, 0);
 }

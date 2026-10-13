@@ -217,10 +217,10 @@ fn launch_refuses_bad_plans() {
     let cases: Vec<(LaunchPlan, E)> = vec![
         (LaunchPlan { fee_bps: 49, ..d.clone() }, E::FeeOutOfRange),
         (LaunchPlan { fee_bps: 301, ..d.clone() }, E::FeeOutOfRange),
-        (LaunchPlan { shares: [2_500, 2_500, 2_500, 2_499], ..d.clone() }, E::SharesDoNotAddUp),
-        (LaunchPlan { shares: [2_500, 2_500, 2_500, 2_501], ..d.clone() }, E::SharesDoNotAddUp),
-        (LaunchPlan { shares: [0; 4], ..d.clone() }, E::SharesDoNotAddUp),
-        (LaunchPlan { shares: [u16::MAX, u16::MAX, u16::MAX, u16::MAX], ..d.clone() }, E::SharesDoNotAddUp),
+        (LaunchPlan { shares: [3_334, 3_333, 3_332], ..d.clone() }, E::SharesDoNotAddUp),
+        (LaunchPlan { shares: [3_334, 3_333, 3_334], ..d.clone() }, E::SharesDoNotAddUp),
+        (LaunchPlan { shares: [0; 3], ..d.clone() }, E::SharesDoNotAddUp),
+        (LaunchPlan { shares: [u16::MAX, u16::MAX, u16::MAX], ..d.clone() }, E::SharesDoNotAddUp),
         (LaunchPlan { creator_receiver: empty, ..d.clone() }, E::MissingReceiver),
         (LaunchPlan { give_receiver: empty, ..d.clone() }, E::MissingReceiver),
         (LaunchPlan { name: "x".repeat(33), ..d.clone() }, E::TextTooLong),
@@ -246,7 +246,7 @@ fn launch_accepts_the_edges_and_unused_settings() {
     w.launch(&LaunchPlan { fee_bps: 300, ..Default::default() });
     // A hook that is not chosen needs no setting.
     w.launch(&LaunchPlan {
-        shares: [0, 0, 10_000, 0],
+        shares: [0, 0, 10_000],
         creator_receiver: empty,
         give_receiver: empty,
         ..Default::default()
@@ -421,16 +421,9 @@ fn a_launch_is_stopped_if_the_platforms_terms_changed_on_the_way() {
 #[test]
 fn every_account_carries_a_layout_version_and_spare_room() {
     let mut w = World::new();
-    let mint = w.launch(&LaunchPlan { shares: [0, 0, 0, 10_000], ..Default::default() });
-    let t = w.trader(1_000_000_000);
-    assert!(w.buy(&t, &mint, 10_000_000).is_ok());
-    assert!(w.stake(&t, &mint, 1).is_ok());
-    let stake = w.stake_of(&mint, &t.pubkey()).unwrap();
+    let mint = w.launch(&LaunchPlan::default());
     let (cfg, coin, ledger) = (w.config(), w.coin(&mint), w.ledger(&mint));
-    assert_eq!((cfg.version, coin.version, ledger.version, stake.version), (1, 1, 1, 1));
-    assert_eq!(
-        (cfg.reserved.len(), coin.reserved.len(), ledger.reserved.len(), stake.reserved.len()),
-        (64, 64, 128, 32)
-    );
-    assert!(cfg.reserved.iter().chain(&coin.reserved).chain(&ledger.reserved).chain(&stake.reserved).all(|b| *b == 0));
+    assert_eq!((cfg.version, coin.version, ledger.version), (1, 1, 1));
+    assert_eq!((cfg.reserved.len(), coin.reserved.len(), ledger.reserved.len()), (64, 64, 128));
+    assert!(cfg.reserved.iter().chain(&coin.reserved).chain(&ledger.reserved).all(|b| *b == 0));
 }

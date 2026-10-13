@@ -87,20 +87,4 @@ pub mod burrpad {
     pub fn burn_pool(ctx: Context<BurnPool>) -> Result<()> {
         instructions::burn::handle_burn_pool(ctx)
     }
-
-    // ---- vault share ----
-
-    pub fn stake(ctx: Context<StakeCoins>, amount: u64) -> Result<()> {
-        instructions::vault_share::handle_stake(ctx, amount)
-    }
-
-    /// Takes coins out and pays what was earned. An amount of zero is a plain claim.
-    pub fn unstake(ctx: Context<UnstakeCoins>, amount: u64) -> Result<()> {
-        instructions::vault_share::handle_unstake(ctx, amount)
-    }
-
-    /// Closes an empty stake record and returns its rent.
-    pub fn close_stake(ctx: Context<CloseStake>) -> Result<()> {
-        instructions::vault_share::handle_close_stake(ctx)
-    }
 }
