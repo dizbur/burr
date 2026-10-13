@@ -294,7 +294,7 @@ export async function send(conn, instructions, signers, { table, units = 400_000
     const height = await conn.getBlockHeight("confirmed").catch(() => { unreachable++; return 0; });
     if (height > lastValidBlockHeight) {
       if (!expiredAt) expiredAt = Date.now();
-      else if (Date.now() - expiredAt > 30_000) break;
+      else if (answer && Date.now() - expiredAt > 30_000) break; // only on a turn where the network really answered "not there"
     } else if (turn % 2 === 1) {
       await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 }).catch(() => {});
     }

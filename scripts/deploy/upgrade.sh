@@ -46,26 +46,58 @@ echo "Program $id, upgrade key $authority"
 want="${offer:-$(solana-keygen pubkey "$key")}"
 [ "$authority" = "$want" ] || { echo "STOPPED: the upgrade key on the network is $authority, not $want." >&2; exit 1; }
 
-case "$build" in
-  none) ;;
-  --plain) ./scripts/deploy/build.sh --plain;;
-  *) ./scripts/deploy/build.sh;;
-esac
-built_check
+# An upload already offered to this wallet for this build on this network, and interrupted before its check?
+# Then only the check is left: nothing is built, uploaded or paid for again.
+mkdir -p scripts/deploy/out
+note="scripts/deploy/out/offered-buffer.txt"
+offered=""
+if [ -n "$offer" ]; then
+  if [ "$build" != "none" ] && [ ! -f "$note" ] && [ ! -f "$HOLDING" ]; then
+    if [ "$build" = "--plain" ]; then ./scripts/deploy/build.sh --plain; else ./scripts/deploy/build.sh; fi
+  fi
+  built_check
+  mark="$genesis $offer $(shasum -a 256 "$BUILT" | cut -d' ' -f1)"
+  if [ -f "$note" ]; then
+    if [ "$(sed -n 1p "$note")" = "$mark" ]; then offered=$(sed -n 2p "$note"); else
+      echo "NOTE  an earlier offer on record was for another build, wallet or network; it is ignored. (Its upload, if unused, can only be closed by the wallet it was offered to.)"
+      rm -f "$note"
+    fi
+  fi
+  # The hand-over may have landed although the tool said it failed: look before uploading again.
+  if [ -z "$offered" ] && [ -f "$HOLDING" ]; then
+    maybe=$(solana-keygen pubkey "$HOLDING")
+    if node scripts/deploy/verify-buffer.mjs "$maybe" --authority "$offer" ${mainnet:+--mainnet "$mainnet"} >/dev/null 2>&1; then
+      offered="$maybe"; printf '%s\n%s\n' "$mark" "$offered" > "$note"; holding_done
+    fi
+  fi
+else
+  case "$build" in
+    none) ;;
+    --plain) ./scripts/deploy/build.sh --plain;;
+    *) ./scripts/deploy/build.sh;;
+  esac
+  built_check
+fi
 grep -q "\"address\": \"$id\"" target/release-kit/burrpad.json || { echo "STOPPED: the release build is for a different program address. Run build.sh again." >&2; exit 1; }
-balance_check "$signer" upgrade
-size=$(wc -c < "$BUILT" | tr -d ' ')
-grow=0
-if [ "$size" -gt "$room" ]; then
-  # A larger program needs more room, paid for once and kept. The network adds room in steps of at least 10,240 bytes.
-  grow=$(( size - room )); [ "$grow" -ge 10240 ] || grow=10240
-  extra=$(awk -v a="$(chain rent "$((room + grow + 45))")" -v b="$(chain rent "$((room + 45))")" 'BEGIN { printf "%.4f", a - b }')
-  echo "The new code is $((size - room)) bytes larger than the room the program has."
-  echo "  added to the program for good:    $extra SOL (on top of the figures above)"
-  have=$(chain balance "$(solana-keygen pubkey "$signer")") || exit 1
-  awk -v h="$have" -v n="$need" -v e="$extra" 'BEGIN { exit !(h >= n + e) }' || { echo "STOPPED: not enough SOL for the larger program. Nothing was sent." >&2; exit 1; }
-  if [ -n "$offer" ]; then
-    echo "STOPPED: the multi-signature wallet must first extend the program by $grow bytes (in its app, or: solana program extend $id $grow)." >&2; exit 1
+
+if [ -z "$offered" ]; then
+  size=$(wc -c < "$BUILT" | tr -d ' ')
+  if [ "$size" -gt "$room" ]; then
+    # A larger program needs more room, paid for once and kept. The network adds room in steps of at least 10,240 bytes.
+    grow=$(( size - room )); [ "$grow" -ge 10240 ] || grow=10240
+    if [ -n "$offer" ]; then
+      echo "STOPPED: the new code is $((size - room)) bytes larger than the room the program has. The multi-signature wallet must first extend the program by $grow bytes (in its app, or: solana program extend $id $grow)." >&2; exit 1
+    fi
+  fi
+  balance_check "$signer" upgrade
+  if [ "$size" -gt "$room" ]; then
+    with=$(chain rent "$((room + grow + 45))") || exit 1
+    without=$(chain rent "$((room + 45))") || exit 1
+    extra=$(awk -v a="$with" -v b="$without" 'BEGIN { printf "%.4f", a - b }')
+    echo "The new code is $((size - room)) bytes larger than the room the program has."
+    echo "  added to the program for good:    $extra SOL (on top of the figures above)"
+    have=$(chain balance "$(solana-keygen pubkey "$signer")") || exit 1
+    awk -v h="$have" -v n="$need" -v e="$extra" 'BEGIN { exit !(h >= n + e) }' || { echo "STOPPED: not enough SOL for the larger program. Nothing was sent." >&2; exit 1; }
   fi
 fi
 
@@ -75,11 +107,8 @@ if [ -n "$key" ]; then
   sol program deploy "$BUILT" --keypair "$key" --program-id "$id" --upgrade-authority "$key" --buffer "$HOLDING" \
     --use-rpc --max-sign-attempts 30 --with-compute-unit-price "$PRIORITY" || upload_stopped
   holding_done
-  sleep 2
-  node scripts/deploy/verify-code.mjs ${mainnet:+--mainnet "$mainnet"}
+  read_back "$id" "$mainnet"
 else
-  # Offered once already and interrupted? Then only the check is left.
-  offered=$(cat scripts/deploy/out/offered-buffer.txt 2>/dev/null || true)
   if [ -z "$offered" ]; then
     holding_key
     buffer=$(solana-keygen pubkey "$HOLDING")
@@ -87,17 +116,18 @@ else
     sol program write-buffer "$BUILT" --keypair "$payer" --buffer "$HOLDING" \
       --use-rpc --max-sign-attempts 30 --with-compute-unit-price "$PRIORITY" || upload_stopped
     sol program set-buffer-authority "$buffer" --new-buffer-authority "$offer" --keypair "$payer" \
-      || { echo "STOPPED: the upload is complete but could not be offered to the wallet. Run the same command again." >&2; exit 1; }
-    printf '%s' "$buffer" > scripts/deploy/out/offered-buffer.txt
+      || { echo "STOPPED: the upload is complete but the hand-over to the wallet was not confirmed. Run the same command again: it checks whether it went through." >&2; exit 1; }
+    printf '%s\n%s\n' "$mark" "$buffer" > "$note"
     holding_done
-    sleep 2
+    sleep 3
   else
     buffer="$offered"
     echo "The new code was already uploaded and offered, at: $buffer"
   fi
   node scripts/deploy/verify-buffer.mjs "$buffer" --authority "$offer" ${mainnet:+--mainnet "$mainnet"} \
-    || { echo "The upload is at $buffer and only the wallet $offer can use or close it. Run the same command again to check it once more." >&2; exit 1; }
-  rm -f scripts/deploy/out/offered-buffer.txt
+    || { echo "The upload is at $buffer and only the wallet $offer can use or close it." >&2
+         echo "Run the same command again to check it once more. If it keeps failing and you want to upload afresh, delete $note first." >&2; exit 1; }
+  rm -f "$note"
   echo "PASS  new code uploaded and offered to $offer"
   echo "      buffer address: $buffer"
   echo "Next: every signer of the multi-signature wallet runs"

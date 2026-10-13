@@ -36,7 +36,6 @@ echo "Deploying $id ..."
 sol program deploy "$BUILT" --keypair "$payer" --program-id "$program_key" --buffer "$HOLDING" \
   --use-rpc --max-sign-attempts 30 --with-compute-unit-price "$PRIORITY" || upload_stopped
 holding_done
-sleep 2
-node scripts/deploy/verify-code.mjs ${mainnet:+--mainnet "$mainnet"}
+read_back "$id" "$mainnet"
 echo "PASS  deployed: $id"
 echo "Next, in the same sitting: node scripts/deploy/initialize.mjs"

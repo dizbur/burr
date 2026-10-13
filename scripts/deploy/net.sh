@@ -122,7 +122,7 @@ holding_key() {
       echo "Get it back first: ./scripts/deploy/reclaim.sh --payer <the same key file>. Then run this again." >&2
       exit 1
     fi
-    echo "Carrying on with the upload started earlier."
+    if awk -v h="${held:-0}" 'BEGIN { exit !(h > 0) }'; then echo "Carrying on with the upload started earlier."; fi
   else
     solana-keygen new --no-bip39-passphrase --silent --outfile "$HOLDING" >/dev/null
   fi
@@ -130,6 +130,23 @@ holding_key() {
   echo "Uploading. This takes a few minutes and shows nothing while it works. Do not close the window."
 }
 holding_done() { rm -f "$HOLDING" "$HOLDING.build"; }
+
+# Reads the program's code back after a deploy or upgrade that has already
+# succeeded. A slow server can answer with what was there a moment ago, so it
+# tries a few times; and if it still cannot confirm, it says plainly that the
+# deploy itself is done.   $1 = the program's address, $2 = "yes" for the main network
+read_back() {
+  echo "The program is on the network at $1. Reading it back ..."
+  for attempt in 1 2 3 4 5 6; do
+    sleep 3
+    if node scripts/deploy/verify-code.mjs ${2:+--mainnet "$2"} > scripts/deploy/out/read-back.log 2>&1; then cat scripts/deploy/out/read-back.log; return 0; fi
+  done
+  cat scripts/deploy/out/read-back.log
+  echo "" >&2
+  echo "The upload itself finished and the program is in place; only the read-back could not confirm it just now." >&2
+  echo "Do NOT run this command again. Wait a minute, then run:  node scripts/deploy/verify-code.mjs${2:+ --mainnet $2}" >&2
+  exit 1
+}
 
 # Says what to do when an upload stops half way.
 upload_stopped() {

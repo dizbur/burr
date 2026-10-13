@@ -24,12 +24,19 @@ if (!table) {
   await send(conn, [create], [payer]);
   console.log("Table made: " + table.toBase58());
 }
-const state = async () => (await conn.getAddressLookupTable(table)).value.state;
+const state = async () => {
+  for (let i = 0; i < 10; i++) {
+    const got = (await conn.getAddressLookupTable(table)).value;
+    if (got) return got.state;
+    await sleep(1500); // a server a moment behind may not show a new table yet
+  }
+  fail("the table is not visible on the network yet. Run this again in a minute; it carries on.");
+};
 let s = await state();
 const have = new Set(s.addresses.map((a) => a.toBase58()));
 const missing = want.filter((a) => !have.has(a.toBase58()));
 if (missing.length) {
-  if (!s.authority) throw new Error("the table is frozen but incomplete; make a new one with a different payer slot");
+  if (!s.authority) fail("the table is frozen but incomplete. Run this again with  --table new");
   await send(conn, [AddressLookupTableProgram.extendLookupTable({ lookupTable: table, authority: payer.publicKey, payer: payer.publicKey, addresses: missing })], [payer]);
   console.log(`Added ${missing.length} addresses.`);
 }

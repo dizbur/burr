@@ -37,10 +37,6 @@ const ANY_PRICE_COINS = 1n, ANY_PRICE_ZEC = 0n;
 
 if (phase === "start") {
   if (cfg.launches_paused) fail("launches are paused");
-  const sol = await conn.getBalance(me);
-  const myZec = await tokenBalance(conn, zecAccount(me));
-  if (sol < 60_000_000) fail(`the payer holds ${sol / 1e9} SOL; this needs about 0.06`);
-  if (myZec < 3_000_000n) fail(`the payer holds ${zec(myZec)}; this needs about 0.03 ZEC (the token on Solana)`);
   if ((await conn.getBalance(address(cfg.rewards_wallet))) < 5_000_000) {
     fail(`the rewards wallet ${cfg.rewards_wallet} holds less than 0.005 SOL; the second half needs it to pay a fee and open its ZEC account`);
   }
@@ -62,10 +58,14 @@ if (phase === "start") {
 
   // 1. launch, with the launcher's own first buy in the same transaction
   if (!mint) {
+    const sol = await conn.getBalance(me);
+    const myZec = await tokenBalance(conn, zecAccount(me));
+    if (sol < 60_000_000) fail(`the payer holds ${sol / 1e9} SOL; this needs about 0.06`);
+    if (myZec < 3_000_000n) fail(`the payer holds ${zec(myZec)}; this needs about 0.03 ZEC (the token on Solana)`);
     const mintKey = Keypair.generate(); // a fresh address for every attempt
     mint = mintKey.publicKey;
     // Written down before sending: if the answer is lost on the way back, the next run finds the coin instead of making another.
-    writeOut(conn.outName, { firstCoin: mint.toBase58(), firstCoinStep: 0, firstCoinLastHeight: (await conn.getLatestBlockhash()).lastValidBlockHeight + 20 });
+    writeOut(conn.outName, { firstCoin: mint.toBase58(), firstCoinStep: 0, firstCoinLastHeight: (await conn.getLatestBlockhash()).lastValidBlockHeight + 150 });
     const plan = { name: "Burrpad first coin", symbol: "BFC", uri: "https://example.invalid/first-coin.json",
       fee_bps: 200, shares: [2500, 2500, 2500, 2500], creator_receiver: me, give_receiver: me };
     sent = await send(conn, [

@@ -33,13 +33,15 @@ if [ -f "$HOLDING" ]; then
     sleep 2
     held=$(chain balance "$where") || exit 1
     if awk -v h="$held" 'BEGIN { exit !(h > 0) }'; then
-      echo "STOPPED: the deposit is still held at $where. Nothing is lost: run this again." >&2; exit 1
+      echo "STOPPED: the deposit is still held at $where. Nothing is lost." >&2
+      echo "Is --payer the same key file the upload was started with? If so, run this again. (An upload already offered to a multi-signature wallet can only be closed by that wallet.)" >&2; exit 1
     fi
   fi
   holding_done
 fi
-sol program close --buffers --keypair "$payer" > "scripts/deploy/out/reclaim.log" 2>&1 || echo "NOTE  could not look for other unfinished uploads on this connection (some providers do not allow that search)."
+searched=yes
+sol program close --buffers --keypair "$payer" > "scripts/deploy/out/reclaim.log" 2>&1 || { searched=no; echo "NOTE  could not look for other unfinished uploads on this connection (some providers do not allow that search)."; }
 sleep 2
 after=$(chain balance "$who") || exit 1
 echo "The wallet had $before SOL and now has $after SOL."
-if awk -v a="$after" -v b="$before" 'BEGIN { exit !(a > b) }'; then echo "PASS  the deposit is back"; else echo "Nothing more was found being held."; fi
+if awk -v a="$after" -v b="$before" 'BEGIN { exit !(a > b) }'; then echo "PASS  the deposit is back"; elif [ "$searched" = yes ]; then echo "Nothing more was found being held."; else echo "No deposit came back on this run."; fi
