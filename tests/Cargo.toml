@@ -1,0 +1,25 @@
+[package]
+name = "burr-tests"
+version = "0.1.0"
+description = "Test bench: Burr against real copies of pump.fun's programs"
+edition.workspace = true
+rust-version.workspace = true
+publish = false
+
+[dependencies]
+litesvm = "=0.18.0"
+solana-account = "=4.7.0"
+solana-pubkey = "=4.3.0"
+solana-instruction = "=3.5.1"
+solana-keypair = "=3.1.2"
+solana-signer = "=3.0.1"
+solana-message = "=4.6.0"
+solana-transaction = "=4.3.0"
+solana-clock = "=3.2.1"
+solana-compute-budget-interface = "=3.1.0"
+serde = { version = "=1.0.229", features = ["derive"] }
+serde_json = "=1.0.154"
+base64 = "=0.22.1"
+sha2 = "0.10"
+burr = { path = "../programs/burr", features = ["no-entrypoint"] }
+anchor-lang = "=1.2.1"
