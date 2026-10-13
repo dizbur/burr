@@ -432,6 +432,33 @@ fn a_proposed_rewards_wallet_can_be_cancelled_or_replaced() {
 }
 
 #[test]
+fn a_new_administrator_does_not_inherit_a_proposed_rewards_wallet() {
+    // An outgoing administrator proposes a wallet, lets the day pass, and
+    // hands the role on. The new one cannot apply it without notice of its own.
+    let (mut w, _) = setup();
+    let planted = w.b.wallet();
+    let next = w.b.wallet();
+    assert!(w.as_admin(burrpad::instruction::ProposeRewardsWallet { wallet: planted.pubkey() }).is_ok());
+    w.b.wait(DAY);
+    assert!(w.as_admin(burrpad::instruction::ProposeAdmin { new_admin: next.pubkey() }).is_ok());
+    let accept = kit::raw(
+        burrpad::accounts::AcceptAdmin { new_admin: next.pubkey(), config: kit::config() },
+        burrpad::instruction::AcceptAdmin {},
+    );
+    assert!(w.b.send_as(Some(&next), &[accept], &[]).is_ok());
+    let c = w.config();
+    assert_eq!(
+        (c.admin, c.pending_rewards_wallet, c.rewards_wallet_ready_at),
+        (next.pubkey(), Pubkey::default(), 0),
+        "the proposal outlived the administrator who made it"
+    );
+    let apply = w.admin_ix(&next.pubkey(), burrpad::instruction::ApplyRewardsWallet {});
+    let r = w.b.send_as(Some(&next), &[apply], &[]);
+    assert_eq!(custom_code(&r), Some(err(E::NoRewardsWalletProposed)), "{}", logs(&r));
+    assert_eq!(w.config().rewards_wallet, w.rewards_wallet.pubkey());
+}
+
+#[test]
 fn a_wallet_change_and_a_release_cannot_be_packed_into_one_transaction() {
     // What the wait is for: one stolen administrator key, one transaction,
     // every open holder pot.

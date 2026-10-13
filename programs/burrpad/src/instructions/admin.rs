@@ -176,6 +176,10 @@ pub fn handle_accept_admin(ctx: Context<AcceptAdmin>) -> Result<()> {
     let c = &mut ctx.accounts.config;
     c.admin = c.pending_admin;
     c.pending_admin = Pubkey::default();
+    // A new administrator does not inherit a rewards-wallet change it never
+    // proposed: it must propose its own, in the open, and wait the full time.
+    c.pending_rewards_wallet = Pubkey::default();
+    c.rewards_wallet_ready_at = 0;
     announce(c);
     Ok(())
 }

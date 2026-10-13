@@ -246,14 +246,14 @@ MANUAL = [
     M("L40", "Launch makes up the rent pump.fun leaves a new mint short of", LAUNCH,
       "    if short > 0 {", "    if false {", "a_launch_works_at_every_text_length"),
 
-    M("M20", "A burn limit worked out with a divisor of zero is refused, not a crash", "math.rs",
+    M("B60", "A burn limit worked out with a divisor of zero is refused, not a crash", "math.rs",
       "    if divisor == 0 {\n        return None;\n    }\n", "", "the_burn_limit_and_floor"),
 
     # ---- recover ----
-    M("R20", "Recovered ZEC is split, not left unaccounted", COLLECT,
+    M("C30", "Recovered ZEC is split, not left unaccounted", COLLECT,
       "    ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount)?;\n    emit!(Recovered", "    emit!(Recovered",
       "a_pool_fee_paid_into_a_side_account_can_be_brought_home_by_anyone", "the recovered fee was not split"),
-    M("R21", "Recover reads the vault afresh after moving the ZEC", COLLECT,
+    M("C31", "Recover reads the vault afresh after moving the ZEC", COLLECT,
       "    ctx.accounts.vault.reload()?;\n    ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount)?;\n    emit!(Recovered",
       "    ops::split_new(&ctx.accounts.coin, &mut ctx.accounts.ledger, ctx.accounts.vault.amount)?;\n    emit!(Recovered",
       "a_pool_fee_paid_into_a_side_account_can_be_brought_home_by_anyone", "the recovered fee was not split"),
@@ -329,6 +329,10 @@ MANUAL = [
     M("H27", "A release's event carries its run number", HOLD,
       "    h.runs = h.runs.checked_add(1).ok_or(BurrpadError::Overflow)?;\n", "",
       "each_release_is_announced_with_its_run_number"),
+    M("H28", "A new administrator does not inherit a proposed rewards wallet", ADMIN,
+      "    c.pending_admin = Pubkey::default();\n    // A new administrator does not inherit a rewards-wallet change it never\n    // proposed: it must propose its own, in the open, and wait the full time.\n    c.pending_rewards_wallet = Pubkey::default();\n    c.rewards_wallet_ready_at = 0;\n",
+      "    c.pending_admin = Pubkey::default();\n",
+      "a_new_administrator_does_not_inherit_a_proposed_rewards_wallet"),
     M("H14", "The rewards wallet cannot be the empty address at initialisation", ADMIN,
       "require!(rewards_wallet != Pubkey::default(), BurrpadError::EmptyAddress);", "",
       "initialise_refuses_empty_addresses", "empty rewards wallet"),
