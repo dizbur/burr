@@ -74,6 +74,10 @@ in_copy ./scripts/deploy/build.sh --plain > "$work/build.log" 2>&1 || { tail -30
 grep -E "^(PASS|      )" "$work/build.log"
 
 step "4. deploy"
+echo "-- asked for the main network on a connection that is not it, every kind of script stops before doing anything:"
+if in_copy ./scripts/deploy/deploy.sh --mainnet yes --program-key "$(key program)" --payer "$(key deployer)" > "$work/again.log" 2>&1; then echo "FAIL  deploy.sh went on"; exit 1; else grep STOPPED "$work/again.log"; fi
+if in_copy ./scripts/deploy/reclaim.sh --mainnet yes --payer "$(key deployer)" > "$work/again.log" 2>&1; then echo "FAIL  reclaim.sh went on"; exit 1; fi
+if node "$kit/verify-code.mjs" --mainnet yes > "$work/again.log" 2>&1; then echo "FAIL  a node script went on"; exit 1; else grep STOPPED "$work/again.log"; echo "PASS  all three refused"; fi
 echo "-- with too little SOL it refuses before sending anything, and says by how much:"
 solana-keygen new --no-bip39-passphrase --silent --outfile "$work/keys/poor.json" >/dev/null
 solana airdrop 1 "$(addr poor)" --url "$url" >/dev/null
@@ -86,10 +90,18 @@ solana airdrop "$tight" "$(addr deployer)" --url "$url" >/dev/null
 echo "deploy wallet starts with $(sol deployer): just enough"
 half_upload() { ( cd "$work/src" && mkdir -p scripts/deploy/out && solana-keygen new --no-bip39-passphrase --silent --outfile scripts/deploy/out/upload-holding-keypair.json >/dev/null \
   && shasum -a 256 target/release-kit/burrpad.so | cut -d' ' -f1 | tr -d '\n' > scripts/deploy/out/upload-holding-keypair.json.build \
+  && printf '%s' "$(solana genesis-hash --url "$url")" > scripts/deploy/out/upload-holding-keypair.json.net \
   && solana program write-buffer target/release-kit/burrpad.so --url "$url" --keypair "$(key deployer)" --buffer scripts/deploy/out/upload-holding-keypair.json >/dev/null 2>&1 ); }
 echo "-- an upload left unfinished: the deposit can be taken back"
 half_upload
 echo "deploy wallet with an unfinished upload: $(sol deployer)"
+in_copy ./scripts/deploy/reclaim.sh --payer "$(key deployer)"
+echo "-- an unfinished upload made on another network: reclaim leaves its note alone"
+half_upload
+printf 'some other network' > "$work/src/scripts/deploy/out/upload-holding-keypair.json.net"
+if in_copy ./scripts/deploy/reclaim.sh --payer "$(key deployer)" > "$work/again.log" 2>&1; then echo "FAIL  reclaim went on"; exit 1; else grep "^STOPPED" "$work/again.log"; fi
+[ -f "$work/src/scripts/deploy/out/upload-holding-keypair.json" ] && echo "PASS  the note is still there"
+printf '%s' "$(solana genesis-hash --url "$url")" > "$work/src/scripts/deploy/out/upload-holding-keypair.json.net"
 in_copy ./scripts/deploy/reclaim.sh --payer "$(key deployer)"
 echo "-- an unfinished upload of a different build is not carried on with:"
 half_upload

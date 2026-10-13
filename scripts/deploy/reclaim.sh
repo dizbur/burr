@@ -24,20 +24,33 @@ mkdir -p scripts/deploy/out
 who=$(solana-keygen pubkey "$payer")
 before=$(chain balance "$who") || exit 1
 # First the one holding account this folder knows about, by its address. Then any others this wallet made.
+# The note of that holding account is only ever removed after this run has itself
+# seen its deposit come back, on the network the upload was made on.
 if [ -f "$HOLDING" ]; then
   where=$(solana-keygen pubkey "$HOLDING")
+  made_on=$(cat "$HOLDING.net" 2>/dev/null || true)
+  if [ -n "$made_on" ] && [ "$made_on" != "$genesis" ]; then
+    echo "STOPPED: the unfinished upload on record was made on a different network from the one this window is connected to. Nothing was done." >&2
+    echo "Check BURRPAD_RPC_URL (and --mainnet yes) and run this again." >&2; exit 1
+  fi
   held=$(chain balance "$where") || exit 1
   if awk -v h="$held" 'BEGIN { exit !(h > 0) }'; then
     echo "Closing the holding account $where, which holds $held SOL ..."
     sol program close "$where" --keypair "$payer" || true
-    sleep 2
-    held=$(chain balance "$where") || exit 1
-    if awk -v h="$held" 'BEGIN { exit !(h > 0) }'; then
-      echo "STOPPED: the deposit is still held at $where. Nothing is lost." >&2
-      echo "Is --payer the same key file the upload was started with? If so, run this again. (An upload already offered to a multi-signature wallet can only be closed by that wallet.)" >&2; exit 1
+    gone=no
+    for attempt in 1 2 3 4 5 6; do
+      sleep 3
+      held=$(chain balance "$where") || exit 1
+      if awk -v h="$held" 'BEGIN { exit !(h == 0) }'; then gone=yes; break; fi
+    done
+    if [ "$gone" = no ]; then
+      echo "STOPPED: the deposit still shows as held at $where. Nothing is lost." >&2
+      echo "Is --payer the same key file the upload was started with? If so, wait a minute and run this again. (An upload already offered to a multi-signature wallet can only be closed by that wallet.)" >&2; exit 1
     fi
+    holding_done
+  else
+    echo "The holding account on record ($where) holds nothing on this network. Its note is kept."
   fi
-  holding_done
 fi
 searched=yes
 sol program close --buffers --keypair "$payer" > "scripts/deploy/out/reclaim.log" 2>&1 || { searched=no; echo "NOTE  could not look for other unfinished uploads on this connection (some providers do not allow that search)."; }

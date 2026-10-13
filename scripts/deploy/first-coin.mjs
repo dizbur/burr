@@ -52,6 +52,9 @@ if (phase === "start") {
   if (saved.firstCoin && opts.again !== "yes") {
     const earlier = address(saved.firstCoin, "the saved coin");
     // A launch sent moments ago may not be visible yet: give it until it can no longer land.
+    if (saved.firstCoinStep === 0 && !(await readAccount(conn, idl, "Coin", coinAddresses(idl, earlier).coin))) {
+      console.log("A launch was sent a moment ago and is not visible yet. Waiting up to two minutes to see whether it landed, so that no second coin is made ...");
+    }
     for (let i = 0; i < 100 && saved.firstCoinStep === 0 && !(await readAccount(conn, idl, "Coin", coinAddresses(idl, earlier).coin))
       && (await conn.getBlockHeight("confirmed")) <= (saved.firstCoinLastHeight ?? 0); i++) await sleep(2000);
     if (await readAccount(conn, idl, "Coin", coinAddresses(idl, earlier).coin)) {
@@ -71,7 +74,7 @@ if (phase === "start") {
     const mintKey = Keypair.generate(); // a fresh address for every attempt
     mint = mintKey.publicKey;
     // Written down before sending: if the answer is lost on the way back, the next run finds the coin instead of making another.
-    writeOut(conn.outName, { firstCoin: mint.toBase58(), firstCoinStep: 0, firstCoinLastHeight: (await conn.getLatestBlockhash()).lastValidBlockHeight + 150 });
+    writeOut(conn.outName, { firstCoin: mint.toBase58(), firstCoinStep: 0, firstCoinBoughtMore: false, firstCoinLastHeight: (await conn.getLatestBlockhash()).lastValidBlockHeight + 150 });
     const plan = { name: coinName, symbol: coinSymbol, uri: "https://example.invalid/first-coin.json",
       fee_bps: 200, shares: [2500, 2500, 2500, 2500], creator_receiver: me, give_receiver: me };
     sent = await send(conn, [
@@ -90,8 +93,13 @@ if (phase === "start") {
 
   // 2. a buy and a sell, straight on pump.fun
   if (step < 2) {
-    sent = await send(conn, [buyIx(mint, me, 500_000n, ANY_PRICE_COINS)], [payer], { units: 400_000 });
-    did("buy 0.005 ZEC more", sent);
+    if (readOut(conn.outName).firstCoinBoughtMore) {
+      console.log("      the second buy was already made");
+    } else {
+      sent = await send(conn, [buyIx(mint, me, 500_000n, ANY_PRICE_COINS)], [payer], { units: 400_000 });
+      writeOut(conn.outName, { firstCoinBoughtMore: true });
+      did("buy 0.005 ZEC more", sent);
+    }
     const held = await tokenBalance(conn, coinAccount(me, mint));
     sent = await send(conn, [sellIx(mint, me, held / 2n, ANY_PRICE_ZEC)], [payer], { units: 400_000 });
     did("sell half of what was bought", sent);

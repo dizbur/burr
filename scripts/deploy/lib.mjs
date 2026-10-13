@@ -105,6 +105,8 @@ export async function connect(opts) {
   if (mainnet && opts.mainnet !== "yes") {
     fail("This is the main network. Add  --mainnet yes  if that is what you mean.");
   }
+  // Asked for the main network, got another: a wrong connection address. Stop before anything is done.
+  if (!mainnet && opts.mainnet === "yes") fail("--mainnet yes was given, but this connection is NOT the main network. Check BURRPAD_RPC_URL in this window. Nothing was done.");
   console.log(mainnet ? "Network: MAIN NETWORK" : "Network: a test network");
   conn.isMainnet = mainnet;
   // Each network keeps its own notes, so a test network's addresses never mix with another's.
@@ -271,7 +273,11 @@ export async function send(conn, instructions, signers, { table, units = 400_000
   }
   const raw = tx.serialize();
   const size = raw.length;
-  const signature = await conn.sendTransaction(tx, { skipPreflight: true, maxRetries: 0 });
+  // The transaction's name is known before it is sent, so a connection that
+  // drops at the very moment of sending does not lose track of it: the wait
+  // below finds it if it landed, and sends it again if it did not.
+  const signature = bs58.encode(tx.signatures[0]);
+  await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 }).catch(() => {});
   // Wait for it by asking the network directly, sending the very same signed
   // transaction again every couple of seconds (it can only ever run once),
   // until well after it could no longer land. Asking, not listening: a dropped
@@ -299,7 +305,7 @@ export async function send(conn, instructions, signers, { table, units = 400_000
       await conn.sendRawTransaction(raw, { skipPreflight: true, maxRetries: 0 }).catch(() => {});
     }
     if (unreachable > 20 || Date.now() - started > 240_000) {
-      throw new Error(`the network stopped answering while waiting for ${link(conn, signature)}\nLook that up before doing anything else: it may or may not have landed.`);
+      throw new Error(`the network stopped answering while waiting for ${link(conn, signature)}\nIt may or may not have landed. Running the same command again is safe: each script looks at what is already there before sending anything.`);
     }
     await sleep(1000);
   }

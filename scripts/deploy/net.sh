@@ -43,6 +43,8 @@ net_check() {
     [ "$2" = "yes" ] || { echo "STOPPED: this is the main network. Add  --mainnet yes  if that is what you mean." >&2; exit 1; }
     echo "Network: MAIN NETWORK"
   else
+    # Asked for the main network, got another: a wrong connection address. Stop before anything is done.
+    [ "$2" != "yes" ] || { echo "STOPPED: --mainnet yes was given, but this connection is NOT the main network. Check BURRPAD_RPC_URL in this window. Nothing was done." >&2; exit 1; }
     echo "Network: a test network"
   fi
   # The network plans a rule (SIMD-0500) that will refuse to deploy programs
@@ -127,9 +129,10 @@ holding_key() {
     solana-keygen new --no-bip39-passphrase --silent --outfile "$HOLDING" >/dev/null
   fi
   printf '%s' "$mark" > "$HOLDING.build"
+  printf '%s' "$genesis" > "$HOLDING.net"   # which network this upload is on
   echo "Uploading. This takes a few minutes and shows nothing while it works. Do not close the window."
 }
-holding_done() { rm -f "$HOLDING" "$HOLDING.build"; }
+holding_done() { rm -f "$HOLDING" "$HOLDING.build" "$HOLDING.net"; }
 
 # Reads the program's code back after a deploy or upgrade that has already
 # succeeded. A slow server can answer with what was there a moment ago, so it
