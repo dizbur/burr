@@ -291,8 +291,8 @@ fn a_burn_started_on_the_curve_carries_on_from_the_pool() {
 #[test]
 fn buying_before_and_selling_after_a_pool_burn_loses_money() {
     for fee in [50u16, 200, 300] {
-        // Sizes that stay inside the 5% price band; larger ones make the burn skip.
-        for attack in [ZEC1 / 100, ZEC1 / 20, ZEC1 / 8] {
+        // From small pushes to ones far past the old 5% band: the burn buys every time, and the attacker loses.
+        for attack in [ZEC1 / 100, ZEC1 / 20, ZEC1 / 8, ZEC1, 5 * ZEC1] {
             let (mut w, mint) = graduated_with_burn_pot(fee, 50 * ZEC1);
             assert!(w.burn_pool(&mint).is_ok());
             w.b.wait(60);

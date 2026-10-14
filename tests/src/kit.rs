@@ -536,9 +536,9 @@ impl World {
         self.b.send(&[i], &[])
     }
 
-    /// Calls the burn once a minute until it really buys. After the price
-    /// has risen, the burn follows it up one 5% step per call. Returns how
-    /// many calls it took.
+    /// Calls the burn once a minute until it really buys, and returns how many
+    /// calls it took. With no price check any more, that is one call whenever
+    /// the pot holds something and the wait is over.
     pub fn burn_until_it_buys(&mut self, mint: &Pubkey) -> u32 {
         for n in 1..=300 {
             let before = self.ledger(mint).pots[3];

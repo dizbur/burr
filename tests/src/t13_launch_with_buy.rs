@@ -75,11 +75,11 @@ fn a_link_longer_than_fits_is_refused() {
 }
 
 #[test]
-fn a_first_buy_delays_the_first_burn_by_a_known_time() {
-    // The launcher's own buy lifts the price above the launch reference. Buy
-    // back and burn then follows it up 5% a minute before it buys.
+fn a_first_buy_does_not_delay_the_first_burn() {
+    // The launcher's own buy lifts the price above the launch price. Buy back
+    // and burn buys on its first call all the same.
     println!("first buy (ZEC), price rise, minutes until buy back and burn first buys");
-    for (first_buy, most_minutes) in [(ZEC1 / 10, 3u32), (ZEC1 / 2, 9), (ZEC1, 15), (3 * ZEC1, 32)] {
+    for first_buy in [ZEC1 / 10, ZEC1 / 2, ZEC1, 3 * ZEC1] {
         let (_, _, mut w, mint) = launch_and_buy(100, first_buy);
         let c = w.b.curve(&mint);
         let rise_pct = (c.virtual_quote_reserves as u128 * 1_073_000_000_000_000u128 * 100)
@@ -91,6 +91,6 @@ fn a_first_buy_delays_the_first_burn_by_a_known_time() {
         w.b.wait(60);
         let calls = w.burn_until_it_buys(&mint);
         println!("{:.2}, +{rise_pct}%, {calls}", first_buy as f64 / ZEC1 as f64);
-        assert!(calls <= most_minutes, "first buy {first_buy}: {calls} minutes");
+        assert_eq!(calls, 1, "first buy {first_buy}: {calls} calls");
     }
 }
