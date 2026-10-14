@@ -20,18 +20,26 @@ use anchor_spl::token::Token;
 use anchor_spl::token_2022::Token2022;
 use anchor_spl::token_interface::{self, Burn, Mint, TokenAccount, TransferChecked};
 
-/// Decides how much to buy now, and the fewest coins to accept.
+/// Decides how much to buy now, and the fewest coins to accept. It no longer
+/// returns `None` (that was the old price check refusing); the callers' branch
+/// for it is kept only so the built program stays the size it was.
 ///
 /// `venue_fee_bps` is the creator fee the curve or pool charges right now,
 /// read from pump.fun's own account. The spend limit uses the lower of that
 /// and the coin's recorded fee, because the limit's safety rests on traders
 /// really paying that fee. The least-coins-out allows for what is charged.
-fn plan(coin: &Coin, ledger: &Ledger, reserves: Reserves, venue_fee_bps: u64, now: i64) -> Result<(u64, u64)> {
+fn plan(
+    coin: &Coin,
+    ledger: &mut Ledger,
+    reserves: Reserves,
+    venue_fee_bps: u64,
+    now: i64,
+) -> Result<Option<(u64, u64)>> {
     require!(coin.share_of(SINK_BURN) > 0, BurrpadError::HookNotChosen);
     // Nothing is recorded unless there is something to spend, so an empty
     // pot cannot be used to move the reference price.
     require!(ledger.pots[SINK_BURN] > 0, BurrpadError::NothingToBurn);
-    let b = &ledger.burn;
+    let b = &mut ledger.burn;
     let ready = b.last_time.checked_add(coin.burn_cooldown_secs as i64).ok_or(BurrpadError::Overflow)?;
     require!(now >= ready, BurrpadError::BurnTooSoon);
     // There is no price check: a burn buys at the price it finds. What makes
@@ -55,7 +63,7 @@ fn plan(coin: &Coin, ledger: &Ledger, reserves: Reserves, venue_fee_bps: u64, no
     // Zero here means nothing can be spent now (no fee is being charged, or
     // the amount is too small to buy one unit).
     require!(min_out > 0, BurrpadError::NothingToBurn);
-    Ok((spend, min_out))
+    Ok(Some((spend, min_out)))
 }
 
 #[derive(Accounts)]
@@ -140,7 +148,11 @@ pub fn handle_burn_curve(ctx: Context<BurnCurve>) -> Result<()> {
     let curve = pump::read_curve(&ctx.accounts.bonding_curve.to_account_info())?;
     require!(!curve.complete && curve.quote_mint == ZEC_MINT, BurrpadError::WrongVenue);
     let reserves = Reserves { quote: curve.virtual_quote_reserves, base: curve.virtual_token_reserves };
-    let (spend, min_out) = plan(&ctx.accounts.coin, &ctx.accounts.ledger, reserves, curve.creator_fee_bps, now)?;
+    let Some((spend, min_out)) =
+        plan(&ctx.accounts.coin, &mut ctx.accounts.ledger, reserves, curve.creator_fee_bps, now)?
+    else {
+        return Ok(());
+    };
 
     let a = &ctx.accounts;
     pump::check_buyback_recipient(
@@ -387,7 +399,10 @@ pub fn handle_burn_pool(ctx: Context<BurnPool>) -> Result<()> {
         ctx.accounts.pool_base_token_account.amount,
         ctx.accounts.pool_quote_token_account.amount,
     )?;
-    let (spend, min_out) = plan(&ctx.accounts.coin, &ctx.accounts.ledger, reserves, venue_fee_bps, now)?;
+    let Some((spend, min_out)) = plan(&ctx.accounts.coin, &mut ctx.accounts.ledger, reserves, venue_fee_bps, now)?
+    else {
+        return Ok(());
+    };
 
     let a = &ctx.accounts;
     pump::check_buyback_recipient(
