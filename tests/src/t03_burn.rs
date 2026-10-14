@@ -97,39 +97,68 @@ fn the_spend_never_passes_the_pot_or_the_limit() {
     }
 }
 
+/// The most one burn may spend, as the program works it out: the coin's fee
+/// rate, a quarter of it, of the smaller of the reserve now and the reserve
+/// recorded at the last buy.
+fn limit_now(w: &World, mint: &Pubkey) -> u128 {
+    let c = w.b.curve(mint);
+    let recorded = w.ledger(mint).burn.reference.quote;
+    c.virtual_quote_reserves.min(recorded) as u128 * w.coin(mint).fee_bps as u128 / 40_000
+}
+
 #[test]
-fn a_price_pushed_up_is_not_bought_at() {
+fn a_price_pushed_up_is_bought_at_within_the_limit() {
+    // There is no price check any more: a burn buys at the price it finds.
+    // What it may spend is the limit, measured against the reserve recorded
+    // before the push, and the reserve it records grows by one step at most.
     let mut w = World::new();
     let mint = coin_with_burn_pot(&mut w, 200, 10 * ZEC1);
     assert!(w.burn_curve(&mint).is_ok());
     let after_first = w.ledger(&mint);
 
-    // Someone pushes the price up well over 5%, then the burn is called.
     let pusher = w.trader(100 * ZEC1);
     assert!(w.buy(&pusher, &mint, ZEC1).is_ok());
     w.b.wait(60);
+    let limit = limit_now(&w, &mint);
     let supply = w.b.mint_supply(&mint);
     let r = w.burn_curve(&mint);
     assert!(r.is_ok(), "{}", logs(&r));
     let l = w.ledger(&mint);
-    assert_eq!(l.pots[3], after_first.pots[3], "nothing was spent");
-    assert_eq!(w.b.mint_supply(&mint), supply, "nothing was burned");
-    assert!(l.burn.last_time > after_first.burn.last_time, "the new price and time were recorded");
-
-    // The pushed price was not taken as the new reference: it rose by one 5% step only.
-    // (The price is the ZEC figure over the coin figure; the step lowers the coin figure.)
-    assert_eq!(l.burn.reference.quote, after_first.burn.reference.quote);
-    assert_eq!(l.burn.reference.base as u128, after_first.burn.reference.base as u128 * 10_000 / 10_500);
-
-    // It cannot be retried at once.
+    let spent = after_first.pots[3] - l.pots[3];
+    assert!(spent > 0, "the burn bought at the pushed price");
+    assert!(spent as u128 <= limit, "spent {spent}, above the limit {limit}");
+    assert!(w.b.mint_supply(&mint) < supply, "and burned what it bought");
+    assert!(
+        l.burn.reference.quote as u128 <= after_first.burn.reference.quote as u128 * 10_500 / 10_000 + 1,
+        "the recorded reserve grew by more than one step"
+    );
+    // It cannot be called again at once.
     let r = w.burn_curve(&mint);
     assert_eq!(custom_code(&r), Some(err(E::BurnTooSoon)));
-    // If the price stays, the reference climbs to it a step a minute, and then the burn buys.
-    w.b.wait(60);
-    let calls = w.burn_until_it_buys(&mint);
-    assert!(calls > 5, "a rise of this size takes many steps, not one ({calls})");
-    assert!(w.ledger(&mint).pots[3] < after_first.pots[3]);
     w.assert_sound(&mint);
+}
+
+#[test]
+fn a_rising_price_is_bought_every_minute() {
+    // The case that made the band go: a coin whose price rises minute after
+    // minute. Every call buys, each within its limit; none is skipped.
+    let mut w = World::new();
+    let mint = coin_with_burn_pot(&mut w, 200, 50 * ZEC1);
+    let buyer = w.trader(1_000 * ZEC1);
+    for minute in 0..20 {
+        // Each minute someone buys and the price rises.
+        assert!(w.buy(&buyer, &mint, ZEC1 / 5).is_ok());
+        assert!(!w.b.curve(&mint).complete, "the test meant to stay on the curve");
+        let pot = w.ledger(&mint).pots[3];
+        let limit = limit_now(&w, &mint);
+        let r = w.burn_curve(&mint);
+        assert!(r.is_ok(), "minute {minute}: {}", logs(&r));
+        let spent = pot - w.ledger(&mint).pots[3];
+        assert!(spent > 0, "minute {minute}: the burn did not buy");
+        assert!(spent as u128 <= limit, "minute {minute}: spent {spent}, above the limit {limit}");
+        w.assert_sound(&mint);
+        w.b.wait(60);
+    }
 }
 
 #[test]
@@ -138,7 +167,7 @@ fn a_price_that_fell_is_bought_at_once() {
     let mint = coin_with_burn_pot(&mut w, 200, 10 * ZEC1);
     let t = w.trader(100 * ZEC1);
     assert!(w.buy(&t, &mint, ZEC1).is_ok());
-    // The price is well above launch; the burn follows it up, then buys.
+    // The price is well above launch; the burn buys anyway.
     w.burn_until_it_buys(&mint);
     let have = w.coins_of(&t.pubkey(), &mint);
     assert!(w.sell(&t, &mint, have).is_ok());
@@ -173,34 +202,17 @@ fn sandwich(fee_bps: u16, attack_zec: u64) -> i128 {
 
 #[test]
 fn buying_before_and_selling_after_a_burn_loses_money() {
-    // Every allowed fee, small and large attacks. Sizes above about 5% of the
-    // pool trip the price check instead, which the next test covers.
+    // Every allowed fee, from a tiny push to one far larger than the old 5%
+    // band ever allowed through: the burn buys every time, and the attacker
+    // loses at least the coin's fee once over.
     for fee in [50u16, 100, 200, 300] {
-        for attack in [ZEC1 / 1_000, ZEC1 / 100, ZEC1 / 20, ZEC1 / 10] {
+        for attack in [ZEC1 / 1_000, ZEC1 / 100, ZEC1 / 20, ZEC1 / 10, ZEC1 / 2, ZEC1, 5 * ZEC1] {
             let gain = sandwich(fee, attack);
             assert!(gain < 0, "fee {fee} attack {attack}: attacker gained {gain}");
-            // The loss is at least the coin's fee paid twice, less what our buy moved the price.
             let floor = attack as i128 * (fee as i128) / 10_000;
             assert!(-gain >= floor, "fee {fee} attack {attack}: lost only {}", -gain);
         }
     }
-}
-
-#[test]
-fn a_large_push_before_a_burn_just_makes_it_skip() {
-    let mut w = World::new();
-    let mint = coin_with_burn_pot(&mut w, 200, 50 * ZEC1);
-    assert!(w.burn_curve(&mint).is_ok());
-    w.b.wait(60);
-    let attacker = w.trader(1_000 * ZEC1);
-    let start = w.zec_of(&attacker.pubkey());
-    assert!(w.buy(&attacker, &mint, 5 * ZEC1).is_ok());
-    let pot = w.ledger(&mint).pots[3];
-    assert!(w.burn_curve(&mint).is_ok());
-    assert_eq!(w.ledger(&mint).pots[3], pot, "the burn did not buy");
-    let coins = w.coins_of(&attacker.pubkey(), &mint);
-    assert!(w.sell(&attacker, &mint, coins).is_ok());
-    assert!(w.zec_of(&attacker.pubkey()) < start, "the attacker only paid fees");
 }
 
 #[test]
@@ -284,7 +296,7 @@ fn gifts_to_the_burner_do_not_confuse_it() {
 }
 
 #[test]
-fn the_first_burn_is_checked_against_the_launch_price() {
+fn a_push_before_the_first_burn_cannot_raise_what_it_spends() {
     let mut w = World::new();
     let mint = w.launch(&burn_plan(200));
     w.b.give_zec(&kit::authority(&mint), 50 * ZEC1);
@@ -293,12 +305,16 @@ fn the_first_burn_is_checked_against_the_launch_price() {
     let r = w.burn_curve(&mint);
     assert_eq!(custom_code(&r), Some(err(E::BurnTooSoon)));
     // Someone pushes the price far up before the first burn ever runs.
+    let launch_reserve = w.ledger(&mint).burn.reference.quote;
     let pusher = w.trader(100 * ZEC1);
     assert!(w.buy(&pusher, &mint, 3 * ZEC1).is_ok());
     w.b.wait(60);
     let pot = w.ledger(&mint).pots[3];
     assert!(w.burn_curve(&mint).is_ok());
-    assert_eq!(w.ledger(&mint).pots[3], pot, "the first burn did not buy at the pushed price");
+    let spent = pot - w.ledger(&mint).pots[3];
+    // The first burn buys, but spends no more than a quarter of the fee rate of the reserve at launch.
+    assert!(spent > 0);
+    assert!(spent as u128 <= launch_reserve as u128 * 200 / 40_000, "spent {spent}");
 }
 
 /// Rewrites the creator fee stored in pump.fun's curve account, as pump.fun's
@@ -366,32 +382,31 @@ fn print_sandwich_figures() {
 }
 
 #[test]
-fn pushing_the_price_for_one_call_does_not_move_the_reference_to_it() {
-    // In one transaction: push the price up, call the burn so it "sees" the
-    // high price, sell back. A minute later the same push must still be refused.
+fn pushing_the_price_for_each_call_raises_the_limit_one_step_at_most() {
+    // Push the price up, let the burn buy, sell back, three times. The burn
+    // buys each time; the reserve its limit is measured against grows by at
+    // most one 5% step per buy, so the pushes cannot make it spend more; and
+    // the pusher loses money.
     let mut w = World::new();
     let mint = coin_with_burn_pot(&mut w, 200, 50 * ZEC1);
     let pusher = w.trader(1_000 * ZEC1);
-    let payer = w.b.payer.pubkey();
-    // The price at launch, as recorded. (pump.fun sets a new ZEC coin's
-    // starting figures and moves them over time, so they are read, not assumed.)
-    let at_launch = w.ledger(&mint).burn.reference;
-    let launch_price = (at_launch.quote as u128, at_launch.base as u128);
+    let start = w.zec_of(&pusher.pubkey());
+    let at_launch = w.ledger(&mint).burn.reference.quote as u128;
     for round in 0..3 {
         assert!(w.buy(&pusher, &mint, 2 * ZEC1).is_ok());
         let pot = w.ledger(&mint).pots[3];
-        let i = kit::raw(w.burn_curve_accounts(&payer, &mint), burrpad::instruction::BurnCurve {});
-        assert!(w.b.send(&[i], &[]).is_ok());
-        assert_eq!(w.ledger(&mint).pots[3], pot, "round {round}: bought at a pushed price");
+        let limit = limit_now(&w, &mint);
+        assert!(w.burn_curve(&mint).is_ok());
+        let spent = pot - w.ledger(&mint).pots[3];
+        assert!(spent > 0 && spent as u128 <= limit, "round {round}: spent {spent}, limit {limit}");
         let coins = w.coins_of(&pusher.pubkey(), &mint);
         assert!(w.sell(&pusher, &mint, coins).is_ok());
         w.b.wait(60);
     }
-    // Three pushes moved the reference by three 5% steps, no more.
-    let r = w.ledger(&mint).burn.reference;
-    assert_eq!(r.quote as u128, launch_price.0, "the recorded reserve did not grow");
-    assert!(r.base as u128 * 116 / 100 > launch_price.1, "the price rose by three steps at most");
-    assert!((r.base as u128) < launch_price.1);
+    let recorded = w.ledger(&mint).burn.reference.quote as u128;
+    assert!(recorded <= at_launch * 11_577 / 10_000 + 3, "the recorded reserve grew by more than three steps");
+    assert!(w.zec_of(&pusher.pubkey()) < start, "the pusher lost money");
+    w.assert_sound(&mint);
 }
 
 #[test]

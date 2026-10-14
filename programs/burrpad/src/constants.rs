@@ -45,8 +45,14 @@ pub const ZEC_DECIMALS: u8 = 8;
 // Hook settings, copied into each coin's record at launch.
 /// Buy back and burn: seconds between calls.
 pub const BURN_COOLDOWN_SECS: u32 = 60;
-/// Buy back and burn: refuse a price more than this far above the last recorded one.
-pub const BURN_PRICE_BAND_BPS: u16 = 500;
+/// Buy back and burn: no longer used. Until 14 Oct 2026 a burn skipped a price
+/// more than this far above its reference; that rule is gone for every coin, and
+/// the figure in a coin's record is not read. New coins record 0.
+pub const BURN_PRICE_BAND_BPS: u16 = 0;
+/// Buy back and burn: the most the reserve the spend limit is measured against
+/// may grow from one buy to the next. It stops liquidity added around one burn
+/// from raising the limit of the next. The same for every coin.
+pub const BURN_RESERVE_STEP_BPS: u16 = 500;
 /// Buy back and burn: room left for pump.fun's own fee when working out the least coins to accept.
 pub const BURN_FEE_ALLOWANCE_BPS: u16 = 200;
 /// Buy back and burn: spend per call is at most `reserve * fee_bps / (BPS * this)`.

@@ -8,7 +8,7 @@
 
 use crate::constants::*;
 use crate::error::BurrpadError;
-use crate::events::{BurnSkipped, Burned};
+use crate::events::Burned;
 use crate::math::{self, Reserves};
 use crate::ops;
 use crate::pump;
@@ -40,16 +40,11 @@ fn plan(
     let b = &mut ledger.burn;
     let ready = b.last_time.checked_add(coin.burn_cooldown_secs as i64).ok_or(BurrpadError::Overflow)?;
     require!(now >= ready, BurrpadError::BurnTooSoon);
-    if reserves.above(&b.reference, coin.burn_price_band_bps).ok_or(BurrpadError::Overflow)? {
-        // Do not take the price seen now as the new reference: it may have
-        // been pushed for this one call. Raise the reference price by one
-        // band only. A real rise is followed step by step, one waiting time
-        // each. The recorded reserve does not grow here.
-        b.reference = b.reference.price_raised_by(coin.burn_price_band_bps).ok_or(BurrpadError::Overflow)?;
-        b.last_time = now;
-        emit!(BurnSkipped { mint: coin.mint });
-        return Ok(None);
-    }
+    // There is no price check: a burn buys at the price it finds. What makes
+    // trading around it a loss is the spend limit below, which keeps the price
+    // move of one burn to about half the coin's fee rate. (A 5% price band was
+    // here until 14 Oct 2026; it made a coin whose price kept rising skip for
+    // hours. The figure for it in a coin's record is no longer read.)
     // The limit is measured against the smaller of the reserve now and the
     // reserve recorded last time, so liquidity added just for this call
     // cannot raise it.
@@ -247,12 +242,10 @@ pub fn handle_burn_curve(ctx: Context<BurnCurve>) -> Result<()> {
 
     // Record the price after our own buy as the next reference.
     let after = pump::read_curve(&ctx.accounts.bonding_curve.to_account_info())?;
-    let band = ctx.accounts.coin.burn_price_band_bps;
     let b = &mut ctx.accounts.ledger.burn;
     b.reference = next_reference(
         &b.reference,
         Reserves { quote: after.virtual_quote_reserves, base: after.virtual_token_reserves },
-        band,
     )?;
     b.last_time = now;
     emit!(Burned { mint: mint_key, spent, burned });
@@ -504,20 +497,19 @@ pub fn handle_burn_pool(ctx: Context<BurnPool>) -> Result<()> {
         ctx.accounts.pool_base_token_account.amount,
         ctx.accounts.pool_quote_token_account.amount,
     )?;
-    let band = ctx.accounts.coin.burn_price_band_bps;
     let b = &mut ctx.accounts.ledger.burn;
-    b.reference = next_reference(&b.reference, after, band)?;
+    b.reference = next_reference(&b.reference, after)?;
     b.last_time = now;
     emit!(Burned { mint: mint_key, spent, burned });
     Ok(())
 }
 
-/// The reference to record after a buy: the pool's price right after it,
-/// with the reserve figure allowed to grow by at most one band over the last
-/// one. Without that bound, liquidity added around one burn would raise the
-/// limit of the next.
-fn next_reference(last: &Reserves, after: Reserves, band_bps: u16) -> Result<Reserves> {
-    let ceiling = last.raised_by(band_bps).ok_or(BurrpadError::Overflow)?.quote;
+/// The reference to record after a buy: the venue's figures right after it,
+/// with the reserve figure allowed to grow by at most one step (5%) over the
+/// last one. Without that bound, liquidity added around one burn would raise
+/// the limit of the next. Only its reserve figure is read now, by the limit.
+fn next_reference(last: &Reserves, after: Reserves) -> Result<Reserves> {
+    let ceiling = last.raised_by(BURN_RESERVE_STEP_BPS).ok_or(BurrpadError::Overflow)?.quote;
     after.held_to(ceiling).ok_or(BurrpadError::Overflow.into())
 }
 
