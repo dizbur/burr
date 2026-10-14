@@ -6,6 +6,7 @@ set -eu
 cd "$(dirname "$0")/../.."
 export PATH="$HOME/.cargo/bin:$HOME/.local/share/solana/install/active_release/bin:$PATH"
 mode="${1:-verified}"
+VERIFY_IMAGE="solanafoundation/solana-verifiable-build:4.3.0"
 
 if [ -n "$(git status --porcelain 2>/dev/null)" ]; then
   echo "NOTE  there are uncommitted changes. A build that others can verify must come from a commit."
@@ -17,7 +18,9 @@ else
   command -v solana-verify >/dev/null 2>&1 || { echo "STOPPED: solana-verify is not installed (cargo install solana-verify --locked)." >&2; exit 1; }
   command -v docker >/dev/null 2>&1 || { echo "STOPPED: Docker is not installed or not running." >&2; exit 1; }
   echo "== reproducible build, in Docker"
-  solana-verify build --library-name burrpad
+  # The image is pinned to the same Solana tools (4.3.0) the tests were run with. It is built for
+  # Intel/AMD processors; on an Apple Silicon Mac Docker runs it through emulation, which is slow.
+  solana-verify build --library-name burrpad --base-image "$VERIFY_IMAGE"
 fi
 echo "== interface file"
 mkdir -p target/idl target/types
