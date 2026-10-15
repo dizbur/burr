@@ -43,3 +43,5 @@ mod t17_burn_burr;
 mod t18_liquidity;
 #[cfg(test)]
 mod t19_payout_options;
+#[cfg(test)]
+mod t20_edge_cases;
