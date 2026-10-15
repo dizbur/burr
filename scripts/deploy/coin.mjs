@@ -134,6 +134,31 @@ export function burnCurveIx(idl, mint, payer) {
     token_program: TOKEN, token_2022_program: TOKEN_2022, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
   });
 }
+// pump.fun's `migrate_v2`: moves a completed curve to its PumpSwap pool. Open to anyone; `user` pays.
+export const WITHDRAW_AUTHORITY = new PublicKey("39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg");
+export function migrateIx(mint, user) {
+  const curve = curveOf(mint);
+  const pa = pda(["pool-authority", mint], PUMP);
+  const pool = pda(["pool", Buffer.from([0, 0]), pa, mint, ZEC], PUMP_AMM);
+  const lp = pda(["pool_lp_mint", pool], PUMP_AMM);
+  const boost = pda(["boost_vault", pool], PUMP_AMM);
+  return new TransactionInstruction({
+    programId: PUMP, data: Buffer.from([187, 203, 18, 31, 206, 237, 254, 41]),
+    keys: [
+      meta(pda(["global"], PUMP)), meta(WITHDRAW_AUTHORITY, true), meta(mint), meta(ZEC), meta(curve, true),
+      meta(ata(curve, mint, TOKEN_2022), true), meta(ata(curve, ZEC, TOKEN), true), meta(user, true, true), meta(SYSTEM), meta(PUMP_AMM),
+      meta(pool, true), meta(pa, true), meta(ata(pa, mint, TOKEN_2022), true), meta(ata(pa, ZEC, TOKEN), true),
+      meta(pda(["global_config"], PUMP_AMM)), meta(lp, true), meta(ata(pa, lp, TOKEN_2022), true),
+      meta(ata(pool, mint, TOKEN_2022), true), meta(ata(pool, ZEC, TOKEN), true),
+      meta(TOKEN_2022), meta(TOKEN), meta(TOKEN_2022), meta(ATA_PROGRAM), meta(pda(["__event_authority"], PUMP_AMM)),
+      meta(new PublicKey("SysvarRent111111111111111111111111111111111")), meta(pda(["__event_authority"], PUMP)), meta(PUMP),
+      // Two accounts the interface file does not list, learned from a real graduation.
+      meta(boost, true), meta(ata(boost, ZEC, TOKEN), true),
+    ],
+  });
+}
+
+
 // ---- after graduation: the coin's PumpSwap pool ----
 export const BURR = new PublicKey("GiwMfYS4jHi256G8K41snZhKUovrMbyQL2hqv3fqr7WU");
 export const poolAuthorityOf = (mint) => pda(["pool-authority", mint], PUMP);
@@ -169,6 +194,13 @@ const buyOnPoolAccounts = (idl, mint, payer, burnerMint) => {
     token_program: TOKEN, token_2022_program: TOKEN_2022, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
   };
 };
+// The liquidity hook: after graduation, adds to the coin's own pool and burns the receipts.
+export function addLiquidityIx(idl, mint, payer) {
+  const x = buyOnPoolAccounts(idl, mint, payer, mint);
+  const lp = pda(["pool_lp_mint", poolOf(mint)], PUMP_AMM);
+  return instruction(idl, "add_liquidity", { ...x, lp_mint: lp, burner_lp: ata(x.burner, lp, TOKEN_2022) });
+}
+
 export const burnPoolIx = (idl, mint, payer) => instruction(idl, "burn_pool", buyOnPoolAccounts(idl, mint, payer, mint));
 // A coin's $BURR pot buys $BURR on $BURR's pool (after the 16 Oct upgrade).
 export function burnBurrIx(idl, mint, payer) {

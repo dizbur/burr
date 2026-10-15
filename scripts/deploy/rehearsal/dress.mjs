@@ -1,16 +1,17 @@
 // Rehearsal only: the calls the dress rehearsal makes on the copied coins,
 // with what each did to the coin's books, written to a file for comparing
 // before and after the upgrade. Refuses the main network.
-//   node dress.mjs <before|after> --payer <file> --coins <mint,...> --out <file>
+//   node dress.mjs <before|after> --payer <file> --coins <mint,...> --out <file> [--payout-wallet <address>]
+// With --payout-wallet (set and confirmed beforehand), "after" also runs the Liquidity upgrade's new calls.
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { writeFileSync } from "node:fs";
 import {
-  BURR, burnBurrIx, burnCurveIx, burnPoolIx, buyIx, clock, coinAccount, collectCurveIx, collectPoolIx, curveOf, launchIx,
+  addLiquidityIx, BURR, burnBurrIx, burnCurveIx, burnPoolIx, buyIx, clock, coinAccount, collectCurveIx, collectPoolIx, curveOf, launchIx, migrateIx, poolOf,
   makeTokenAccountIx, payOutIx, splitIx, tokenBalance, zecAccount, zecTransferIx,
 } from "../coin.mjs";
-import { address, coinAddresses, connect, fail, loadIdl, loadKey, loadTable, need, options, readAccount, readOut, send, TOKEN_2022 } from "../lib.mjs";
+import { address, ata, coinAddresses, connect, fail, loadIdl, loadKey, loadTable, need, options, pda, PUMP_AMM, readAccount, readOut, send, TOKEN, TOKEN_2022, ZEC } from "../lib.mjs";
 
-const opts = options(["url", "payer", "coins", "out"]);
+const opts = options(["url", "payer", "coins", "out", "payout-wallet"]);
 const phase = opts._[0];
 if (!["before", "after"].includes(phase)) fail("say: before or after");
 const conn = await connect(opts);
@@ -84,4 +85,42 @@ if (phase === "after") {
   const burr = await readAccount(conn, idl, "Ledger", coinAddresses(idl, BURR).ledger);
   console.log("      $BURR's own ledger after: burn last_time", String(burr.burn.last_time));
 }
+// The Liquidity upgrade's new calls, once the payout wallet has been set and confirmed (by admin.mjs, before this).
+if (phase === "after" && opts["payout-wallet"]) {
+  const wallet = address(opts["payout-wallet"], "--payout-wallet");
+  const every = { ...plan, shares: [1500, 1500, 1500, 1500], burr_share: 2000, liquidity_share: 2000,
+    payout_options: 7, long_holder_step_bps: 100, long_holder_max_bps: 10000, creator_receiver: wallet };
+  const m = await launchWithBuy("launch_v3, every option on", every, true);
+  const coin = await readAccount(conn, idl, "Coin", coinAddresses(idl, m).coin);
+  console.log(`      recorded: choices ${coin.payout_options}, bonus ${coin.long_holder_step_bps}/${coin.long_holder_max_bps}, $BURR ${coin.burr_share}, liquidity ${coin.liquidity_share}, creator receiver ${coin.creator_receiver === wallet.toBase58() ? "the payout wallet" : coin.creator_receiver}`);
+  // Graduation on pump.fun's real programs: buy until the curve completes, then pump.fun's own migration to PumpSwap.
+  for (let i = 0; i < 20; i++) {
+    if ((await conn.getAccountInfo(curveOf(m))).data[48] !== 0) break;
+    await send(conn, [buyIx(m, me, 500_000_000n, 1n)], [payer], { units: 400_000 });
+  }
+  await step("pump.fun's migration to PumpSwap", m, [migrateIx(m, me)], [payer], { units: 600_000 });
+  await step("fee in + split (launch_v3 coin)", m, [zecTransferIx(zecAccount(me), coinAddresses(idl, m).vault, me, 2_000_000_000n), splitIx(idl, m)]);
+  await waitForBurn(m);
+  await step("add_liquidity, first call (records)", m, [addLiquidityIx(idl, m, me)]);
+  await waitForBurn(m);
+  const lpMint = pda(["pool_lp_mint", poolOf(m)], PUMP_AMM);
+  const lpSupply = async () => (await conn.getAccountInfo(lpMint)).data.readBigUInt64LE(36);
+  const poolZec = async () => tokenBalance(conn, ata(poolOf(m), ZEC, TOKEN));
+  const [supplyBefore, zecBefore] = [await lpSupply(), await poolZec()];
+  await step("add_liquidity, adds and burns the receipts", m, [addLiquidityIx(idl, m, me)]);
+  const r = results.at(-1);
+  r.lpSupplyBefore = String(supplyBefore);
+  r.lpSupplyAfter = String(await lpSupply());
+  r.burnerReceipts = String(await tokenBalance(conn, ata(coinAddresses(idl, m).burner, lpMint, TOKEN_2022)).catch(() => 0n));
+  r.poolZecRose = String((await poolZec()) - zecBefore);
+  console.log(`      receipt mint supply ${r.lpSupplyBefore} -> ${r.lpSupplyAfter} (all burned if equal); the burner holds ${r.burnerReceipts} receipts; the pool's ZEC rose ${r.poolZecRose}`);
+  const walletZec = async () => tokenBalance(conn, zecAccount(wallet)).catch(() => 0n);
+  const w0 = await walletZec();
+  await step("pay_out Creator to the payout wallet", m, [payOutIx(idl, m, me, "Creator", wallet)]);
+  results.at(-1).payoutWalletRose = String((await walletZec()) - w0);
+  console.log(`      the payout wallet received ${results.at(-1).payoutWalletRose}`);
+  await waitForBurn(BURR);
+  await step("burn_burr (launch_v3 coin)", m, [burnBurrIx(idl, m, me)]);
+}
+
 writeFileSync(need(opts, "out"), JSON.stringify(results, null, 1));

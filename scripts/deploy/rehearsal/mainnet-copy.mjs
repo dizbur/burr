@@ -9,13 +9,13 @@
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { BURR, burnBurrIx, burnCurveIx, burnPoolIx, collectCurveIx, collectPoolIx, curveOf, launchIx, payOutIx, poolOf, splitIx } from "../coin.mjs";
+import { BURR, WITHDRAW_AUTHORITY, burnBurrIx, burnCurveIx, burnPoolIx, collectCurveIx, collectPoolIx, curveOf, launchIx, payOutIx, poolOf, splitIx } from "../coin.mjs";
 import {
   address, ata, ATA_PROGRAM, COMPUTE_BUDGET, configAddress, connect, fail, fixedAccounts, loadIdl, LOADER, MAYHEM, need,
   options, pda, PUMP, PUMP_AMM, PUMP_FEES, readAccount, SYSTEM, TOKEN, TOKEN_2022, ZEC,
 } from "../lib.mjs";
 
-const opts = options(["url", "mainnet", "stand-in", "trader", "coins"]);
+const opts = options(["url", "mainnet", "stand-in", "trader", "coins", "admin-stand-in"]);
 const out = opts._[0] ?? fail("give the output folder");
 const conn = await connect(opts);
 if (!conn.isMainnet) fail("this copies from the main network; add --mainnet yes with a main-network connection");
@@ -51,6 +51,7 @@ add(await launchIx(conn, idl, Keypair.generate().publicKey, trader, {
 }));
 add(burnBurrIx(idl, BURR, trader));
 for (const [seeds, program] of [[["global_volume_accumulator"], PUMP], [["global_volume_accumulator"], PUMP_AMM]]) keys.add(pda(seeds, program).toBase58());
+keys.add(WITHDRAW_AUTHORITY.toBase58());
 
 const programs = [idl.programId, PUMP, PUMP_AMM, PUMP_FEES, MAYHEM];
 const skip = new Set([...programs, TOKEN, TOKEN_2022, ATA_PROGRAM, SYSTEM, COMPUTE_BUDGET, LOADER].map((k) => new PublicKey(k).toBase58()));
@@ -72,7 +73,14 @@ for (let i = 0; i < wanted.length; i += 100) {
     // A local validator asks more rent than the main network (6,960 lamports a byte against 5,080 read
     // today), so an account copied as it is can fall short there. Topped up to the local minimum.
     const local = (info.data.length + 128) * 6960;
-    writeAccount("a" + (i + j), batch[j], info.owner.toBase58(), Math.max(info.lamports, local), info.data);
+    // With --admin-stand-in yes, the stand-in also becomes the settings' administrator (bytes 9 to 41), as
+    // the multi-signature wallet's vault is on the network, so the rehearsal can use administrator switches.
+    let data = info.data;
+    if (opts["admin-stand-in"] === "yes" && batch[j] === configAddress(idl).toBase58()) {
+      data = Buffer.from(data);
+      standIn.toBuffer().copy(data, 9);
+    }
+    writeAccount("a" + (i + j), batch[j], info.owner.toBase58(), Math.max(info.lamports, local), data);
     copied++;
   });
 }
