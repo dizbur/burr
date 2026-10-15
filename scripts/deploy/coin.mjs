@@ -29,8 +29,9 @@ export const coinAccount = (owner, mint) => ata(owner, mint, TOKEN_2022);
 
 // `plan`: name, symbol, uri, fee_bps, shares [creator, give, burn, holders], creator_receiver, give_receiver.
 // The platform terms are read from the settings, so the launch states the terms it saw.
-// `plan.burr_share` and `plan.liquidity_share` (optional): the extra hooks,
-// sent with `launch_v2` or `launch_v3`; without them it is the plain `launch`.
+// `plan.burr_share`, `plan.liquidity_share` and `plan.payout_options` (optional):
+// the extra hooks and the payout choices, sent with `launch_v2` or `launch_v3`;
+// without them it is the plain `launch`.
 // `makeOwnAccount`: the launch also makes the launcher's own account for the
 // new coin (after the next upgrade), so a first buy needs no instruction of its own for it.
 export async function launchIx(conn, idl, mint, payer, plan, { makeOwnAccount = false } = {}) {
@@ -38,8 +39,8 @@ export async function launchIx(conn, idl, mint, payer, plan, { makeOwnAccount = 
   const a = coinAddresses(idl, mint);
   const curve = curveOf(mint);
   const solVault = pda(["sol-vault"], MAYHEM);
-  const { burr_share = 0, liquidity_share = 0, ...terms } = plan;
-  const name = liquidity_share ? "launch_v3" : burr_share ? "launch_v2" : "launch";
+  const { burr_share = 0, liquidity_share = 0, payout_options = 0, ...terms } = plan;
+  const name = liquidity_share || payout_options ? "launch_v3" : burr_share ? "launch_v2" : "launch";
   const ix = instruction(idl, name, {
     payer, mint, config: configAddress(idl), coin: a.coin, ledger: a.ledger, authority: a.authority, vault: a.vault, zec_mint: ZEC,
     pump_mint_authority: pda(["mint-authority"], PUMP),
@@ -56,7 +57,7 @@ export async function launchIx(conn, idl, mint, payer, plan, { makeOwnAccount = 
     quote_control: pda(["quote-control"], PUMP),
     pump_program: PUMP, token_program: TOKEN, token_2022_program: TOKEN_2022,
     associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
-  }, { args: { ...terms, max_platform_fraction_bps: cfg.platform_fraction_bps, platform_receiver: cfg.platform_receiver }, burr_share, liquidity_share });
+  }, { args: { ...terms, max_platform_fraction_bps: cfg.platform_fraction_bps, platform_receiver: cfg.platform_receiver }, burr_share, liquidity_share, payout_options });
   if (makeOwnAccount) ix.keys.push(meta(coinAccount(payer, mint), true));
   return ix;
 }
