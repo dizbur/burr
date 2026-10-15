@@ -50,4 +50,13 @@ in_copy ./scripts/deploy/build.sh --plain > "$work/build.log" 2>&1 || { tail -30
 in_copy ./scripts/deploy/deploy.sh --program-key "$(key program)" --payer "$(key deployer)" > "$work/deploy.log" 2>&1 || { grep -vE "^[a-z]+( [a-z]+){11}$" "$work/deploy.log" | tail -20; exit 1; }
 node "$kit/initialize.mjs" --upgrade-key "$(key deployer)" --platform-receiver "$(addr platform)" --rewards-wallet "$(addr rewards)" >/dev/null
 node "$kit/address-table.mjs" --payer "$(key deployer)" >/dev/null
-node "$kit/rehearsal/launch-size.mjs" --payer "$(key deployer)"
+payout_args=()
+if grep -q '"confirm_creator_payout_wallet"' "$work/src/target/release-kit/burrpad.json"; then
+  # Private creator payouts opened as the owner will: set by the administrator, confirmed by the wallet itself.
+  solana-keygen new --no-bip39-passphrase --silent --outfile "$work/keys/payout.json" >/dev/null
+  solana airdrop 1 "$(addr payout)" --url "$url" >/dev/null
+  node "$kit/admin.mjs" set-creator-payout-wallet "$(addr payout)" --admin-key "$(key deployer)" | grep -E "PASS|creator payout"
+  node "$kit/admin.mjs" confirm-creator-payout-wallet --admin-key "$(key payout)" | grep -E "PASS|creator payout"
+  payout_args=(--payout-wallet "$(addr payout)")
+fi
+node "$kit/rehearsal/launch-size.mjs" --payer "$(key deployer)" ${payout_args[@]+"${payout_args[@]}"}

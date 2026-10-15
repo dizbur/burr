@@ -17,6 +17,8 @@
 //   set-platform-fraction <bps>                      the platform's part of each fee, 2500 to 5000, for coins launched from now on
 //   set-fee-range --min <bps> --max <bps> --default <bps>
 //                                                    the fees a launcher may pick, in hundredths of a percent, for coins launched from now on
+//   set-creator-payout-wallet <address>              names Burrpad's one wallet for private creator payouts (a fresh address)
+//   confirm-creator-payout-wallet                    signed by that wallet itself (--admin-key is its key file); from then on it is fixed for good
 import { address, configAddress, connect, fail, ordinaryWallet, instruction, loadIdl, loadKey, options, readAccount, send, unsignedForWallet } from "./lib.mjs";
 
 const opts = options(["url", "admin-key", "admin", "min", "max", "default", "mainnet"]);
@@ -59,9 +61,12 @@ const actions = {
   "set-platform-receiver": () => asAdmin("set_platform_receiver", { receiver: target() }),
   "set-platform-fraction": () => asAdmin("set_platform_fraction", fraction()),
   "set-fee-range": () => asAdmin("set_fee_range", feeRange()),
+  "set-creator-payout-wallet": () => asAdmin("set_creator_payout_wallet", { wallet: target() }),
+  // Not the administrator: the payout wallet signs for itself, as a proposed administrator does in accept-admin.
+  "confirm-creator-payout-wallet": () => instruction(idl, "confirm_creator_payout_wallet", { wallet: admin, config }),
 };
 if (!actions[action]) fail("Unknown action. One of: " + Object.keys(actions).join(", "));
-if (action === "set-platform-receiver" || action === "propose-rewards-wallet") await ordinaryWallet(conn, target(), "the new address");
+if (["set-platform-receiver", "propose-rewards-wallet", "set-creator-payout-wallet"].includes(action)) await ordinaryWallet(conn, target(), "the new address");
 const ix = actions[action]();
 const settings = async () => {
   const c = await readAccount(conn, idl, "Config", config);
@@ -82,4 +87,5 @@ if (forFuture) console.log("After:  " + (await settings()) + "\n        This app
 const c = await readAccount(conn, idl, "Config", config);
 console.log(`      administrator ${c.admin}` + (c.pending_admin !== "11111111111111111111111111111111" ? `, proposed ${c.pending_admin}` : ""));
 console.log(`      launches ${c.launches_paused ? "PAUSED" : "on"}, holder releases ${c.holder_releases_paused ? "PAUSED" : "on"}`);
+if (c.creator_payout_wallet !== undefined) console.log(`      creator payout wallet ${c.creator_payout_wallet === "11111111111111111111111111111111" ? "none" : c.creator_payout_wallet + (c.creator_payout_confirmed ? " (confirmed: fixed for good)" : " (not yet confirmed)")}`);
 console.log(`      rewards wallet ${c.rewards_wallet}` + (c.pending_rewards_wallet !== "11111111111111111111111111111111" ? `, proposed ${c.pending_rewards_wallet}, can be applied at ${new Date(Number(c.rewards_wallet_ready_at) * 1000).toISOString()}` : ""));
