@@ -43,6 +43,7 @@ until solana cluster-version --url "$url" >/dev/null 2>&1; do
   sleep 1
 done
 solana airdrop 20 "$(addr deployer)" --url "$url" >/dev/null
+for k in platform rewards; do solana airdrop 1 "$(addr "$k")" --url "$url" >/dev/null; done
 
 in_copy ./scripts/deploy/set-program-id.sh "$(addr program)" >/dev/null
 in_copy ./scripts/deploy/build.sh --plain > "$work/build.log" 2>&1 || { tail -30 "$work/build.log"; exit 1; }
