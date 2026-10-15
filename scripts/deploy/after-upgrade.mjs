@@ -10,7 +10,7 @@
 //
 // --admin <address> if the administrator is not the same as --authority.
 import { PublicKey, TransactionMessage, VersionedTransaction, ComputeBudgetProgram } from "@solana/web3.js";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { BURR, burnBurrIx, burnCurveIx, burnPoolIx, clock, collectCurveIx, collectPoolIx, curveOf, splitIx } from "./coin.mjs";
 import { address, checker, coinAddresses, configAddress, connect, decodeAccount, fail, loadIdl, need, options, programDataAddress, readAccount, ROOT, sha256 } from "./lib.mjs";
@@ -27,6 +27,7 @@ const settings = await conn.getAccountInfo(config);
 if (!settings) fail("no settings account: is this the right network?");
 
 if (opts.save === "yes") {
+  mkdirSync(path.dirname(keep), { recursive: true }); // a fresh checkout has no notes folder yet
   writeFileSync(keep, JSON.stringify({ at: new Date().toISOString(), data: settings.data.toString("base64") }) + "\n");
   console.log(`Kept a copy of the settings (${settings.data.length} bytes) for after the upgrade. Nothing was sent.`);
   process.exit(0);
