@@ -669,6 +669,9 @@ def worker(n, queue, results):
 # stands. Filled from the run's results, by reasoning about each one.
 def second_line(entry_id):
     """Why no test can see this check missing on its own: what else stops the same swap."""
+    if entry_id == "U6":
+        return ("every $BURR buy also writes the same time into $BURR's own ledger, which is checked too (U15, held "
+                "alone); this one is kept so the shared record says when the next buy may run")
     if entry_id == "R12":
         return "the call's target is a constant in the code, not the account passed; and the account's address is pinned too"
     m = re.match(r"([XY])\.(\w+)\.(\w+)$", entry_id)
