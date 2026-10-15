@@ -39,7 +39,7 @@ export async function launchIx(conn, idl, mint, payer, plan, { makeOwnAccount = 
   const a = coinAddresses(idl, mint);
   const curve = curveOf(mint);
   const solVault = pda(["sol-vault"], MAYHEM);
-  const { burr_share = 0, liquidity_share = 0, payout_options = 0, ...terms } = plan;
+  const { burr_share = 0, liquidity_share = 0, payout_options = 0, long_holder_step_bps = 0, long_holder_max_bps = 0, ...terms } = plan;
   const name = liquidity_share || payout_options ? "launch_v3" : burr_share ? "launch_v2" : "launch";
   const ix = instruction(idl, name, {
     payer, mint, config: configAddress(idl), coin: a.coin, ledger: a.ledger, authority: a.authority, vault: a.vault, zec_mint: ZEC,
@@ -57,7 +57,8 @@ export async function launchIx(conn, idl, mint, payer, plan, { makeOwnAccount = 
     quote_control: pda(["quote-control"], PUMP),
     pump_program: PUMP, token_program: TOKEN, token_2022_program: TOKEN_2022,
     associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
-  }, { args: { ...terms, max_platform_fraction_bps: cfg.platform_fraction_bps, platform_receiver: cfg.platform_receiver }, burr_share, liquidity_share, payout_options });
+  }, { args: { ...terms, max_platform_fraction_bps: cfg.platform_fraction_bps, platform_receiver: cfg.platform_receiver }, burr_share, liquidity_share,
+    payout: { options: payout_options, long_holder_step_bps, long_holder_max_bps } });
   if (makeOwnAccount) ix.keys.push(meta(coinAccount(payer, mint), true));
   return ix;
 }

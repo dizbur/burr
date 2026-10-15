@@ -45,7 +45,7 @@ if (idl.instructions.some((i) => i.name === "confirm_creator_payout_wallet")) {
   const wallet = Keypair.generate();
   await send(conn, [instruction(idl, "set_creator_payout_wallet", { admin: me, config: configAddress(idl) }, { wallet: wallet.publicKey })], [payer]);
   await send(conn, [instruction(idl, "confirm_creator_payout_wallet", { wallet: wallet.publicKey, config: configAddress(idl) })], [payer, wallet]);
-  everything = await launch(true, { ...plan, shares: [1500, 1500, 1500, 1500], burr_share: 2000, liquidity_share: 2000, payout_options: 1, creator_receiver: wallet.publicKey });
+  everything = await launch(true, { ...plan, shares: [1500, 1500, 1500, 1500], burr_share: 2000, liquidity_share: 2000, payout_options: 7, long_holder_step_bps: 100, long_holder_max_bps: 10000, creator_receiver: wallet.publicKey });
 }
 console.log(`launch with first buy, longest name, ticker and link, with the priority-fee instructions:`);
 console.log(`  today:                          ${before} of 1232 bytes`);
