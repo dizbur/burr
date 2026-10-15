@@ -301,3 +301,71 @@ fn add_liquidity_takes_only_this_coins_pool_and_money() {
     assert_eq!(w.ledger(&mint).liquidity.pot, pot);
     assert!(w.add_liquidity(&mint).is_ok());
 }
+
+/// Prints what a sandwich around an add costs and takes, on a small pool (just
+/// graduated) and a large one (ten times deeper), against PumpSwap's own
+/// program. Each push is run twice, with and without the add in the middle:
+/// the difference is what the attacker took from the add.
+/// Run: cargo test -p burrpad-tests -- --ignored --nocapture sandwich_figures
+#[test]
+#[ignore = "prints figures; not a check"]
+fn sandwich_figures() {
+    fn run(deepen: u64, push: u64, with_add: bool) -> (i128, u64, u64) {
+        let mut w = World::new();
+        let mint = w.launch(&liquidity_plan());
+        w.graduate(&mint);
+        if deepen > 0 {
+            let lp = w.trader(1_000_000 * ZEC1);
+            assert!(w.pool_buy(&lp, &mint, 2_000 * ZEC1).is_ok());
+            let mk = pump::create_ata(&lp.pubkey(), &lp.pubkey(), &pump::lp_mint(&mint), &TOKEN_2022);
+            assert!(w.b.send_as(Some(&lp), &[mk], &[]).is_ok());
+            let d = w.b.account(&pump::pool(&mint)).unwrap().data;
+            let supply = u64::from_le_bytes(d[203..211].try_into().unwrap());
+            let r = w.b.send_as(
+                Some(&lp),
+                &[pump::pool_deposit(&mint, &lp.pubkey(), supply * deepen, u64::MAX, u64::MAX)],
+                &[],
+            );
+            assert!(r.is_ok(), "{}", logs(&r));
+        }
+        w.b.give_zec(&kit::authority(&mint), 5_000 * ZEC1);
+        assert!(w.split(&mint).is_ok());
+        w.b.wait(60);
+        assert!(w.add_liquidity(&mint).is_ok());
+        w.b.wait(60);
+        let (q, _) = w.pool_reserves(&mint);
+        let attacker = w.trader(100_000 * ZEC1);
+        let start = w.zec_of(&attacker.pubkey());
+        assert!(w.pool_buy(&attacker, &mint, push).is_ok());
+        let pot = w.ledger(&mint).liquidity.pot;
+        if with_add {
+            assert!(w.add_liquidity(&mint).is_ok());
+        }
+        let used = pot - w.ledger(&mint).liquidity.pot;
+        let held = w.coins_of(&attacker.pubkey(), &mint);
+        assert!(w.pool_sell(&attacker, &mint, held).is_ok());
+        (w.zec_of(&attacker.pubkey()) as i128 - start as i128, used, q)
+    }
+    let z = |u: i128| u as f64 / ZEC1 as f64;
+    println!("coin fee {}%; amounts in ZEC", LaunchPlan::default().fee_bps as f64 / 100.0);
+    println!("pool | pool ZEC | push | add used | attacker without the add | with the add | taken from the add");
+    for (label, deepen, pushes) in [
+        ("small", 0u64, [ZEC1 / 10, ZEC1, 10 * ZEC1, 100 * ZEC1]),
+        ("large", 9, [ZEC1, 10 * ZEC1, 100 * ZEC1, 1_000 * ZEC1]),
+    ] {
+        for push in pushes {
+            let (without, _, q) = run(deepen, push, false);
+            let (with, used, _) = run(deepen, push, true);
+            println!(
+                "{label} | {:.1} | {:.1} | {:.4} | {:+.4} | {:+.4} | {:+.4}",
+                z(q as i128),
+                z(push as i128),
+                z(used as i128),
+                z(without),
+                z(with),
+                z(with - without)
+            );
+            assert!(with < 0, "{label}, push {push}: the attacker gained {with}");
+        }
+    }
+}
