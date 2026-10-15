@@ -4,7 +4,7 @@
 // tests/src/kit.rs and tests/src/pump.rs.
 import { PublicKey, TransactionInstruction } from "@solana/web3.js";
 import { createHash } from "node:crypto";
-import { ata, ATA_PROGRAM, BUYBACK, coinAddresses, configAddress, instruction, MAYHEM, pda, PUMP, PUMP_FEES, readAccount,
+import { ata, ATA_PROGRAM, BUYBACK, coinAddresses, configAddress, instruction, MAYHEM, pda, PUMP, PUMP_AMM, PUMP_FEES, readAccount,
   SYSTEM, TOKEN, TOKEN_2022, ZEC } from "./lib.mjs";
 
 const pumpDisc = (name) => createHash("sha256").update("global:" + name).digest().subarray(0, 8);
@@ -132,6 +132,51 @@ export function burnCurveIx(idl, mint, payer) {
     token_program: TOKEN, token_2022_program: TOKEN_2022, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
   });
 }
+// ---- after graduation: the coin's PumpSwap pool ----
+export const BURR = new PublicKey("GiwMfYS4jHi256G8K41snZhKUovrMbyQL2hqv3fqr7WU");
+export const poolAuthorityOf = (mint) => pda(["pool-authority", mint], PUMP);
+export const poolOf = (mint) => pda(["pool", Buffer.from([0, 0]), poolAuthorityOf(mint), mint, ZEC], PUMP_AMM);
+const poolAccounts = (mint) => {
+  const pool = poolOf(mint);
+  return {
+    amm_global_config: pda(["global_config"], PUMP_AMM), pool_authority: poolAuthorityOf(mint), pool,
+    pool_base_token_account: ata(pool, mint, TOKEN_2022), pool_quote_token_account: ata(pool, ZEC, TOKEN),
+    amm_event_authority: pda(["__event_authority"], PUMP_AMM), amm_program: PUMP_AMM,
+  };
+};
+export function collectPoolIx(idl, mint, payer) {
+  const a = coinAddresses(idl, mint);
+  const p = poolAccounts(mint);
+  const va = pda(["creator_vault", a.authority], PUMP_AMM);
+  return instruction(idl, "collect_pool", {
+    payer, mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: a.vault, zec_mint: ZEC,
+    amm_global_config: p.amm_global_config, pool_authority: p.pool_authority, pool: p.pool,
+    pool_quote_token_account: p.pool_quote_token_account, amm_creator_vault_authority: va, amm_creator_vault_ata: ata(va, ZEC, TOKEN),
+    amm_event_authority: p.amm_event_authority, amm_program: PUMP_AMM,
+    token_program: TOKEN, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
+  });
+}
+const buyOnPoolAccounts = (idl, mint, payer, burnerMint) => {
+  const a = coinAddresses(idl, mint);
+  return {
+    payer, mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: a.vault, zec_mint: ZEC,
+    burner: a.burner, burner_zec: zecAccount(a.burner), burner_coin: coinAccount(a.burner, burnerMint),
+    ...poolAccounts(burnerMint),
+    user_volume: pda(["user_volume_accumulator", a.burner], PUMP_AMM), fee_config: pda(["fee_config", PUMP_AMM], PUMP_FEES),
+    buyback_fee_recipient: ata(BUYBACK, ZEC, TOKEN),
+    token_program: TOKEN, token_2022_program: TOKEN_2022, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
+  };
+};
+export const burnPoolIx = (idl, mint, payer) => instruction(idl, "burn_pool", buyOnPoolAccounts(idl, mint, payer, mint));
+// A coin's $BURR pot buys $BURR on $BURR's pool (after the 16 Oct upgrade).
+export function burnBurrIx(idl, mint, payer) {
+  const x = buyOnPoolAccounts(idl, mint, payer, BURR);
+  const { burner_coin, ...rest } = x;
+  return instruction(idl, "burn_burr", {
+    ...rest, config: configAddress(idl), burr_ledger: coinAddresses(idl, BURR).ledger, burr_mint: BURR, burner_burr: burner_coin,
+  });
+}
+
 // `amount` of the holder pot, for the snapshot taken at `slot` whose fingerprint is `hash` (32 bytes).
 export function releaseIx(idl, mint, rewardsWallet, amount, slot, hash) {
   const a = coinAddresses(idl, mint);
