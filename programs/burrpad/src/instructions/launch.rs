@@ -120,7 +120,18 @@ pub struct Launch<'info> {
 }
 
 pub fn handle_launch<'info>(ctx: Context<'info, Launch<'info>>, args: LaunchArgs) -> Result<()> {
-    handle_launch_with_extras(ctx, args, 0, 0, 0)
+    handle_launch_with_extras(ctx, args, 0, 0, PayoutChoices::default())
+}
+
+/// The payout choices made at launch, recorded in the coin's record. Paid by
+/// Burrpad's server; the program checks only that they make sense together.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default)]
+pub struct PayoutChoices {
+    /// Bits (`PAYOUT_*`).
+    pub options: u8,
+    /// With the long-holder bonus: per day held, and the most, in hundredths of a percent.
+    pub long_holder_step_bps: u16,
+    pub long_holder_max_bps: u16,
 }
 
 /// A launch whose fee may also buy and burn $BURR and add liquidity to the
@@ -132,8 +143,9 @@ pub fn handle_launch_with_extras<'info>(
     args: LaunchArgs,
     burr_share: u16,
     liquidity_share: u16,
-    payout_options: u8,
+    payout: PayoutChoices,
 ) -> Result<()> {
+    let payout_options = payout.options;
     let a = &ctx.accounts;
     let cfg = &a.config;
 
@@ -171,6 +183,17 @@ pub fn handle_launch_with_extras<'info>(
         payout_wallet == Pubkey::default() || args.give_receiver != payout_wallet,
         BurrpadError::ReceiverNotAllowed
     );
+    // The holders' choices need a holders' share; the bonus needs a sensible step and most, and none without it.
+    require!(
+        payout_options & (PAYOUT_HOLDERS_IN_BURR | PAYOUT_LONG_HOLDER_BONUS) == 0 || args.shares[SINK_HOLDERS - 1] > 0,
+        BurrpadError::HookNotChosen
+    );
+    let (step, most) = (payout.long_holder_step_bps, payout.long_holder_max_bps);
+    if payout_options & PAYOUT_LONG_HOLDER_BONUS != 0 {
+        require!(step >= 1 && step <= most && most <= LONG_HOLDER_BONUS_MAX_BPS, BurrpadError::BonusOutOfRange);
+    } else {
+        require!(step == 0 && most == 0, BurrpadError::BonusOutOfRange);
+    }
     require!(
         args.name.len() <= MAX_NAME_LEN && args.symbol.len() <= MAX_SYMBOL_LEN && args.uri.len() <= MAX_URI_LEN,
         BurrpadError::TextTooLong
@@ -291,6 +314,8 @@ pub fn handle_launch_with_extras<'info>(
     coin.burr_share = burr_share;
     coin.liquidity_share = liquidity_share;
     coin.payout_options = payout_options;
+    coin.long_holder_step_bps = step;
+    coin.long_holder_max_bps = most;
     coin.creator_receiver = args.creator_receiver;
     coin.give_receiver = args.give_receiver;
     coin.burn_cooldown_secs = BURN_COOLDOWN_SECS;

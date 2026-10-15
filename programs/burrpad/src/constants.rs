@@ -93,9 +93,16 @@ pub const SINK_LIQUIDITY: usize = 6;
 /// Payout choice: the creator is paid in ZEC on Zcash. The creator pot goes
 /// to `Config.creator_payout_wallet`, which Burrpad's server forwards.
 pub const PAYOUT_PRIVATE_CREATOR: u8 = 1;
-/// The payout choices defined so far. Bit 1 (holders paid in $BURR) and bit 2
-/// (a long-holder bonus) are reserved, and refused until an upgrade defines them.
-pub const PAYOUT_DEFINED: u8 = PAYOUT_PRIVATE_CREATOR;
+/// Payout choice: holders are paid in $BURR instead of ZEC (by the server).
+pub const PAYOUT_HOLDERS_IN_BURR: u8 = 2;
+/// Payout choice: holders who hold longer are weighted more (by the server),
+/// with the step and the most fixed in the coin's record at launch.
+pub const PAYOUT_LONG_HOLDER_BONUS: u8 = 4;
+/// The payout choices defined so far. Every other bit is refused until an
+/// upgrade defines it.
+pub const PAYOUT_DEFINED: u8 = PAYOUT_PRIVATE_CREATOR | PAYOUT_HOLDERS_IN_BURR | PAYOUT_LONG_HOLDER_BONUS;
+/// The most a long-holder bonus may reach, in hundredths of a percent: 300%.
+pub const LONG_HOLDER_BONUS_MAX_BPS: u16 = 30_000;
 /// All pots, the sixth and seventh included, as the split works them out.
 pub const ALL_SINKS: usize = 7;
 

@@ -93,7 +93,7 @@ pub mod burrpad {
 
     /// The same, with part of the hooks' share buying and burning $BURR.
     pub fn launch_v2<'info>(ctx: Context<'info, Launch<'info>>, args: LaunchArgs, burr_share: u16) -> Result<()> {
-        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, 0, 0)
+        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, 0, PayoutChoices::default())
     }
 
     /// The same, with part of the hooks' share also added to the coin's own
@@ -103,9 +103,9 @@ pub mod burrpad {
         args: LaunchArgs,
         burr_share: u16,
         liquidity_share: u16,
-        payout_options: u8,
+        payout: PayoutChoices,
     ) -> Result<()> {
-        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, liquidity_share, payout_options)
+        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, liquidity_share, payout)
     }
 
     pub fn split(ctx: Context<SplitOnly>) -> Result<()> {

@@ -55,7 +55,7 @@ fn a_private_launch_needs_a_confirmed_wallet_a_creator_share_and_that_wallet_as_
 fn choices_not_yet_defined_are_refused() {
     let mut w = World::new();
     let wallet = w.open_private_payouts().pubkey();
-    for bits in [2u8, 4, 8, 0x80, 3, 0xff] {
+    for bits in [8u8, 0x10, 0x40, 0x80, 0x0f, 0xff] {
         let (_, r) = w.try_launch(&LaunchPlan { payout_options: bits, ..private(&wallet) });
         assert_eq!(custom_code(&r), Some(err(E::PayoutOptionNotAllowed)), "bits {bits:#x}");
     }
@@ -141,4 +141,68 @@ fn coins_launched_before_keep_their_receiver_and_no_choices() {
     // And plain launches go on as before.
     let m = w.launch(&LaunchPlan::default());
     assert_eq!(w.coin(&m).payout_options, 0);
+}
+
+#[test]
+fn the_holders_choices_are_recorded_with_the_bonus_fixed_at_launch() {
+    let mut w = World::new();
+    // Holders paid in $BURR: recorded, nothing else.
+    let m = w.launch(&LaunchPlan { payout_options: 2, ..Default::default() });
+    let c = w.coin(&m);
+    assert_eq!((c.payout_options, c.long_holder_step_bps, c.long_holder_max_bps), (2, 0, 0));
+    // The long-holder bonus: its step and most are the coin's own, for good.
+    let m = w.launch(&LaunchPlan {
+        payout_options: 4,
+        long_holder_step_bps: 100,
+        long_holder_max_bps: 10_000,
+        ..Default::default()
+    });
+    let c = w.coin(&m);
+    assert_eq!((c.payout_options, c.long_holder_step_bps, c.long_holder_max_bps), (4, 100, 10_000));
+    // All three choices together, at the edges allowed.
+    let wallet = w.open_private_payouts().pubkey();
+    let m = w.launch(&LaunchPlan {
+        payout_options: 7,
+        creator_receiver: wallet,
+        long_holder_step_bps: 30_000,
+        long_holder_max_bps: 30_000,
+        ..Default::default()
+    });
+    assert_eq!(w.coin(&m).payout_options, 7);
+}
+
+#[test]
+fn the_holders_choices_need_a_holders_share_and_a_sensible_bonus() {
+    let mut w = World::new();
+    let no_holders = [2_500u16, 2_500, 5_000, 0];
+    for bits in [2u8, 4] {
+        let (_, r) = w.try_launch(&LaunchPlan {
+            shares: no_holders,
+            payout_options: bits,
+            long_holder_step_bps: if bits == 4 { 100 } else { 0 },
+            long_holder_max_bps: if bits == 4 { 1_000 } else { 0 },
+            ..Default::default()
+        });
+        assert_eq!(custom_code(&r), Some(err(E::HookNotChosen)), "bit {bits} with no holders' share");
+    }
+    // With the bonus: a step of at least 1, no more than the most, and the most at most 300%.
+    for (step, most) in [(0u16, 1_000u16), (2_000, 1_000), (100, 30_001), (0, 0)] {
+        let (_, r) = w.try_launch(&LaunchPlan {
+            payout_options: 4,
+            long_holder_step_bps: step,
+            long_holder_max_bps: most,
+            ..Default::default()
+        });
+        assert_eq!(custom_code(&r), Some(err(E::BonusOutOfRange)), "step {step}, most {most}");
+    }
+    // Without it, no step or most may be written.
+    for (step, most) in [(100u16, 0u16), (0, 1_000), (100, 1_000)] {
+        let (_, r) = w.try_launch(&LaunchPlan {
+            payout_options: 2,
+            long_holder_step_bps: step,
+            long_holder_max_bps: most,
+            ..Default::default()
+        });
+        assert_eq!(custom_code(&r), Some(err(E::BonusOutOfRange)), "without the bonus: step {step}, most {most}");
+    }
 }

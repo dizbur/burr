@@ -86,4 +86,6 @@ pub enum BurrpadError {
     PayoutWalletFixed,
     #[msg("Only the wallet named can confirm itself")]
     NotThePayoutWallet,
+    #[msg("The long-holder bonus's step and most are out of range")]
+    BonusOutOfRange,
 }

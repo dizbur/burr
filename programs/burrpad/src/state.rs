@@ -80,8 +80,12 @@ pub struct Coin {
     /// server; recorded here so they are fixed and public. Zero for every coin
     /// launched before this field existed.
     pub payout_options: u8,
+    /// With the long-holder bonus: the bonus per day held, and the most it
+    /// reaches, in hundredths of a percent. Zero without it.
+    pub long_holder_step_bps: u16,
+    pub long_holder_max_bps: u16,
     /// Unused. Room for fields a later version may add without moving the account.
-    pub reserved: [u8; 59],
+    pub reserved: [u8; 55],
 }
 
 impl Coin {

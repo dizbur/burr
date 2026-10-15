@@ -57,6 +57,8 @@ pub struct LaunchPlan {
     pub burr_share: u16,
     pub liquidity_share: u16,
     pub payout_options: u8,
+    pub long_holder_step_bps: u16,
+    pub long_holder_max_bps: u16,
 }
 
 impl Default for LaunchPlan {
@@ -73,6 +75,8 @@ impl Default for LaunchPlan {
             burr_share: 0,
             liquidity_share: 0,
             payout_options: 0,
+            long_holder_step_bps: 0,
+            long_holder_max_bps: 0,
         }
     }
 }
@@ -231,7 +235,11 @@ impl World {
                     args,
                     burr_share: plan.burr_share,
                     liquidity_share: plan.liquidity_share,
-                    payout_options: plan.payout_options,
+                    payout: burrpad::instructions::PayoutChoices {
+                        options: plan.payout_options,
+                        long_holder_step_bps: plan.long_holder_step_bps,
+                        long_holder_max_bps: plan.long_holder_max_bps,
+                    },
                 }
                 .data()
             } else if plan.burr_share > 0 {
