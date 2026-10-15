@@ -296,3 +296,126 @@ fn a_pool_charging_no_creator_fee_stops_both_buys_and_nothing_is_lost() {
     set_fee(&mut w, &BURR_MINT, fee);
     assert!(w.burn_burr(&mint).is_ok());
 }
+
+// ---- Second round ----
+
+/// A coin with a burn pot whose curve a whale has brought to `whale` ZEC of buying.
+fn near_graduation(whale: u64) -> (World, Pubkey) {
+    let mut w = World::new();
+    let mint = w.launch(&LaunchPlan { shares: [2_000; 4], liquidity_share: 2_000, ..Default::default() });
+    w.b.give_zec(&kit::authority(&mint), 50 * ZEC1);
+    assert!(w.split(&mint).is_ok());
+    let t = w.trader(10_000 * ZEC1);
+    if whale > 0 {
+        assert!(w.buy(&t, &mint, whale).is_ok());
+    }
+    (w, mint)
+}
+
+#[test]
+fn a_burn_whose_own_buy_completes_the_curve_leaves_the_books_sound() {
+    // Find, to the unit, the most a whale can buy without completing the curve.
+    let (mut lo, mut hi) = (0u64, 20 * ZEC1);
+    while hi - lo > 1_000 {
+        let mid = (lo + hi) / 2;
+        let (w, mint) = near_graduation(mid);
+        if w.b.curve(&mint).complete {
+            hi = mid;
+        } else {
+            lo = mid;
+        }
+    }
+    let (mut w, mint) = near_graduation(lo);
+    assert!(!w.b.curve(&mint).complete, "just short of graduating");
+    w.b.wait(60);
+    let (vault, pot) = (w.vault_balance(&mint), w.ledger(&mint).pots[3]);
+    let r = w.burn_curve(&mint);
+    let complete = w.b.curve(&mint).complete;
+    println!(
+        "burn on the last step of the curve: {}; the curve is now complete: {complete}",
+        if r.is_ok() { "bought" } else { "refused" }
+    );
+    // Either way the books stay sound and the burner keeps nothing.
+    let spent = pot - w.ledger(&mint).pots[3];
+    assert_eq!(w.vault_balance(&mint), vault - spent);
+    let bn = kit::burner(&mint);
+    assert_eq!(w.b.token_balance(&ata(&bn, &ZEC, &TOKEN)), 0);
+    assert_eq!(w.b.token_balance(&ata(&bn, &mint, &TOKEN_2022)), 0);
+    w.assert_sound(&mint);
+    // After graduation everything carries on: the pool burn and the liquidity hook.
+    if !complete {
+        let t = w.trader(1_000 * ZEC1);
+        assert!(w.buy(&t, &mint, ZEC1).is_ok());
+    }
+    assert!(w.b.curve(&mint).complete);
+    assert!(w.burn_curve(&mint).is_err(), "the curve no longer trades");
+    let whale = w.trader(ZEC1);
+    w.b.svm.airdrop(&pump::WITHDRAW_AUTHORITY, 1_000_000_000).unwrap();
+    assert!(w.b.send_as(Some(&whale), &[pump::migrate_v2(&mint, &whale.pubkey())], &[]).is_ok());
+    w.b.wait(60);
+    assert!(w.add_liquidity(&mint).is_ok(), "the first liquidity call records");
+    w.b.wait(60);
+    let r = w.burn_pool(&mint);
+    assert!(r.is_ok(), "{}", logs(&r));
+    w.assert_sound(&mint);
+}
+
+#[test]
+fn a_liquidity_call_at_exactly_its_limit_and_one_unit_either_side() {
+    // The pot is set to twice the buy's limit, one under, one over: the call never uses more than twice the limit.
+    for delta in [-1i64, 0, 1] {
+        let mut w = World::new();
+        let plan = LaunchPlan { shares: [2_000; 4], liquidity_share: 2_000, ..Default::default() };
+        let mint = w.launch(&plan);
+        w.graduate(&mint);
+        w.b.give_zec(&kit::authority(&mint), 10);
+        assert!(w.split(&mint).is_ok());
+        w.b.wait(60);
+        assert!(w.add_liquidity(&mint).is_ok(), "the first call records");
+        w.b.wait(60);
+        let (q, _) = w.pool_reserves(&mint);
+        let recorded = w.ledger(&mint).liquidity.reference.quote;
+        let fee = w.pool(&mint).creator_fee_bps.min(w.coin(&mint).fee_bps as u64);
+        let cap = q.min(recorded) * fee / 40_000;
+        // A tenth of each split goes to this pot on this plan.
+        let have = w.ledger(&mint).liquidity.pot;
+        let want = (2 * cap) as i64 + delta;
+        w.b.give_zec(&kit::authority(&mint), ((want - have as i64) * 10) as u64);
+        assert!(w.split(&mint).is_ok());
+        assert_eq!(w.ledger(&mint).liquidity.pot as i64, want);
+        let r = w.add_liquidity(&mint);
+        assert!(r.is_ok(), "{}", logs(&r));
+        let spent = want as u64 - w.ledger(&mint).liquidity.pot;
+        assert!(spent <= 2 * cap, "pot 2 x limit {delta:+}: spent {spent}, twice the limit is {}", 2 * cap);
+        if delta > 0 {
+            assert!(w.ledger(&mint).liquidity.pot >= 1, "the unit over the limit stays");
+        }
+        w.assert_sound(&mint);
+    }
+}
+
+#[test]
+fn a_look_alike_settings_account_cannot_confirm_a_payout_wallet() {
+    // Someone copies the real settings, naming their own wallet as the payout wallet, at another address.
+    let mut w = World::new();
+    let thief = w.b.wallet();
+    let mut fake = w.b.account(&kit::config()).unwrap();
+    let mut data = fake.data.clone();
+    // Find the payout wallet's place by setting a known value, then put the thief's key there in the copy.
+    let marker = w.b.wallet();
+    assert!(w.as_admin(burrpad::instruction::SetCreatorPayoutWallet { wallet: marker.pubkey() }).is_ok());
+    let with_marker = w.b.account(&kit::config()).unwrap().data;
+    let at = with_marker.windows(32).position(|x| x == marker.pubkey().as_ref()).expect("the field");
+    data[at..at + 32].copy_from_slice(thief.pubkey().as_ref());
+    fake.data = data;
+    let fake_addr = Pubkey::new_unique();
+    w.b.svm.set_account(fake_addr, fake).unwrap();
+    let i = kit::raw(
+        burrpad::accounts::ConfirmPayoutWallet { wallet: thief.pubkey(), config: fake_addr },
+        burrpad::instruction::ConfirmCreatorPayoutWallet {},
+    );
+    assert!(w.b.send_as(Some(&thief), &[i], &[]).is_err(), "a look-alike settings account was accepted");
+    // The real settings are untouched: the marker, unconfirmed.
+    let c = w.config();
+    assert_eq!((c.creator_payout_wallet, c.creator_payout_confirmed), (marker.pubkey(), false));
+}
