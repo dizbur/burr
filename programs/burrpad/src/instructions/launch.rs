@@ -119,13 +119,17 @@ pub struct Launch<'info> {
     pub system_program: Program<'info, System>,
 }
 
-pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
+pub fn handle_launch<'info>(ctx: Context<'info, Launch<'info>>, args: LaunchArgs) -> Result<()> {
     handle_launch_with_burr(ctx, args, 0)
 }
 
 /// A launch whose fee may also buy and burn $BURR: `burr_share` counts with
 /// the four hooks' shares, and all five add to 10,000.
-pub fn handle_launch_with_burr(ctx: Context<Launch>, args: LaunchArgs, burr_share: u16) -> Result<()> {
+pub fn handle_launch_with_burr<'info>(
+    ctx: Context<'info, Launch<'info>>,
+    args: LaunchArgs,
+    burr_share: u16,
+) -> Result<()> {
     let a = &ctx.accounts;
     let cfg = &a.config;
 
@@ -228,6 +232,25 @@ pub fn handle_launch_with_burr(ctx: Context<Launch>, args: LaunchArgs, burr_shar
             ),
             short,
         )?;
+    }
+
+    // The launcher's own coin account, made here when it is passed as one more
+    // account after the listed ones. A launch with a first buy then needs no
+    // instruction of its own for it, which leaves room in the transaction.
+    if let Some(buyer) = ctx.remaining_accounts.first() {
+        let own = get_associated_token_address_with_program_id(&a.payer.key(), &mint_key, &a.token_2022_program.key());
+        require_keys_eq!(buyer.key(), own, BurrpadError::WrongBuyerAccount);
+        anchor_spl::associated_token::create_idempotent(CpiContext::new(
+            a.associated_token_program.key(),
+            anchor_spl::associated_token::Create {
+                payer: a.payer.to_account_info(),
+                associated_token: buyer.clone(),
+                authority: a.payer.to_account_info(),
+                mint: a.mint.to_account_info(),
+                system_program: a.system_program.to_account_info(),
+                token_program: a.token_2022_program.to_account_info(),
+            },
+        ))?;
     }
 
     // 4. Write the record. Nothing writes to it again.

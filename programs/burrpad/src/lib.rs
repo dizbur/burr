@@ -79,12 +79,12 @@ pub mod burrpad {
 
     // ---- a coin ----
 
-    pub fn launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
+    pub fn launch<'info>(ctx: Context<'info, Launch<'info>>, args: LaunchArgs) -> Result<()> {
         instructions::launch::handle_launch(ctx, args)
     }
 
     /// The same, with part of the hooks' share buying and burning $BURR.
-    pub fn launch_v2(ctx: Context<Launch>, args: LaunchArgs, burr_share: u16) -> Result<()> {
+    pub fn launch_v2<'info>(ctx: Context<'info, Launch<'info>>, args: LaunchArgs, burr_share: u16) -> Result<()> {
         instructions::launch::handle_launch_with_burr(ctx, args, burr_share)
     }
 

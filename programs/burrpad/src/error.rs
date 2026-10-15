@@ -74,4 +74,6 @@ pub enum BurrpadError {
     NotAStrayAccount,
     #[msg("Platform fraction below the hard limit")]
     PlatformFractionTooLow,
+    #[msg("The extra account is not the launcher's own coin account")]
+    WrongBuyerAccount,
 }
