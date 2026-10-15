@@ -12,8 +12,8 @@
 import { PublicKey, TransactionMessage, VersionedTransaction, ComputeBudgetProgram } from "@solana/web3.js";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { burnCurveIx, burnPoolIx, collectCurveIx, collectPoolIx, curveOf, splitIx } from "./coin.mjs";
-import { address, checker, configAddress, connect, decodeAccount, fail, loadIdl, need, options, programDataAddress, readAccount, ROOT, sha256 } from "./lib.mjs";
+import { BURR, burnBurrIx, burnCurveIx, burnPoolIx, clock, collectCurveIx, collectPoolIx, curveOf, splitIx } from "./coin.mjs";
+import { address, checker, coinAddresses, configAddress, connect, decodeAccount, fail, loadIdl, need, options, programDataAddress, readAccount, ROOT, sha256 } from "./lib.mjs";
 
 const opts = options(["url", "mainnet", "authority", "admin", "coins", "save"]);
 const conn = await connect(opts);
@@ -68,8 +68,9 @@ console.log(`      launches ${c.launches_paused ? "PAUSED" : "on"}, holder relea
 
 // 4. Collect, split and burn on live coins: simulated with the real accounts, never sent.
 // Refusals that only mean "not now" are expected: the keeper burns every minute, and a pot may be empty.
-const expected = { BurnTooSoon: "the coin's last burn was less than a minute ago", NothingToBurn: "nothing to buy now (the pot is empty, or too small)", HookNotChosen: "the coin has no burn share" };
-const simulate = async (what, ix) => {
+const expected = { BurnTooSoon: "the last burn was less than a minute ago", NothingToBurn: "nothing to buy now (the pot is empty, or too small)", HookNotChosen: "the coin did not choose this hook" };
+let throughTheBuy = 0, burnsTried = 0;
+const run = async (ix) => {
   const { blockhash } = await conn.getLatestBlockhash();
   const message = new TransactionMessage({
     payerKey: authority, recentBlockhash: blockhash,
@@ -77,11 +78,34 @@ const simulate = async (what, ix) => {
   }).compileToV0Message();
   const r = await conn.simulateTransaction(new VersionedTransaction(message), { sigVerify: false, replaceRecentBlockhash: true });
   const logs = (r.value.logs ?? []).join("\n");
-  const code = (logs.match(/Error Code: (\w+)/) ?? [])[1];
-  if (!r.value.err) return t.check(what, true, `would work (${r.value.unitsConsumed} compute units)`);
-  if (code && expected[code]) return t.check(what, true, `refused as expected: ${code}, ${expected[code]}`);
-  return t.check(what, false, `${code ?? JSON.stringify(r.value.err)}\n${logs.split("\n").slice(-6).join("\n")}`);
+  return { ok: !r.value.err, err: r.value.err, code: (logs.match(/Error Code: (\w+)/) ?? [])[1], logs, units: r.value.unitsConsumed };
 };
+const report = (what, r) => {
+  if (r.ok) return t.check(what, true, `would work (${r.units} compute units)`);
+  if (r.code && expected[r.code]) return t.check(what, true, `refused as expected: ${r.code}, ${expected[r.code]}`);
+  return t.check(what, false, `${r.code ?? JSON.stringify(r.err)}\n${r.logs.split("\n").slice(-6).join("\n")}`);
+};
+const simulate = async (what, ix) => report(what, await run(ix));
+// A burn is simulated again once its one-minute wait is over (up to about 70 seconds), so that it is
+// tried all the way through the buy, not only up to "too soon". `readyAt` gives the moment it may run.
+const simulateBurn = async (what, build, readyAt) => {
+  burnsTried++;
+  let r = await run(build());
+  for (let tries = 0; r.code === "BurnTooSoon" && tries < 2; tries++) {
+    const wait = Number(await readyAt()) - Number((await clock(conn)).time) + 2;
+    if (wait > 75) break;
+    console.log(`      ${what}: waiting ${Math.max(wait, 1)} seconds for its wait to end, then simulating again`);
+    await new Promise((res) => setTimeout(res, Math.max(wait, 1) * 1000));
+    r = await run(build());
+  }
+  if (r.ok) throughTheBuy++;
+  return report(what, r);
+};
+const lastBurn = (mint) => async () => {
+  const l = await readAccount(conn, idl, "Ledger", coinAddresses(idl, mint).ledger);
+  return BigInt(l.burn.last_time) + 60n;
+};
+const hasBurnBurr = idl.instructions.some((i) => i.name === "burn_burr");
 const mints = (opts.coins ?? "").split(",").filter(Boolean).map((m) => address(m, "a coin"));
 if (!mints.length) console.log("      (no --coins given: the simulated calls were skipped)");
 for (const mint of mints) {
@@ -91,6 +115,25 @@ for (const mint of mints) {
   await simulate(`${name}: collect from the curve`, collectCurveIx(idl, mint, authority));
   if (graduated) await simulate(`${name}: collect from the pool`, collectPoolIx(idl, mint, authority));
   await simulate(`${name}: split`, splitIx(idl, mint));
-  await simulate(`${name}: buy back and burn (${graduated ? "pool" : "curve"})`, graduated ? burnPoolIx(idl, mint, authority) : burnCurveIx(idl, mint, authority));
+  await simulateBurn(`${name}: buy back and burn (${graduated ? "pool" : "curve"})`,
+    () => (graduated ? burnPoolIx(idl, mint, authority) : burnCurveIx(idl, mint, authority)), lastBurn(mint));
+  if (hasBurnBurr && mint.equals(BURR)) {
+    console.log(`      ${name}: buy and burn $BURR: not simulated ($BURR does not buy itself; the program refuses its own ledger twice)`);
+  } else if (hasBurnBurr) {
+    // No coin launched before the upgrade chose the $BURR hook, so for them the expected answer is "hook not chosen":
+    // the new instruction is reached with its real accounts, up to the coin's own choice.
+    const coin = await readAccount(conn, idl, "Coin", coinAddresses(idl, mint).coin);
+    await simulateBurn(`${name}: buy and burn $BURR`, () => burnBurrIx(idl, mint, authority), async () => {
+      const c = await readAccount(conn, idl, "Config", config);
+      const own = await lastBurn(BURR)();
+      return [BigInt(c.burr_buy.ready_at), own].reduce((a, b) => (a > b ? a : b));
+    });
+    if (!Number(coin.burr_share ?? 0)) burnsTried--;
+  }
+}
+if (mints.length) {
+  console.log(`      burns simulated all the way through the buy: ${throughTheBuy} of ${burnsTried} tried`);
+  t.check("at least one burn was simulated all the way through the buy", throughTheBuy > 0,
+    throughTheBuy ? `${throughTheBuy}` : "none: every burn was waiting or had an empty pot. Run again, or add a coin whose burn pot holds ZEC");
 }
 t.finish();
