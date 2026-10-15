@@ -185,13 +185,14 @@ impl Books {
                 let shared = self.w.config().burr_buy;
                 let recorded =
                     if shared.reference.quote == 0 { burrpad::BURR_START_RESERVE } else { shared.reference.quote };
-                let fee = self.w.pool(&burrpad::BURR_MINT).creator_fee_bps as u128;
+                let fee =
+                    (self.w.pool(&burrpad::BURR_MINT).creator_fee_bps as u128).min(self.w.config().max_fee_bps as u128);
                 let r = self.w.burn_burr(&m);
                 let after = self.w.ledger(&m);
                 let spent = before.burr.pot - after.burr.pot;
                 assert_eq!(after.pots, before.pots, "a $BURR burn touched another pot");
                 if r.is_ok() {
-                    assert!(now >= shared.last_time + 60, "a $BURR burn ran inside the shared wait");
+                    assert!(now >= shared.ready_at, "a $BURR burn ran inside the shared wait");
                     let limit = quote.min(recorded) as u128 * fee / 40_000;
                     assert!(spent > 0 && spent as u128 <= limit, "a $BURR burn spent {spent}, limit {limit}");
                     self.did[0] += 1;

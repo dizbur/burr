@@ -510,7 +510,7 @@ pub fn handle_burn_pool(ctx: Context<BurnPool>) -> Result<()> {
 /// with the reserve figure allowed to grow by at most one step (5%) over the
 /// last one. Without that bound, liquidity added around one burn would raise
 /// the limit of the next. Only its reserve figure is read now, by the limit.
-pub(crate) fn next_reference(last: &Reserves, after: Reserves) -> Result<Reserves> {
+fn next_reference(last: &Reserves, after: Reserves) -> Result<Reserves> {
     let ceiling = last.raised_by(BURN_RESERVE_STEP_BPS).ok_or(BurrpadError::Overflow)?.quote;
     after.held_to(ceiling).ok_or(BurrpadError::Overflow.into())
 }

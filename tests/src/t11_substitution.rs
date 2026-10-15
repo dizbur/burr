@@ -452,6 +452,7 @@ fn burn_burr() {
         sw("vault", |x: &mut A| x.vault = kit::vault(&d)),
         sw("zec_mint", |x: &mut A| x.zec_mint = d),
         sw("config", |x: &mut A| x.config = kit::coin(&c)),
+        sw("burr_ledger", |x: &mut A| x.burr_ledger = kit::ledger(&d)),
         sw("burner", |x: &mut A| {
             let other_burner = kit::burner(&d);
             x.burner = other_burner;

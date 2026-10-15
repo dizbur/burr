@@ -132,6 +132,26 @@ pub fn burn_spend_limit(pot: u64, quote_reserve: u64, fee_bps: u16, divisor: u16
     Some(pot.min(u64::try_from(cap).ok()?))
 }
 
+/// The part of `whole` in proportion to `spent` out of a full limit `cap`,
+/// rounded up, at least 1 and at most `whole`. A $BURR buy that uses all its
+/// limit takes the whole wait and the whole reserve step; a crumb takes a crumb.
+pub fn part_used(spent: u64, cap: u64, whole: u64) -> Option<u64> {
+    if cap == 0 {
+        return None;
+    }
+    let p = (whole as u128).checked_mul(spent as u128)?.div_ceil(cap as u128);
+    Some(u64::try_from(p).ok()?.clamp(1, whole))
+}
+
+/// The recorded reserve after a $BURR buy: the pool's figure after it, held
+/// within `step_bps` of the last recorded one, up or down.
+pub fn burr_next_reserve(last: u64, after: u64, step_bps: u64) -> Option<u64> {
+    let move_by = ((last as u128).checked_mul(step_bps as u128)? / BPS as u128).max(1);
+    let low = (last as u128).saturating_sub(move_by);
+    let high = (last as u128).checked_add(move_by)?;
+    u64::try_from((after as u128).clamp(low, high)).ok()
+}
+
 /// Fewest coins a buy back accepts: the fee-free figure, less the coin's own
 /// fee and an allowance for pump.fun's.
 pub fn burn_min_out(reserves: &Reserves, spend: u64, fee_bps: u16, allowance_bps: u16) -> Option<u64> {

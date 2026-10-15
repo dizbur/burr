@@ -559,6 +559,9 @@ impl World {
             (authority(&src), authority(&burr)),
             (ata(&old_pool, &src, &TOKEN_2022), ata(&new_pool, &burr, &TOKEN_2022)),
             (ata(&old_pool, &ZEC, &TOKEN), ata(&new_pool, &ZEC, &TOKEN)),
+            (coin(&src), coin(&burr)),
+            (ledger(&src), ledger(&burr)),
+            (vault(&src), vault(&burr)),
         ];
         let rewrite = |mut data: Vec<u8>| {
             for (old, new) in &map {
@@ -575,17 +578,25 @@ impl World {
             }
             data
         };
-        for (old, new) in [map[0], map[2], map[4], map[5]] {
+        let bump = |seeds: &[&[u8]], program: &Pubkey| Pubkey::find_program_address(seeds, program).1;
+        for (old, new) in [map[0], map[2], map[4], map[5], map[6], map[7], map[8]] {
             let mut acct = self.b.account(&old).expect("account to copy");
             acct.data = rewrite(acct.data);
             if new == new_pool {
                 // The pool's own bump, the first byte after its code, is that of its new address.
-                let bump = Pubkey::find_program_address(
+                acct.data[8] = bump(
                     &[b"pool", &[0, 0], pump::pool_authority(&burr).as_ref(), burr.as_ref(), ZEC.as_ref()],
                     &PUMP_AMM,
-                )
-                .1;
-                acct.data[8] = bump;
+                );
+            }
+            // $BURR is a Burrpad coin too: its record's and ledger's bumps (after code, version and mint) are its own.
+            if new == coin(&burr) {
+                acct.data[41] = bump(&[b"coin", burr.as_ref()], &BURRPAD);
+                acct.data[42] = bump(&[b"authority", burr.as_ref()], &BURRPAD);
+                acct.data[43] = bump(&[b"burner", burr.as_ref()], &BURRPAD);
+            }
+            if new == ledger(&burr) {
+                acct.data[41] = bump(&[b"ledger", burr.as_ref()], &BURRPAD);
             }
             self.b.svm.set_account(new, acct).unwrap();
         }
@@ -605,6 +616,7 @@ impl World {
             vault: vault(mint),
             zec_mint: ZEC,
             config: config(),
+            burr_ledger: ledger(&burr),
             burner: bn,
             burner_zec: ata(&bn, &ZEC, &TOKEN),
             burr_mint: burr,

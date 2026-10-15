@@ -430,7 +430,21 @@ MANUAL = [
       "require!(ctx.accounts.coin.burr_share > 0, BurrpadError::HookNotChosen);", "",
       "a_coin_launched_the_old_way_has_no_burr_share"),
     M("U6", "One $BURR buy a minute over all coins", BURR,
-      "require!(now >= ready, BurrpadError::BurnTooSoon);", "", "one_burr_buy_a_minute_across_all_coins"),
+      "now >= shared.ready_at && now >= own", "now >= own", "one_burr_buy_a_minute_across_all_coins"),
+    M("U15", "No $BURR buy within a minute of $BURR's own buy back", BURR,
+      "now >= shared.ready_at && now >= own", "now >= shared.ready_at", "burrs_own_buy_back_and_burn_burr_share_one_wait"),
+    M("U16", "$BURR's own buy back waits after a $BURR buy as long as the next $BURR buy does", BURR,
+      "own.last_time = own.last_time.max(held);", "let _ = (own, held);", "burrs_own_buy_back_and_burn_burr_share_one_wait"),
+    M("U17", "A $BURR buy holds the next one off only in proportion to the part of its limit used", BURR,
+      "math::part_used(spent, cap, BURN_COOLDOWN_SECS as u64)", "Some(BURN_COOLDOWN_SECS as u64)",
+      "crumbs_can_neither_hold_the_wait_nor_walk_the_reserve"),
+    M("U18", "A $BURR buy moves the recorded reserve only in proportion to the part of its limit used", BURR,
+      "math::part_used(spent, cap, BURN_RESERVE_STEP_BPS as u64)", "Some(BURN_RESERVE_STEP_BPS as u64)",
+      "crumbs_can_neither_hold_the_wait_nor_walk_the_reserve"),
+    M("U19", "The $BURR limit counts no more fee than a coin may launch with", BURR,
+      ".min(ctx.accounts.config.max_fee_bps)", "", "burr_limit_counts_no_more_fee_than_a_coin_may_launch_with"),
+    M("U20", "The recorded $BURR reserve falls a step at most per buy", "math.rs",
+      "(after as u128).clamp(low, high)", "(after as u128).min(high)", "the_recorded_reserve_moves_a_step_at_most_either_way"),
     M("U7", "Before any $BURR buy the limit is measured against the fixed starting reserve", BURR,
       "if shared.reference.quote == 0 { BURR_START_RESERVE }", "if shared.reference.quote == 0 { u64::MAX }",
       "the_recorded_reserve_starts_at_one_zec_and_grows_a_step_per_buy"),
@@ -449,10 +463,11 @@ MANUAL = [
       "        burr_after,\n        zec_after,\n    )?;", "        0,\n        zec_after,\n    )?;",
       "burn_burr_buys_burr_and_destroys_it_within_the_limit"),
     M("U13", "The recorded $BURR reserve grows one step per buy at most", BURR,
-      "buy.reference = next_reference(&Reserves { quote: recorded, base: shared.reference.base.max(1) }, after)?;",
-      "buy.reference = after;", "the_recorded_reserve_starts_at_one_zec_and_grows_a_step_per_buy"),
+      "quote: math::burr_next_reserve(recorded, after.quote, step).ok_or(BurrpadError::Overflow)?,",
+      "quote: after.quote,", "the_recorded_reserve_starts_at_one_zec_and_grows_a_step_per_buy"),
     M("U14", "After a $BURR buy the time is recorded for all coins", BURR,
-      "    buy.last_time = now;", "", "one_burr_buy_a_minute_across_all_coins"),
+      "buy.ready_at = now.checked_add(wait as i64).ok_or(BurrpadError::Overflow)?;", "",
+      "one_burr_buy_a_minute_across_all_coins"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -686,12 +701,23 @@ def second_line(entry_id):
         return "the token program refuses: the signer does not own that account"
     if field in ("pump_global", "amm_global_config"):
         return "the buy-back check reads this account and requires pump.fun's owner and its settings code"
-    if struct == "BurnPool" and field in ("pool_base_token_account", "pool_quote_token_account"):
+    if struct in ("BurnPool", "BurnBurr") and field in ("pool_base_token_account", "pool_quote_token_account"):
         return "the pool's own record names its two token accounts, and the burn compares them (held as B29 and B30)"
     if field == "pool_authority":
         return "the pool's own address is derived from it and checked"
     if field == "pool" and struct == "BurnPool":
         return "the pool's own record is read and must name this coin and ZEC"
+    if field == "pool" and struct == "BurnBurr":
+        return "the pool's own record is read and must name $BURR and ZEC"
+    if struct == "BurnBurr" and field == "burner":
+        return ("the buy is signed with this coin's own burner seeds, so any other account is not a signer; pump.fun "
+                "refuses the buy and the whole call, the ZEC moved to it included, is undone")
+    if struct == "BurnBurr" and field == "burr_mint":
+        return ("$BURR's pool is found from the fixed $BURR address and its record must name $BURR; pump.fun refuses a "
+                "buy naming another mint than its pool's, and the whole call is undone")
+    if struct == "BurnBurr" and field in ("burner_zec", "burner_burr"):
+        return ("the same constraint is what makes the account on first use, so without it every $BURR buy fails "
+                "(the tests that fail are the ones that buy)")
     if field == "config":
         return "only `initialize` can make a Config, at one address; anything else fails to load as one"
     return None

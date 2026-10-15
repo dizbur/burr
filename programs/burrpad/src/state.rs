@@ -124,10 +124,12 @@ pub struct BurrPot {
     pub total_burned: u64,
 }
 
-/// Shared by all coins: when $BURR was last bought, and the pool's figures then.
+/// Shared by all coins: when the next $BURR buy may run, and the reserve the
+/// limit is measured against. A buy holds the next one off, and moves the
+/// recorded reserve, in proportion to how much of its limit it used.
 #[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]
 pub struct BurrBuy {
-    pub last_time: i64,
+    pub ready_at: i64,
     pub reference: Reserves,
 }
 

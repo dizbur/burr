@@ -12,7 +12,7 @@
 use crate::constants::*;
 use crate::error::BurrpadError;
 use crate::events::BurrBurned;
-use crate::instructions::burn::{burn_and_return, fund_burner, next_reference, pool_reserves, PoolExpect};
+use crate::instructions::burn::{burn_and_return, fund_burner, pool_reserves, PoolExpect};
 use crate::math::{self, Reserves};
 use crate::pump;
 use crate::state::{Coin, Config, Ledger};
@@ -48,6 +48,9 @@ pub struct BurnBurr<'info> {
     /// The waiting time and recorded reserve shared by every coin's $BURR buys.
     #[account(mut, seeds = [SEED_CONFIG], bump = config.bump)]
     pub config: Box<Account<'info, Config>>,
+    /// $BURR's own ledger: its own buy back and this one share one wait.
+    #[account(mut, seeds = [SEED_LEDGER, BURR_MINT.as_ref()], bump = burr_ledger.bump)]
+    pub burr_ledger: Box<Account<'info, Ledger>>,
     /// CHECK: the coin's burner, a derived address that makes the trade
     #[account(mut, seeds = [SEED_BURNER, mint.key().as_ref()], bump = coin.burner_bump)]
     pub burner: UncheckedAccount<'info>,
@@ -125,8 +128,10 @@ pub fn handle_burn_burr(ctx: Context<BurnBurr>) -> Result<()> {
     require!(ctx.accounts.coin.burr_share > 0, BurrpadError::HookNotChosen);
     require!(ctx.accounts.ledger.burr.pot > 0, BurrpadError::NothingToBurn);
     let shared = ctx.accounts.config.burr_buy;
-    let ready = shared.last_time.checked_add(BURN_COOLDOWN_SECS as i64).ok_or(BurrpadError::Overflow)?;
-    require!(now >= ready, BurrpadError::BurnTooSoon);
+    // Not before the shared wait is over, nor within a minute of $BURR's own buy back.
+    let own =
+        ctx.accounts.burr_ledger.burn.last_time.checked_add(BURN_COOLDOWN_SECS as i64).ok_or(BurrpadError::Overflow)?;
+    require!(now >= shared.ready_at && now >= own, BurrpadError::BurnTooSoon);
 
     let pool_authority_key = ctx.accounts.pool_authority.key();
     let base_account_key = ctx.accounts.pool_base_token_account.key();
@@ -147,10 +152,11 @@ pub fn handle_burn_burr(ctx: Context<BurnBurr>) -> Result<()> {
     // fixed starting figure, not against whatever the pool shows at that moment.
     let recorded = if shared.reference.quote == 0 { BURR_START_RESERVE } else { shared.reference.quote };
     // The limit's safety rests on traders paying the fee $BURR's pool charges.
-    let charged = u16::try_from(venue_fee_bps).unwrap_or(u16::MAX);
-    let spend =
-        math::burn_spend_limit(ctx.accounts.ledger.burr.pot, reserves.quote.min(recorded), charged, BURN_SPEND_DIVISOR)
-            .ok_or(BurrpadError::Overflow)?;
+    // It is held to the highest fee a coin may be launched with.
+    let charged = u16::try_from(venue_fee_bps).unwrap_or(u16::MAX).min(ctx.accounts.config.max_fee_bps);
+    let cap = math::burn_spend_limit(u64::MAX, reserves.quote.min(recorded), charged, BURN_SPEND_DIVISOR)
+        .ok_or(BurrpadError::Overflow)?;
+    let spend = ctx.accounts.ledger.burr.pot.min(cap);
     let min_out =
         math::burn_min_out(&reserves, spend, charged, BURN_FEE_ALLOWANCE_BPS).ok_or(BurrpadError::Overflow)?;
     require!(min_out > 0, BurrpadError::NothingToBurn);
@@ -255,9 +261,20 @@ pub fn handle_burn_burr(ctx: Context<BurnBurr>) -> Result<()> {
         ctx.accounts.pool_base_token_account.amount,
         ctx.accounts.pool_quote_token_account.amount,
     )?;
+    // The next buy waits, and the recorded reserve moves, in proportion to the
+    // part of the limit used: crumbs can neither hold the wait nor walk the reserve.
+    let wait = math::part_used(spent, cap, BURN_COOLDOWN_SECS as u64).ok_or(BurrpadError::Overflow)?;
+    let step = math::part_used(spent, cap, BURN_RESERVE_STEP_BPS as u64).ok_or(BurrpadError::Overflow)?;
     let buy = &mut ctx.accounts.config.burr_buy;
-    buy.reference = next_reference(&Reserves { quote: recorded, base: shared.reference.base.max(1) }, after)?;
-    buy.last_time = now;
+    buy.reference = Reserves {
+        quote: math::burr_next_reserve(recorded, after.quote, step).ok_or(BurrpadError::Overflow)?,
+        base: after.base,
+    };
+    buy.ready_at = now.checked_add(wait as i64).ok_or(BurrpadError::Overflow)?;
+    // $BURR's own buy back waits as long.
+    let held = buy.ready_at - BURN_COOLDOWN_SECS as i64;
+    let own = &mut ctx.accounts.burr_ledger.burn;
+    own.last_time = own.last_time.max(held);
     emit!(BurrBurned { mint: coin_mint, spent, burned: burr_after });
     Ok(())
 }

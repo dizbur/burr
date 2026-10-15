@@ -36,7 +36,12 @@ fn burr_limit(w: &World) -> u128 {
         0 => burrpad::BURR_START_RESERVE,
         r => r,
     };
-    q.min(recorded) as u128 * w.pool(&BURR_MINT).creator_fee_bps as u128 / 40_000
+    q.min(recorded) as u128 * burr_fee(w) / 40_000
+}
+
+/// $BURR's pool fee as the limit counts it: held to the highest a coin may launch with.
+fn burr_fee(w: &World) -> u128 {
+    (w.pool(&BURR_MINT).creator_fee_bps as u128).min(w.config().max_fee_bps as u128)
 }
 
 #[test]
@@ -125,7 +130,7 @@ fn the_recorded_reserve_starts_at_one_zec_and_grows_a_step_per_buy() {
     // Someone adds a lot to the pool's price first: it cannot raise the first limit above 1 ZEC's worth.
     let pusher = w.trader(1_000 * ZEC1);
     assert!(w.pool_buy(&pusher, &BURR_MINT, 5 * ZEC1).is_ok());
-    let fee = w.pool(&BURR_MINT).creator_fee_bps as u128;
+    let fee = burr_fee(&w);
     let mut recorded = burrpad::BURR_START_RESERVE as u128;
     for buy in 0..5 {
         let pot = w.ledger(&mint).burr.pot;
@@ -151,6 +156,10 @@ fn buying_burr_before_a_burr_burn_and_selling_after_loses_money() {
             assert!(w.burn_burr(&mint).is_ok());
             w.b.wait(60);
         }
+        assert!(
+            w.config().burr_buy.reference.quote >= w.pool_reserves(&BURR_MINT).0,
+            "the recorded reserve caught up with the pool, so the burn spends its full limit"
+        );
         let attacker = w.trader(1_000 * ZEC1);
         let start = w.zec_of(&attacker.pubkey());
         assert!(w.pool_buy(&attacker, &BURR_MINT, attack).is_ok());
@@ -170,8 +179,9 @@ fn burn_burr_takes_only_burrs_own_pool_and_this_coins_money() {
     let other = w.launch(&burr_plan());
     w.b.give_zec(&kit::authority(&other), 10 * ZEC1);
     assert!(w.split(&other).is_ok());
-    // The coin $BURR was copied from still has its own pool: it is not $BURR's.
-    let copied_from = w.make_burr();
+    // Another graduated coin, with a pool of its own that is not $BURR's.
+    let copied_from = w.launch(&LaunchPlan::default());
+    w.graduate(&copied_from);
     let payer = w.b.payer.pubkey();
     type Change<'x> = Box<dyn Fn(&mut burrpad::accounts::BurnBurr) + 'x>;
     let swaps: Vec<(&str, Change)> = vec![
@@ -214,4 +224,99 @@ fn burn_burr_takes_only_burrs_own_pool_and_this_coins_money() {
     assert_eq!((w.vault_balance(&mint), w.vault_balance(&other)), (before.2, before.3));
     assert_eq!((w.ledger(&mint).burr.pot, w.ledger(&other).burr.pot), (before.0.burr.pot, before.1.burr.pot));
     assert!(w.burn_burr(&mint).is_ok(), "with the right accounts it buys");
+}
+
+#[test]
+fn crumbs_can_neither_hold_the_wait_nor_walk_the_reserve() {
+    // A buy holds the next one off, and moves the recorded reserve, in proportion to the part of its limit it used.
+    let (mut w, big) = setup(10 * ZEC1);
+    let small = w.launch(&burr_plan());
+    w.b.give_zec(&kit::authority(&small), 20_000);
+    assert!(w.split(&small).is_ok());
+    w.b.wait(60);
+    let cap = burr_limit(&w);
+    let before = burrpad::BURR_START_RESERVE as u128;
+    let pot = w.ledger(&small).burr.pot;
+    let r = w.burn_burr(&small);
+    assert!(r.is_ok(), "{}", logs(&r));
+    let spent = (pot - w.ledger(&small).burr.pot) as u128;
+    assert!(spent > 0 && spent * 20 < cap, "a crumb: {spent} of a limit of {cap}");
+    let wait = (60 * spent).div_ceil(cap) as i64;
+    let step = (500 * spent).div_ceil(cap);
+    let now = w.config().burr_buy.reference.quote as u128;
+    assert!(
+        now.abs_diff(before) <= (before * step / 10_000).max(1),
+        "a crumb moved the recorded reserve {before} -> {now}"
+    );
+    assert!(wait < 4, "a crumb holds the next buy {wait} seconds");
+    if wait > 1 {
+        w.b.wait(wait - 1);
+        assert_eq!(custom_code(&w.burn_burr(&big)), Some(err(E::BurnTooSoon)));
+    }
+    w.b.wait(1);
+    let r = w.burn_burr(&big);
+    assert!(r.is_ok(), "a full buy {wait} seconds after a crumb: {}", logs(&r));
+    // A full buy holds the next one off for the whole minute.
+    w.b.give_zec(&kit::authority(&small), 10 * ZEC1);
+    assert!(w.split(&small).is_ok());
+    w.b.wait(59);
+    assert_eq!(custom_code(&w.burn_burr(&small)), Some(err(E::BurnTooSoon)));
+    w.b.wait(1);
+    assert!(w.burn_burr(&small).is_ok());
+}
+
+#[test]
+fn burrs_own_buy_back_and_burn_burr_share_one_wait() {
+    // $BURR is a Burrpad coin with a burn pot of its own; buying it two ways at once would move its price twice.
+    let (mut w, mint) = setup(10 * ZEC1);
+    w.b.give_zec(&kit::authority(&BURR_MINT), 10 * ZEC1);
+    assert!(w.split(&BURR_MINT).is_ok());
+    w.b.wait(60);
+    let r = w.burn_pool(&BURR_MINT);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert_eq!(
+        custom_code(&w.burn_burr(&mint)),
+        Some(err(E::BurnTooSoon)),
+        "burn_burr in the minute after $BURR's own"
+    );
+    w.b.wait(60);
+    assert!(w.burn_burr(&mint).is_ok());
+    assert_eq!(
+        custom_code(&w.burn_pool(&BURR_MINT)),
+        Some(err(E::BurnTooSoon)),
+        "$BURR's own in the minute after burn_burr"
+    );
+    w.b.wait(60);
+    assert!(w.burn_pool(&BURR_MINT).is_ok());
+}
+
+#[test]
+fn the_recorded_reserve_moves_a_step_at_most_either_way() {
+    use burrpad::math::burr_next_reserve as next;
+    let r = 1_000_000_000u64;
+    // A full step is 5%, up or down; a part step is that part of it.
+    assert_eq!(next(r, 10 * r, 500), Some(1_050_000_000));
+    assert_eq!(next(r, r / 10, 500), Some(950_000_000));
+    assert_eq!(next(r, r / 10, 50), Some(995_000_000));
+    assert_eq!(next(r, 1_002_000_000, 500), Some(1_002_000_000), "inside the step it follows the pool");
+    // Always able to move by one unit, so a small reserve is never stuck.
+    assert_eq!(next(3, 1_000, 1), Some(4));
+    assert_eq!(next(3, 0, 1), Some(2));
+}
+
+#[test]
+fn burr_limit_counts_no_more_fee_than_a_coin_may_launch_with() {
+    let (mut w, mint) = setup(10 * ZEC1);
+    let pool_fee = w.pool(&BURR_MINT).creator_fee_bps;
+    let c = w.config();
+    // The administrator lowers the highest fee below $BURR's pool fee.
+    assert!(w
+        .as_admin(burrpad::instruction::SetFeeRange { min_bps: c.min_fee_bps.min(50), max_bps: 50, default_bps: 50 })
+        .is_ok());
+    assert!(pool_fee > 50, "the bench's pool charges {pool_fee}");
+    let limit = burr_limit(&w);
+    let pot = w.ledger(&mint).burr.pot;
+    assert!(w.burn_burr(&mint).is_ok());
+    let spent = pot - w.ledger(&mint).burr.pot;
+    assert!(spent as u128 <= limit, "spent {spent}, above {limit}, counted at 50");
 }
