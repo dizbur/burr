@@ -120,6 +120,12 @@ pub struct Launch<'info> {
 }
 
 pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
+    handle_launch_with_burr(ctx, args, 0)
+}
+
+/// A launch whose fee may also buy and burn $BURR: `burr_share` counts with
+/// the four hooks' shares, and all five add to 10,000.
+pub fn handle_launch_with_burr(ctx: Context<Launch>, args: LaunchArgs, burr_share: u16) -> Result<()> {
     let a = &ctx.accounts;
     let cfg = &a.config;
 
@@ -132,7 +138,10 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
         BurrpadError::PlatformTermsChanged
     );
     require!(args.fee_bps >= cfg.min_fee_bps && args.fee_bps <= cfg.max_fee_bps, BurrpadError::FeeOutOfRange);
-    require!(math::weights(cfg.platform_fraction_bps, &args.shares).is_some(), BurrpadError::SharesDoNotAddUp);
+    require!(
+        math::weights_with_burr(cfg.platform_fraction_bps, &args.shares, burr_share).is_some(),
+        BurrpadError::SharesDoNotAddUp
+    );
     require!(
         args.shares[SINK_CREATOR - 1] == 0 || args.creator_receiver != Pubkey::default(),
         BurrpadError::MissingReceiver
@@ -236,6 +245,7 @@ pub fn handle_launch(ctx: Context<Launch>, args: LaunchArgs) -> Result<()> {
     coin.platform_fraction_bps = platform_fraction_bps;
     coin.platform_receiver = platform_receiver;
     coin.shares = args.shares;
+    coin.burr_share = burr_share;
     coin.creator_receiver = args.creator_receiver;
     coin.give_receiver = args.give_receiver;
     coin.burn_cooldown_secs = BURN_COOLDOWN_SECS;

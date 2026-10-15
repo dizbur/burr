@@ -37,3 +37,5 @@ mod t14_text_lengths;
 mod t15_random_sequences;
 #[cfg(test)]
 mod t16_more_attacks;
+#[cfg(test)]
+mod t17_burn_burr;

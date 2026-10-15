@@ -83,6 +83,11 @@ pub mod burrpad {
         instructions::launch::handle_launch(ctx, args)
     }
 
+    /// The same, with part of the hooks' share buying and burning $BURR.
+    pub fn launch_v2(ctx: Context<Launch>, args: LaunchArgs, burr_share: u16) -> Result<()> {
+        instructions::launch::handle_launch_with_burr(ctx, args, burr_share)
+    }
+
     pub fn split(ctx: Context<SplitOnly>) -> Result<()> {
         instructions::collect::handle_split(ctx)
     }
@@ -112,6 +117,11 @@ pub mod burrpad {
 
     pub fn burn_pool(ctx: Context<BurnPool>) -> Result<()> {
         instructions::burn::handle_burn_pool(ctx)
+    }
+
+    /// Buys $BURR with the coin's sixth pot and burns it.
+    pub fn burn_burr(ctx: Context<BurnBurr>) -> Result<()> {
+        instructions::burr::handle_burn_burr(ctx)
     }
 
     // ---- holders ----

@@ -53,6 +53,8 @@ pub struct LaunchPlan {
     /// The platform terms the launcher agrees to; `None` means those in force.
     pub max_platform_fraction_bps: Option<u16>,
     pub platform_receiver: Option<Pubkey>,
+    /// The share that buys and burns $BURR. Above 0, the launch uses `launch_v2`.
+    pub burr_share: u16,
 }
 
 impl Default for LaunchPlan {
@@ -66,6 +68,7 @@ impl Default for LaunchPlan {
             uri: "https://e.co/t".into(),
             max_platform_fraction_bps: None,
             platform_receiver: None,
+            burr_share: 0,
         }
     }
 }
@@ -195,22 +198,24 @@ impl World {
     pub fn launch_ix(&self, payer: &Pubkey, mint: &Pubkey, plan: &LaunchPlan) -> Instruction {
         // Unless a test says otherwise, the launcher agrees to the terms in force.
         let cfg = self.config();
-        ix(
-            self.launch_accounts(payer, mint),
-            burrpad::instruction::Launch {
-                args: burrpad::LaunchArgs {
-                    name: plan.name.clone(),
-                    symbol: "TST".into(),
-                    uri: plan.uri.clone(),
-                    fee_bps: plan.fee_bps,
-                    shares: plan.shares,
-                    creator_receiver: plan.creator_receiver,
-                    give_receiver: plan.give_receiver,
-                    max_platform_fraction_bps: plan.max_platform_fraction_bps.unwrap_or(cfg.platform_fraction_bps),
-                    platform_receiver: plan.platform_receiver.unwrap_or(cfg.platform_receiver),
-                },
-            },
-        )
+        raw_data(self.launch_accounts(payer, mint), {
+            let args = burrpad::LaunchArgs {
+                name: plan.name.clone(),
+                symbol: "TST".into(),
+                uri: plan.uri.clone(),
+                fee_bps: plan.fee_bps,
+                shares: plan.shares,
+                creator_receiver: plan.creator_receiver,
+                give_receiver: plan.give_receiver,
+                max_platform_fraction_bps: plan.max_platform_fraction_bps.unwrap_or(cfg.platform_fraction_bps),
+                platform_receiver: plan.platform_receiver.unwrap_or(cfg.platform_receiver),
+            };
+            if plan.burr_share > 0 {
+                burrpad::instruction::LaunchV2 { args, burr_share: plan.burr_share }.data()
+            } else {
+                burrpad::instruction::Launch { args }.data()
+            }
+        })
     }
 
     /// Launches with a mint key chosen beforehand.
@@ -261,12 +266,12 @@ impl World {
     /// says, and the pots never add up to more than the ledger's total.
     pub fn assert_sound(&self, mint: &Pubkey) {
         let l = self.ledger(mint);
-        let pots: u128 = l.pots.iter().map(|p| *p as u128).sum();
+        let pots: u128 = l.pots.iter().map(|p| *p as u128).sum::<u128>() + l.burr.pot as u128;
         assert!(self.vault_balance(mint) >= l.accounted, "vault below accounted");
         assert!(pots <= l.accounted as u128, "pots above accounted");
-        assert!(l.accounted as u128 - pots < 5, "carry too large");
-        let credited: u128 = l.credited.iter().sum();
-        assert!(credited <= l.total_split && l.total_split - credited < 5, "credited does not match total");
+        assert!(l.accounted as u128 - pots < 6, "carry too large");
+        let credited: u128 = l.credited.iter().sum::<u128>() + l.burr.credited;
+        assert!(credited <= l.total_split && l.total_split - credited < 6, "credited does not match total");
     }
 
     // ---- trades made straight on pump.fun, as an ordinary trader would ----
@@ -536,6 +541,95 @@ impl World {
         self.b.send(&[i], &[])
     }
 
+    // ---- Burn $BURR ----
+
+    /// Puts a $BURR on the bench at $BURR's real address: a coin is launched and
+    /// graduated, then its mint, its pool and the pool's two token accounts are
+    /// copied to the addresses $BURR's would have, with every address inside
+    /// them rewritten to match. Returns the coin that was copied.
+    pub fn make_burr(&mut self) -> Pubkey {
+        let src = self.launch(&LaunchPlan::default());
+        self.graduate(&src);
+        let burr = burrpad::BURR_MINT;
+        let (old_pool, new_pool) = (pump::pool(&src), pump::pool(&burr));
+        let map = [
+            (src, burr),
+            (pump::pool_authority(&src), pump::pool_authority(&burr)),
+            (old_pool, new_pool),
+            (authority(&src), authority(&burr)),
+            (ata(&old_pool, &src, &TOKEN_2022), ata(&new_pool, &burr, &TOKEN_2022)),
+            (ata(&old_pool, &ZEC, &TOKEN), ata(&new_pool, &ZEC, &TOKEN)),
+        ];
+        let rewrite = |mut data: Vec<u8>| {
+            for (old, new) in &map {
+                let (o, n) = (old.to_bytes(), new.to_bytes());
+                let mut i = 0;
+                while i + 32 <= data.len() {
+                    if data[i..i + 32] == o {
+                        data[i..i + 32].copy_from_slice(&n);
+                        i += 32;
+                    } else {
+                        i += 1;
+                    }
+                }
+            }
+            data
+        };
+        for (old, new) in [map[0], map[2], map[4], map[5]] {
+            let mut acct = self.b.account(&old).expect("account to copy");
+            acct.data = rewrite(acct.data);
+            if new == new_pool {
+                // The pool's own bump, the first byte after its code, is that of its new address.
+                let bump = Pubkey::find_program_address(
+                    &[b"pool", &[0, 0], pump::pool_authority(&burr).as_ref(), burr.as_ref(), ZEC.as_ref()],
+                    &PUMP_AMM,
+                )
+                .1;
+                acct.data[8] = bump;
+            }
+            self.b.svm.set_account(new, acct).unwrap();
+        }
+        src
+    }
+
+    pub fn burn_burr_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burrpad::accounts::BurnBurr {
+        let burr = burrpad::BURR_MINT;
+        let pool = pump::pool(&burr);
+        let bn = burner(mint);
+        burrpad::accounts::BurnBurr {
+            payer: *payer,
+            mint: *mint,
+            coin: coin(mint),
+            ledger: ledger(mint),
+            authority: authority(mint),
+            vault: vault(mint),
+            zec_mint: ZEC,
+            config: config(),
+            burner: bn,
+            burner_zec: ata(&bn, &ZEC, &TOKEN),
+            burr_mint: burr,
+            burner_burr: ata(&bn, &burr, &TOKEN_2022),
+            amm_global_config: pump::amm_global_config(),
+            pool_authority: pump::pool_authority(&burr),
+            pool,
+            pool_base_token_account: ata(&pool, &burr, &TOKEN_2022),
+            pool_quote_token_account: ata(&pool, &ZEC, &TOKEN),
+            user_volume: pda(&[b"user_volume_accumulator", bn.as_ref()], &PUMP_AMM),
+            fee_config: pda(&[b"fee_config", PUMP_AMM.as_ref()], &PUMP_FEES),
+            buyback_fee_recipient: ata(&BUYBACK, &ZEC, &TOKEN),
+            amm_event_authority: pump::amm_event_authority(),
+            amm_program: PUMP_AMM,
+            token_program: TOKEN,
+            token_2022_program: TOKEN_2022,
+            associated_token_program: ATA_PROGRAM,
+            system_program: SYSTEM,
+        }
+    }
+    pub fn burn_burr(&mut self, mint: &Pubkey) -> TxResult {
+        let i = ix(self.burn_burr_accounts(&self.b.payer.pubkey(), mint), burrpad::instruction::BurnBurr {});
+        self.b.send(&[i], &[])
+    }
+
     /// Calls the burn once a minute until it really buys, and returns how many
     /// calls it took. With no price check any more, that is one call whenever
     /// the pot holds something and the wait is over.
@@ -591,6 +685,10 @@ impl World {
         );
         self.b.send_as(Some(&wallet), &[i], &[])
     }
+}
+
+fn raw_data(accounts: impl ToAccountMetas, data: Vec<u8>) -> Instruction {
+    Instruction { program_id: BURRPAD, accounts: accounts.to_account_metas(None), data }
 }
 
 /// Builds a Burrpad instruction from an account list and its data. For tests

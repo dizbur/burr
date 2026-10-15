@@ -82,3 +82,16 @@ pub const SINK_CREATOR: usize = 1;
 pub const SINK_GIVE: usize = 2;
 pub const SINK_BURN: usize = 3;
 pub const SINK_HOLDERS: usize = 4;
+
+/// The sixth pot: buying and burning $BURR. It is kept apart from the five
+/// above (in spare room of the records), so that launched coins' records keep
+/// their layout. Its share counts with the four hooks': all five add to 10,000.
+pub const SINK_BURR: usize = 5;
+/// All pots, the sixth included, as the split works them out.
+pub const ALL_SINKS: usize = 6;
+/// $BURR, the platform's own coin: what the sixth pot buys and burns.
+pub const BURR_MINT: Pubkey = pubkey!("GiwMfYS4jHi256G8K41snZhKUovrMbyQL2hqv3fqr7WU");
+/// The reserve the first $BURR buy's limit is measured against, before any has
+/// been recorded: 1 ZEC. It then grows 5% per buy towards the pool's own, so
+/// nobody can raise the first limit by adding liquidity just before it.
+pub const BURR_START_RESERVE: u64 = 100_000_000;

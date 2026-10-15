@@ -419,6 +419,76 @@ fn burn_pool() {
 }
 
 #[test]
+fn burn_burr() {
+    // Its own small stage: $BURR in place, two coins that chose the hook, one buy already made.
+    let mut w = World::new();
+    let src = w.make_burr();
+    let plan = LaunchPlan { shares: [2_000, 2_000, 2_000, 2_000], burr_share: 2_000, ..Default::default() };
+    let (c, d) = (w.launch(&plan), w.launch(&plan));
+    for m in [c, d] {
+        w.b.give_zec(&kit::authority(&m), 50 * ZEC1);
+        assert!(w.split(&m).is_ok());
+    }
+    w.b.wait(60);
+    assert!(w.burn_burr(&d).is_ok());
+    w.b.wait(60);
+    let thief = w.trader(ZEC1);
+    assert!(w.pool_buy(&thief, &src, ZEC1 / 100).is_ok());
+    let (nothing, fake) = (w.b.do_nothing_program(), Pubkey::new_unique());
+    let payer = w.b.payer.insecure_clone();
+    let good = w.burn_burr_accounts(&payer.pubkey(), &c);
+    let burr = burrpad::BURR_MINT;
+    let thief_zec = ata(&thief.pubkey(), &ZEC, &TOKEN);
+    let thief_coin = ata(&thief.pubkey(), &src, &TOKEN_2022);
+    type A = burrpad::accounts::BurnBurr;
+    let swaps: Vec<Swap<A>> = vec![
+        sw("mint", |x: &mut A| x.mint = d),
+        sw("coin", |x: &mut A| x.coin = kit::coin(&d)),
+        sw("ledger", |x: &mut A| x.ledger = kit::ledger(&d)),
+        sw("authority", |x: &mut A| {
+            x.authority = kit::authority(&d);
+            x.vault = kit::vault(&d);
+        }),
+        sw("vault", |x: &mut A| x.vault = kit::vault(&d)),
+        sw("zec_mint", |x: &mut A| x.zec_mint = d),
+        sw("config", |x: &mut A| x.config = kit::coin(&c)),
+        sw("burner", |x: &mut A| {
+            let other_burner = kit::burner(&d);
+            x.burner = other_burner;
+            x.burner_zec = ata(&other_burner, &ZEC, &TOKEN);
+            x.burner_burr = ata(&other_burner, &burr, &TOKEN_2022);
+            x.user_volume = pda(&[b"user_volume_accumulator", other_burner.as_ref()], &PUMP_AMM);
+        }),
+        sw("burner_zec", |x: &mut A| x.burner_zec = thief_zec),
+        sw("burr_mint", |x: &mut A| {
+            x.burr_mint = src;
+            x.burner_burr = ata(&kit::burner(&c), &src, &TOKEN_2022);
+        }),
+        sw("burner_burr", |x: &mut A| x.burner_burr = thief_coin),
+        sw("amm_global_config", |x: &mut A| x.amm_global_config = pump::global()),
+        sw("pool_authority", |x: &mut A| x.pool_authority = pump::pool_authority(&src)),
+        sw("pool", |x: &mut A| x.pool = pump::pool(&src)),
+        sw("pool_base_token_account", |x: &mut A| {
+            x.pool_base_token_account = ata(&pump::pool(&src), &src, &TOKEN_2022)
+        }),
+        sw("pool_quote_token_account", |x: &mut A| x.pool_quote_token_account = ata(&pump::pool(&src), &ZEC, &TOKEN)),
+        sw("user_volume", |x: &mut A| x.user_volume = pump::user_volume(&kit::burner(&d))),
+        sw("fee_config", |x: &mut A| x.fee_config = pump::fee_config()),
+        sw("buyback_fee_recipient", |x: &mut A| x.buyback_fee_recipient = thief_zec),
+        sw("amm_event_authority", |x: &mut A| x.amm_event_authority = fake),
+        sw("amm_program", |x: &mut A| x.amm_program = nothing),
+        sw("token_program", |x: &mut A| x.token_program = nothing),
+        sw("token_2022_program", |x: &mut A| x.token_2022_program = nothing),
+        sw("associated_token_program", |x: &mut A| x.associated_token_program = nothing),
+        sw("system_program", |x: &mut A| x.system_program = nothing),
+    ];
+    let pot = w.ledger(&c).burr.pot;
+    let r = each_refused(&mut w, &payer, &[], good, burrpad::instruction::BurnBurr {}, swaps);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert!(w.ledger(&c).burr.pot < pot, "with the right accounts it buys $BURR");
+}
+
+#[test]
 fn recover() {
     let Stage { mut w, c, d, user, thief, nothing, .. } = stage();
     assert!(w.pool_buy(&user, &c, ZEC1).is_ok());

@@ -10,10 +10,23 @@ pub const WEIGHT_TOTAL: u128 = 100_000_000;
 
 /// The split weights of a coin: the platform's, then one per hook.
 pub fn weights(platform_fraction_bps: u16, shares: &[u16; HOOKS]) -> Option<[u128; SINKS]> {
+    let w = weights_with_burr(platform_fraction_bps, shares, 0)?;
+    let mut out = [0u128; SINKS];
+    out.copy_from_slice(&w[..SINKS]);
+    Some(out)
+}
+
+/// The weights of all six pots: the platform's, the four hooks', and the one
+/// that buys $BURR. The five shares must add to the whole.
+pub fn weights_with_burr(
+    platform_fraction_bps: u16,
+    shares: &[u16; HOOKS],
+    burr_share: u16,
+) -> Option<[u128; ALL_SINKS]> {
     if platform_fraction_bps > BPS {
         return None;
     }
-    let mut sum: u32 = 0;
+    let mut sum: u32 = burr_share as u32;
     for s in shares {
         sum = sum.checked_add(*s as u32)?;
     }
@@ -21,11 +34,12 @@ pub fn weights(platform_fraction_bps: u16, shares: &[u16; HOOKS]) -> Option<[u12
         return None;
     }
     let rest = (BPS - platform_fraction_bps) as u128;
-    let mut w = [0u128; SINKS];
+    let mut w = [0u128; ALL_SINKS];
     w[SINK_PLATFORM] = platform_fraction_bps as u128 * BPS as u128;
     for (i, s) in shares.iter().enumerate() {
         w[i + 1] = rest * (*s as u128);
     }
+    w[SINK_BURR] = rest * burr_share as u128;
     Some(w)
 }
 
@@ -33,17 +47,17 @@ pub fn weights(platform_fraction_bps: u16, shares: &[u16; HOOKS]) -> Option<[u12
 ///
 /// Dues are worked out on the running total since launch, so the outcome is
 /// the same however the same money is cut into calls. Returns what each pot
-/// is credited now. What flooring leaves over (always fewer than `SINKS`
-/// units in all) stays in the vault as the carry and is credited by later calls.
-pub fn split(
+/// is credited now. What flooring leaves over (always fewer than `N` units in
+/// all) stays in the vault as the carry and is credited by later calls.
+pub fn split<const N: usize>(
     total_split: &mut u128,
-    credited: &mut [u128; SINKS],
-    w: &[u128; SINKS],
+    credited: &mut [u128; N],
+    w: &[u128; N],
     new: u64,
-) -> Option<[u64; SINKS]> {
+) -> Option<[u64; N]> {
     let total = total_split.checked_add(new as u128)?;
-    let mut out = [0u64; SINKS];
-    for i in 0..SINKS {
+    let mut out = [0u64; N];
+    for i in 0..N {
         let due = total.checked_mul(w[i])? / WEIGHT_TOTAL;
         let add = due.checked_sub(credited[i])?;
         out[i] = u64::try_from(add).ok()?;

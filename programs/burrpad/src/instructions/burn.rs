@@ -510,14 +510,14 @@ pub fn handle_burn_pool(ctx: Context<BurnPool>) -> Result<()> {
 /// with the reserve figure allowed to grow by at most one step (5%) over the
 /// last one. Without that bound, liquidity added around one burn would raise
 /// the limit of the next. Only its reserve figure is read now, by the limit.
-fn next_reference(last: &Reserves, after: Reserves) -> Result<Reserves> {
+pub(crate) fn next_reference(last: &Reserves, after: Reserves) -> Result<Reserves> {
     let ceiling = last.raised_by(BURN_RESERVE_STEP_BPS).ok_or(BurrpadError::Overflow)?.quote;
     after.held_to(ceiling).ok_or(BurrpadError::Overflow.into())
 }
 
 /// Moves exactly `spend` from the vault to the burner. Nothing else in the
 /// vault is within the trade's reach.
-fn fund_burner<'info>(
+pub(crate) fn fund_burner<'info>(
     token_program: &AccountInfo<'info>,
     vault: &AccountInfo<'info>,
     zec_mint: &AccountInfo<'info>,
@@ -552,7 +552,7 @@ fn finish(
 /// Burns every coin the burner holds and sends any ZEC it still holds back
 /// to the vault.
 #[allow(clippy::too_many_arguments)]
-fn burn_and_return<'info>(
+pub(crate) fn burn_and_return<'info>(
     token_2022_program: &AccountInfo<'info>,
     token_program: &AccountInfo<'info>,
     mint: &AccountInfo<'info>,

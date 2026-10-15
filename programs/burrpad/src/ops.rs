@@ -3,7 +3,7 @@
 
 use crate::constants::*;
 use crate::error::BurrpadError;
-use crate::events::Split;
+use crate::events::{Split, SplitBurr};
 use crate::math;
 use crate::state::{Coin, Ledger};
 use anchor_lang::prelude::*;
@@ -18,13 +18,25 @@ pub fn split_new(coin: &Coin, ledger: &mut Ledger, vault_amount: u64) -> Result<
     if new == 0 {
         return Ok(0);
     }
-    let w = math::weights(coin.platform_fraction_bps, &coin.shares).ok_or(BurrpadError::SharesDoNotAddUp)?;
-    let credits = math::split(&mut ledger.total_split, &mut ledger.credited, &w, new).ok_or(BurrpadError::Overflow)?;
+    let w = math::weights_with_burr(coin.platform_fraction_bps, &coin.shares, coin.burr_share)
+        .ok_or(BurrpadError::SharesDoNotAddUp)?;
+    let mut credited = [0u128; ALL_SINKS];
+    credited[..SINKS].copy_from_slice(&ledger.credited);
+    credited[SINK_BURR] = ledger.burr.credited;
+    let all = math::split(&mut ledger.total_split, &mut credited, &w, new).ok_or(BurrpadError::Overflow)?;
+    ledger.credited.copy_from_slice(&credited[..SINKS]);
+    ledger.burr.credited = credited[SINK_BURR];
+    let mut credits = [0u64; SINKS];
+    credits.copy_from_slice(&all[..SINKS]);
     for (pot, add) in ledger.pots.iter_mut().zip(credits.iter()) {
         *pot = pot.checked_add(*add).ok_or(BurrpadError::Overflow)?;
     }
+    ledger.burr.pot = ledger.burr.pot.checked_add(all[SINK_BURR]).ok_or(BurrpadError::Overflow)?;
     ledger.accounted = ledger.accounted.checked_add(new).ok_or(BurrpadError::Overflow)?;
     emit!(Split { mint: coin.mint, amount: new, credited: credits });
+    if all[SINK_BURR] > 0 {
+        emit!(SplitBurr { mint: coin.mint, credited: all[SINK_BURR] });
+    }
     Ok(new)
 }
 

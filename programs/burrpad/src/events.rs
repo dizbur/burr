@@ -54,6 +54,21 @@ pub struct Recovered {
     pub amount: u64,
 }
 
+/// What a split credited to the pot that buys $BURR.
+#[event]
+pub struct SplitBurr {
+    pub mint: Pubkey,
+    pub credited: u64,
+}
+
+/// $BURR was bought with a coin's sixth pot and burned.
+#[event]
+pub struct BurrBurned {
+    pub mint: Pubkey,
+    pub spent: u64,
+    pub burned: u64,
+}
+
 #[event]
 pub struct PaidOut {
     pub mint: Pubkey,

@@ -54,13 +54,14 @@ fn open() -> Books {
     let mut w = World::new();
     let mut coins = vec![];
     let mut plans = vec![];
-    // Three coins with different fees and shares; the third has graduated.
-    for (fee_bps, shares, graduated) in [
-        (200u16, [2_500u16, 2_500, 2_500, 2_500], false),
-        (300, [0, 1_000, 4_000, 5_000], false),
-        (100, [4_000, 0, 3_000, 3_000], true),
+    // Three coins with different fees and shares; the third has graduated. Two give part to burning $BURR.
+    w.make_burr();
+    for (fee_bps, shares, burr_share, graduated) in [
+        (200u16, [2_000u16, 2_000, 2_000, 2_000], 2_000u16, false),
+        (300, [0, 1_000, 4_000, 5_000], 0, false),
+        (100, [4_000, 0, 3_000, 1_000], 2_000, true),
     ] {
-        let plan = LaunchPlan { fee_bps, shares, ..Default::default() };
+        let plan = LaunchPlan { fee_bps, shares, burr_share, ..Default::default() };
         let mint = w.launch(&plan);
         if graduated {
             w.graduate(&mint);
@@ -92,8 +93,8 @@ impl Books {
             // The vault covers the ledger; the pots add up; nothing is negative (they are unsigned, so: nothing wrapped).
             w.assert_sound(m);
             let l = w.ledger(m);
-            let pots: u128 = l.pots.iter().map(|p| *p as u128).sum();
-            let credited: u128 = l.credited.iter().sum();
+            let pots: u128 = l.pots.iter().map(|p| *p as u128).sum::<u128>() + l.burr.pot as u128;
+            let credited: u128 = l.credited.iter().sum::<u128>() + l.burr.credited;
             assert_eq!(
                 l.accounted as u128 - pots,
                 l.total_split - credited,
@@ -120,6 +121,11 @@ impl Books {
                 l.credited[4],
                 l.pots[4] as u128 + l.holders.total_released as u128,
                 "{at}: coin {i}: the holders' pot does not close"
+            );
+            assert_eq!(
+                l.burr.credited,
+                l.burr.pot as u128 + l.burr.total_spent as u128,
+                "{at}: coin {i}: the $BURR pot does not close"
             );
             platform_due += l.credited[0] - l.pots[0] as u128;
             released += l.holders.total_released;
@@ -172,6 +178,26 @@ impl Books {
             6 => {
                 let payee = [Payee::Platform, Payee::Creator, Payee::Give][s.actor as usize % 3];
                 let _ = self.w.pay_out(&m, payee);
+            }
+            7 | 8 if s.amount.is_multiple_of(3) => {
+                // A $BURR burn: one a minute over all coins, never above its limit, only from its own pot.
+                let (quote, _) = self.w.pool_reserves(&burrpad::BURR_MINT);
+                let shared = self.w.config().burr_buy;
+                let recorded =
+                    if shared.reference.quote == 0 { burrpad::BURR_START_RESERVE } else { shared.reference.quote };
+                let fee = self.w.pool(&burrpad::BURR_MINT).creator_fee_bps as u128;
+                let r = self.w.burn_burr(&m);
+                let after = self.w.ledger(&m);
+                let spent = before.burr.pot - after.burr.pot;
+                assert_eq!(after.pots, before.pots, "a $BURR burn touched another pot");
+                if r.is_ok() {
+                    assert!(now >= shared.last_time + 60, "a $BURR burn ran inside the shared wait");
+                    let limit = quote.min(recorded) as u128 * fee / 40_000;
+                    assert!(spent > 0 && spent as u128 <= limit, "a $BURR burn spent {spent}, limit {limit}");
+                    self.did[0] += 1;
+                } else {
+                    assert_eq!(spent, 0);
+                }
             }
             7 | 8 => {
                 // A burn never spends more than its limit, nor sooner than its wait.
@@ -400,6 +426,9 @@ fn instructions_for(
             vec![wallet],
         ),
     ];
+    if plan.burr_share > 0 {
+        v.push(("burn_burr", built(w.burn_burr_accounts(&pk, m), burrpad::instruction::BurnBurr {}), me()));
+    }
     if graduated {
         v.push(("collect_pool", built(w.collect_pool_accounts(&pk, m), burrpad::instruction::CollectPool {}), me()));
         v.push(("burn_pool", built(w.burn_pool_accounts(&pk, m), burrpad::instruction::BurnPool {}), me()));

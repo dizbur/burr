@@ -42,6 +42,7 @@ COLLECT = "instructions/collect.rs"
 PAY = "instructions/pay_out.rs"
 BURN = "instructions/burn.rs"
 HOLD = "instructions/holders.rs"
+BURR = "instructions/burr.rs"
 
 MANUAL = [
     # ---- the administrator ----
@@ -105,7 +106,7 @@ MANUAL = [
     M("L3", "A coin's fee cannot be above the highest allowed", LAUNCH,
       " && args.fee_bps <= cfg.max_fee_bps", "", "launch_refuses_bad_plans"),
     M("L4", "Hook shares must add up to exactly the whole", LAUNCH,
-      "require!(math::weights(cfg.platform_fraction_bps, &args.shares).is_some(), BurrpadError::SharesDoNotAddUp);", "",
+      "require!(\n        math::weights_with_burr(cfg.platform_fraction_bps, &args.shares, burr_share).is_some(),\n        BurrpadError::SharesDoNotAddUp\n    );", "",
       "launch_refuses_bad_plans"),
     M("L5", "A chosen creator's share needs a receiver", LAUNCH,
       "args.shares[SINK_CREATOR - 1] == 0 || args.creator_receiver != Pubkey::default()", "true",
@@ -414,6 +415,44 @@ MANUAL = [
     M("B21", "The least-coins-out is worked out from the pool's own figures", "math.rs",
       "u64::try_from(ideal.checked_mul(keep)? / BPS as u128).ok()", "let _ = (ideal, keep);\n    Some(1)",
       "a_burn_is_undone_if_the_buy_did_not_deliver", "a crumb"),
+
+    # ---- burning $BURR ----
+    M("U1", "The $BURR shares count in the whole the shares must add to", "math.rs",
+      "let mut sum: u32 = burr_share as u32;", "let mut sum: u32 = 0;", "shares_with_burr_must_add_to_the_whole"),
+    M("U2", "The $BURR pot gets its weight of every split", "math.rs",
+      "w[SINK_BURR] = rest * burr_share as u128;", "", "a_launch_can_give_part_of_the_fee_to_burning_burr"),
+    M("U3", "What the split gives the $BURR pot is added to it", "ops.rs",
+      "ledger.burr.pot = ledger.burr.pot.checked_add(all[SINK_BURR]).ok_or(BurrpadError::Overflow)?;", "",
+      "a_launch_can_give_part_of_the_fee_to_burning_burr"),
+    M("U4", "The $BURR pot's running total is kept", "ops.rs",
+      "ledger.burr.credited = credited[SINK_BURR];", "", "a_launch_can_give_part_of_the_fee_to_burning_burr"),
+    M("U5", "A coin that did not choose the hook cannot buy $BURR", BURR,
+      "require!(ctx.accounts.coin.burr_share > 0, BurrpadError::HookNotChosen);", "",
+      "a_coin_launched_the_old_way_has_no_burr_share"),
+    M("U6", "One $BURR buy a minute over all coins", BURR,
+      "require!(now >= ready, BurrpadError::BurnTooSoon);", "", "one_burr_buy_a_minute_across_all_coins"),
+    M("U7", "Before any $BURR buy the limit is measured against the fixed starting reserve", BURR,
+      "if shared.reference.quote == 0 { BURR_START_RESERVE }", "if shared.reference.quote == 0 { u64::MAX }",
+      "the_recorded_reserve_starts_at_one_zec_and_grows_a_step_per_buy"),
+    M("U8", "The $BURR limit is measured against the smaller of the reserve now and the recorded one", BURR,
+      "reserves.quote.min(recorded)", "reserves.quote", "burn_burr_buys_burr_and_destroys_it_within_the_limit"),
+    M("U9", "The buy-back receiver is checked before the $BURR buy", BURR,
+      "pump::check_buyback_recipient(\n        &a.amm_global_config.to_account_info(),\n        &pump::PUMP_AMM_ID,\n        &pump::ACC_AMM_GLOBAL_CONFIG,\n        pump::AMM_GLOBAL_BUYBACK_OFFSET,\n        &a.buyback_fee_recipient.to_account_info(),\n        &ZEC_MINT,\n        &a.token_program.key(),\n    )?;",
+      "", "t11_substitution::burn_burr", "swapping buyback_fee_recipient"),
+    M("U10", "What was spent is taken off the $BURR pot", BURR,
+      "ledger.burr.pot = ledger.burr.pot.checked_sub(spent).ok_or(BurrpadError::Overflow)?;", "",
+      "burn_burr_buys_burr_and_destroys_it_within_the_limit"),
+    M("U11", "What was spent is taken off what the vault must cover", BURR,
+      "ledger.accounted = ledger.accounted.checked_sub(spent).ok_or(BurrpadError::Overflow)?;", "",
+      "burn_burr_buys_burr_and_destroys_it_within_the_limit"),
+    M("U12", "Every $BURR bought is burned", BURR,
+      "        burr_after,\n        zec_after,\n    )?;", "        0,\n        zec_after,\n    )?;",
+      "burn_burr_buys_burr_and_destroys_it_within_the_limit"),
+    M("U13", "The recorded $BURR reserve grows one step per buy at most", BURR,
+      "buy.reference = next_reference(&Reserves { quote: recorded, base: shared.reference.base.max(1) }, after)?;",
+      "buy.reference = after;", "the_recorded_reserve_starts_at_one_zec_and_grows_a_step_per_buy"),
+    M("U14", "After a $BURR buy the time is recorded for all coins", BURR,
+      "    buy.last_time = now;", "", "one_burr_buy_a_minute_across_all_coins"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -423,7 +462,7 @@ MANUAL = [
 
 STRUCT_TEST = {
     "Launch": "launch", "SplitOnly": "split", "CollectCurve": "collect_curve", "CollectPool": "collect_pool",
-    "PayOut": "pay_out", "BurnCurve": "burn_curve", "BurnPool": "burn_pool",
+    "PayOut": "pay_out", "BurnCurve": "burn_curve", "BurnPool": "burn_pool", "BurnBurr": "burn_burr",
     "ReleaseHolderRewards": "release_holder_rewards", "Recover": "recover",
 }
 CONSTRAINT_KEYS = ("seeds", "bump", "address", "associated_token::", "token::", "mint::", "has_one", "constraint")

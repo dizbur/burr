@@ -31,8 +31,11 @@ pub struct Config {
     pub default_fee_bps: u16,
     pub launches_paused: bool,
     pub bump: u8,
+    /// One waiting time and one recorded reserve for every coin's $BURR buys
+    /// together, so that several coins' buys cannot be packed into one moment.
+    pub burr_buy: BurrBuy,
     /// Unused. Room for fields a later version may add without moving the account.
-    pub reserved: [u8; 64],
+    pub reserved: [u8; 40],
 }
 
 /// A coin's record. Written once by `launch`. No instruction changes it.
@@ -61,8 +64,11 @@ pub struct Coin {
     pub holders_release_interval_secs: u32,
     pub launched_at: i64,
     pub launcher: Pubkey,
+    /// Share of the hooks' part that buys and burns $BURR. Zero for every coin
+    /// launched before this field existed: they did not choose it.
+    pub burr_share: u16,
     /// Unused. Room for fields a later version may add without moving the account.
-    pub reserved: [u8; 64],
+    pub reserved: [u8; 62],
 }
 
 impl Coin {
@@ -93,8 +99,10 @@ pub struct Ledger {
     pub pots: [u64; SINKS],
     pub burn: BurnState,
     pub holders: HoldersState,
+    /// The sixth pot, for buying and burning $BURR.
+    pub burr: BurrPot,
     /// Unused. Room for fields a later version may add without moving the account.
-    pub reserved: [u8; 128],
+    pub reserved: [u8; 88],
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]
@@ -104,6 +112,23 @@ pub struct BurnState {
     pub reference: Reserves,
     pub total_spent: u64,
     pub total_burned: u64,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]
+pub struct BurrPot {
+    /// What the pot holds now.
+    pub pot: u64,
+    /// All ZEC ever credited to it.
+    pub credited: u128,
+    pub total_spent: u64,
+    pub total_burned: u64,
+}
+
+/// Shared by all coins: when $BURR was last bought, and the pool's figures then.
+#[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]
+pub struct BurrBuy {
+    pub last_time: i64,
+    pub reference: Reserves,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]
