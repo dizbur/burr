@@ -97,19 +97,6 @@ impl Reserves {
         Some(Reserves { quote: self.quote, base: u64::try_from(b).ok()? })
     }
 
-    /// The same reserve figure at a price `band_bps` lower, for stepping a
-    /// reference price downward. Only the coin figure moves.
-    pub fn price_lowered_by(&self, band_bps: u16) -> Option<Reserves> {
-        let b = (self.base as u128).checked_mul(BPS as u128 + band_bps as u128)? / BPS as u128;
-        let b = b.max(self.base as u128 + 1);
-        Some(Reserves { quote: self.quote, base: u64::try_from(b).ok()? })
-    }
-
-    /// True if this price is within `band_bps` of `reference`, either way.
-    pub fn within(&self, reference: &Reserves, band_bps: u16) -> Option<bool> {
-        Some(!self.above(reference, band_bps)? && !reference.above(self, band_bps)?)
-    }
-
     /// The reserve figure raised by `band_bps`: the most a recorded reserve
     /// may grow from one buy to the next.
     pub fn raised_by(&self, band_bps: u16) -> Option<Reserves> {

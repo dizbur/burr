@@ -129,8 +129,8 @@ pub struct LiquidityPot {
     pub total_spent: u64,
     /// Pool receipts (LP tokens) burned, so that liquidity can never be withdrawn.
     pub total_lp_burned: u64,
-    /// The pool's figures as recorded at the last call: the price the band is
-    /// checked against, and the reserve the limit is measured against.
+    /// The pool's figures as recorded at the last call: the reserve the limit
+    /// is measured against.
     pub reference: Reserves,
 }
 

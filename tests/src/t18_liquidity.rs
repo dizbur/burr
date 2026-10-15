@@ -135,30 +135,26 @@ fn an_add_buys_deposits_both_sides_and_burns_every_receipt() {
 }
 
 #[test]
-fn outside_the_band_a_call_only_steps_its_record_and_nothing_is_lost() {
-    let (mut w, mint) = setup(20 * ZEC1);
-    // Push the price 20% up: calls step the recorded price 5% a minute, adding nothing, then add again.
-    let t = w.trader(10_000 * ZEC1);
+fn a_coin_whose_price_really_moves_still_adds_every_call() {
+    // No price band: after a fivefold pump, and after a long slide, the very next call adds.
+    let (mut w, mint) = setup(50 * ZEC1);
+    let t = w.trader(100_000 * ZEC1);
     let (q, _) = w.pool_reserves(&mint);
-    assert!(w.pool_buy(&t, &mint, q / 10).is_ok());
-    let pot = w.ledger(&mint).liquidity.pot;
-    let mut steps = 0;
-    loop {
-        assert!(w.add_liquidity(&mint).is_ok());
-        w.b.wait(60);
-        if w.ledger(&mint).liquidity.pot < pot {
-            break;
+    // The pool's ZEC grows by sqrt(5) - 1 for a fivefold price.
+    assert!(w.pool_buy(&t, &mint, q * 1_236 / 1_000).is_ok());
+    for moved in ["after a fivefold pump", "after a slide back down"] {
+        for call in 0..3 {
+            let pot = w.ledger(&mint).liquidity.pot;
+            let r = w.add_liquidity(&mint);
+            assert!(r.is_ok(), "{moved}, call {call}: {}", logs(&r));
+            assert!(w.ledger(&mint).liquidity.pot < pot, "{moved}, call {call} added");
+            w.b.wait(60);
         }
-        steps += 1;
-        assert!(steps < 20, "it never added again");
+        let held = w.coins_of(&t.pubkey(), &mint);
+        if held > 0 {
+            assert!(w.pool_sell(&t, &mint, held).is_ok());
+        }
     }
-    assert!(steps >= 2, "a 20% push took {steps} steps");
-    // And down: sell it all back and more.
-    let held = w.coins_of(&t.pubkey(), &mint);
-    assert!(w.pool_sell(&t, &mint, held).is_ok());
-    let pot = w.ledger(&mint).liquidity.pot;
-    assert!(w.add_liquidity(&mint).is_ok());
-    assert_eq!(w.ledger(&mint).liquidity.pot, pot, "below the band nothing is added either");
     w.assert_sound(&mint);
 }
 
@@ -194,7 +190,7 @@ fn the_coins_burn_and_its_liquidity_share_one_wait() {
 
 #[test]
 fn buying_before_an_add_and_selling_after_loses_money() {
-    for attack in [ZEC1 / 100, ZEC1 / 10, ZEC1, 5 * ZEC1] {
+    for attack in [ZEC1 / 100, ZEC1 / 10, ZEC1, 5 * ZEC1, 50 * ZEC1, 500 * ZEC1] {
         let (mut w, mint) = setup(50 * ZEC1);
         // Bring the recorded reserve up to the pool's first, so the add uses its full limit.
         for _ in 0..80 {
@@ -204,10 +200,12 @@ fn buying_before_an_add_and_selling_after_loses_money() {
             assert!(w.add_liquidity(&mint).is_ok());
             w.b.wait(60);
         }
-        let attacker = w.trader(1_000 * ZEC1);
+        let attacker = w.trader(10_000 * ZEC1);
         let start = w.zec_of(&attacker.pubkey());
         assert!(w.pool_buy(&attacker, &mint, attack).is_ok());
+        let pot = w.ledger(&mint).liquidity.pot;
         assert!(w.add_liquidity(&mint).is_ok());
+        assert!(w.ledger(&mint).liquidity.pot < pot, "attack {attack}: the add went ahead at the pushed price");
         let held = w.coins_of(&attacker.pubkey(), &mint);
         assert!(w.pool_sell(&attacker, &mint, held).is_ok());
         let gain = w.zec_of(&attacker.pubkey()) as i128 - start as i128;

@@ -79,10 +79,10 @@ pub struct LiquidityAdded {
     pub lp_burned: u64,
 }
 
-/// A liquidity call that found the pool's price outside the band: it only
-/// stepped the recorded price toward the pool's.
+/// The first liquidity call after graduation: it only recorded the pool's
+/// reserve, which the limit is measured against from then on.
 #[event]
-pub struct LiquidityStepped {
+pub struct LiquidityRecorded {
     pub mint: Pubkey,
 }
 

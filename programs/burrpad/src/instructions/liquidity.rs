@@ -3,14 +3,16 @@
 //! what it may use, deposits the coins and the ZEC they match into the pool,
 //! and burns the pool receipts, so that liquidity can never be withdrawn.
 //!
-//! The buy keeps the burn's rules (spend limit, least-out, balance checks,
-//! recorded reserve). A deposit at a pushed price is the one way this hook can
-//! lose value, so it also has a price band: outside it, the call only steps
-//! its recorded price toward the pool's and waits.
+//! The buy keeps the burn's rules: spend limit, least-out, balance checks,
+//! the recorded reserve's step and a wait shared with the coin's own burn.
+//! There is no price band, as for the burn since 14 Oct: the deposit is at
+//! most twice the buy's limit, so whatever someone could win back from it by
+//! pushing the price around a call is a small part of what the push costs
+//! them in fees (worked out in docs/plan-liquidity-hook.md).
 
 use crate::constants::*;
 use crate::error::BurrpadError;
-use crate::events::{LiquidityAdded, LiquidityStepped};
+use crate::events::{LiquidityAdded, LiquidityRecorded};
 use crate::instructions::burn::{burn_and_return, fund_burner, pool_reserves, PoolExpect};
 use crate::math::{self, Reserves};
 use crate::pump;
@@ -159,24 +161,15 @@ pub fn handle_add_liquidity(ctx: Context<AddLiquidity>) -> Result<()> {
     let shares = pump::read_pool_shares(&ctx.accounts.pool.to_account_info())?;
     require_keys_eq!(shares.lp_mint, ctx.accounts.lp_mint.key(), BurrpadError::WrongPumpAccount);
 
-    // The band. The first call only records the pool's figures; a call outside
-    // the band only steps the recorded price toward the pool's. Either way the
-    // pot is untouched and the next call waits the whole minute.
+    // The first call after graduation only records the pool's reserve, which
+    // the limit is then measured against; the pot is untouched and the next
+    // call waits the whole minute.
     let last = ctx.accounts.ledger.liquidity.reference;
-    let stepped = if last.quote == 0 || last.base == 0 {
-        Some(reserves)
-    } else if reserves.above(&last, LIQUIDITY_BAND_BPS).ok_or(BurrpadError::Overflow)? {
-        Some(last.price_raised_by(LIQUIDITY_BAND_BPS).ok_or(BurrpadError::Overflow)?)
-    } else if last.above(&reserves, LIQUIDITY_BAND_BPS).ok_or(BurrpadError::Overflow)? {
-        Some(last.price_lowered_by(LIQUIDITY_BAND_BPS).ok_or(BurrpadError::Overflow)?)
-    } else {
-        None
-    };
-    if let Some(next) = stepped {
+    if last.quote == 0 {
         let ledger = &mut ctx.accounts.ledger;
-        ledger.liquidity.reference = next;
+        ledger.liquidity.reference = reserves;
         ledger.burn.last_time = now;
-        emit!(LiquidityStepped { mint: mint_key });
+        emit!(LiquidityRecorded { mint: mint_key });
         return Ok(());
     }
 
@@ -359,7 +352,7 @@ pub fn handle_add_liquidity(ctx: Context<AddLiquidity>) -> Result<()> {
     )?;
 
     // The record moves, and the next call waits, in proportion to the part of
-    // the buy's limit used. The recorded price is the pool's after this call.
+    // the buy's limit used.
     ctx.accounts.pool_base_token_account.reload()?;
     ctx.accounts.pool_quote_token_account.reload()?;
     let (after, _) = pool_reserves(

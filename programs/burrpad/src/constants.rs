@@ -92,9 +92,7 @@ pub const SINK_BURR: usize = 5;
 pub const SINK_LIQUIDITY: usize = 6;
 /// All pots, the sixth and seventh included, as the split works them out.
 pub const ALL_SINKS: usize = 7;
-/// The liquidity hook adds only while the pool's price is within this much of
-/// the price it recorded; otherwise it steps the record this much and waits.
-pub const LIQUIDITY_BAND_BPS: u16 = 500;
+
 /// $BURR, the platform's own coin: what the sixth pot buys and burns.
 pub const BURR_MINT: Pubkey = pubkey!("GiwMfYS4jHi256G8K41snZhKUovrMbyQL2hqv3fqr7WU");
 /// The reserve the first $BURR buy's limit is measured against, before any has
