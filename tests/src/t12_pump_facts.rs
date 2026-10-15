@@ -119,3 +119,44 @@ fn adding_liquidity_to_a_pool_is_proportional_and_does_not_move_the_price() {
         zec0 - w.zec_of(&lp.pubkey())
     );
 }
+
+#[test]
+fn a_deposit_takes_zec_by_the_pools_balance_less_the_fees_waiting_in_it() {
+    // How PumpSwap's deposit counts each side, pinned to the unit: the coins
+    // by the pool's coin balance; the ZEC by its ZEC balance less the creator
+    // and protocol fees waiting in that account, with no virtual adjustment.
+    // The trading price (which uses the adjustment) does not move.
+    for push in [0u64, 20 * ZEC1, 300 * ZEC1] {
+        let mut w = World::new();
+        let mint = w.launch(&LaunchPlan::default());
+        w.graduate(&mint);
+        let lp = liquidity_provider(&mut w, &mint);
+        if push > 0 {
+            let t = w.trader(10_000 * ZEC1);
+            assert!(w.pool_buy(&t, &mint, push).is_ok());
+        }
+        for part in [1_000u64, 100, 10] {
+            let p = pump::pool(&mint);
+            let zec_balance = w.b.token_balance(&ata(&p, &pump::ZEC, &pump::TOKEN)) as u128;
+            let coin_balance = w.b.token_balance(&ata(&p, &mint, &TOKEN_2022)) as u128;
+            let raw = w.b.account(&p).unwrap().data;
+            let protocol = u64::from_le_bytes(raw[271..279].try_into().unwrap()) as u128;
+            let creator = w.pool(&mint).creator_fees as u128;
+            assert_ne!(w.pool(&mint).virtual_quote_reserves, 0, "the adjustment is in play");
+            let (q0, b0) = w.pool_reserves(&mint);
+            let supply = lp_supply(&w, &mint) as u128;
+            let out = supply / part as u128;
+            let (z0, c0) = (w.zec_of(&lp.pubkey()), w.coins_of(&lp.pubkey(), &mint));
+            let r =
+                w.b.send_as(Some(&lp), &[pump::pool_deposit(&mint, &lp.pubkey(), out as u64, u64::MAX, u64::MAX)], &[]);
+            assert!(r.is_ok(), "{}", logs(&r));
+            let zec = (z0 - w.zec_of(&lp.pubkey())) as u128;
+            let coins = (c0 - w.coins_of(&lp.pubkey(), &mint)) as u128;
+            assert_eq!(zec, (out * (zec_balance - creator - protocol)).div_ceil(supply), "push {push}, 1/{part}: ZEC");
+            assert_eq!(coins, (out * coin_balance).div_ceil(supply), "push {push}, 1/{part}: coins");
+            let (q1, b1) = w.pool_reserves(&mint);
+            let (p0, p1) = (q0 as u128 * b1 as u128, q1 as u128 * b0 as u128);
+            assert!(p0.abs_diff(p1) <= p0 / 100_000, "push {push}, 1/{part}: price moved");
+        }
+    }
+}
