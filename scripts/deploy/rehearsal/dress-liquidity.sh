@@ -9,6 +9,9 @@
 # admin.mjs; and runs the same calls again, plus the new ones. Then compares.
 #   ./scripts/deploy/rehearsal/dress-liquidity.sh <name> <mint,mint,...>
 # Needs BURRPAD_MAINNET_READ_URL: a main-network address to read from.
+# DRESS_SECOND_KIT=<a release-kit folder> upgrades second to that build (from the
+# commit in its commit.txt) instead of a plain build of this folder's commit:
+# the way to rehearse the exact Docker build that will be offered.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
 export PATH="$HOME/.cargo/bin:$HOME/.local/share/solana/install/active_release/bin:$PATH"
@@ -25,11 +28,16 @@ MAINNET_LAMPORTS_PER_BYTE=5080
 step "1. the two commits to upgrade to, the rehearsal's tools, throwaway keys"
 first=$(cat target/release-kit/commit.txt)
 second=$(git rev-parse HEAD)
+[ -z "${DRESS_SECOND_KIT:-}" ] || second=$(cat "$DRESS_SECOND_KIT/commit.txt")
 rm -rf "$work"; mkdir -p "$work/first" "$work/second" "$work/tools" "$work/keys"
 git archive "$first" | tar -x -C "$work/first"
 mkdir -p "$work/first/target"; cp -R target/release-kit "$work/first/target/"
 git archive "$second" | tar -x -C "$work/second"
-( cd "$work/second" && ./scripts/deploy/build.sh --plain > "$root/$work/build-second.log" 2>&1 ) || { tail -20 "$work/build-second.log"; exit 1; }
+if [ -n "${DRESS_SECOND_KIT:-}" ]; then
+  mkdir -p "$work/second/target"; cp -R "$DRESS_SECOND_KIT" "$work/second/target/release-kit"
+else
+  ( cd "$work/second" && ./scripts/deploy/build.sh --plain > "$root/$work/build-second.log" 2>&1 ) || { tail -20 "$work/build-second.log"; exit 1; }
+fi
 git ls-files -co --exclude-standard scripts | while read -r f; do mkdir -p "$work/tools/$(dirname "$f")"; cp "$f" "$work/tools/$f"; done
 mkdir -p "$work/tools/target"; cp -R "$work/second/target/release-kit" "$work/tools/target/"
 for d in first second tools; do ( cd "$work/$d/scripts/deploy" && npm ci --ignore-scripts --no-audit --no-fund >/dev/null 2>&1 ); done
@@ -38,7 +46,7 @@ key() { echo "$root/$work/keys/$1.json"; }; addr() { solana-keygen pubkey "$(key
 kit="$work/tools/scripts/deploy"
 size1=$(wc -c < "$work/first/target/release-kit/burrpad.so" | tr -d ' '); size2=$(wc -c < "$work/second/target/release-kit/burrpad.so" | tr -d ' ')
 echo "first:  ${first:0:7} ($(cat "$work/first/target/release-kit/mode.txt") build, $size1 bytes, sha256 $(shasum -a 256 "$work/first/target/release-kit/burrpad.so" | cut -c1-16)…)"
-echo "second: ${second:0:7} ($(cat "$work/second/target/release-kit/mode.txt") build, $size2 bytes)"
+echo "second: ${second:0:7} ($(cat "$work/second/target/release-kit/mode.txt") build, $size2 bytes, sha256 $(shasum -a 256 "$work/second/target/release-kit/burrpad.so" | cut -c1-16)…)"
 
 step "2. the main network's state, read only (the stand-in for the vault is upgrade key and administrator)"
 BURRPAD_RPC_URL="$BURRPAD_MAINNET_READ_URL" node "$kit/rehearsal/mainnet-copy.mjs" "$work/accounts" --stand-in "$(addr standin)" --trader "$(addr deployer)" --coins "$coins" --admin-stand-in yes --mainnet yes | grep -v "^Network:" > "$work/validator-args.txt"
