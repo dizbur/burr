@@ -45,3 +45,5 @@ mod t18_liquidity;
 mod t19_payout_options;
 #[cfg(test)]
 mod t20_edge_cases;
+#[cfg(test)]
+mod t21_random_life;
