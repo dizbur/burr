@@ -91,6 +91,8 @@ upgrade() {
 
 step "3. before: the calls on the program as it is"
 start
+echo "-- the after-upgrade check keeps the settings as they are now, for after both upgrades"
+node "$kit/after-upgrade.mjs" --save yes --release-kit "$work/second/target/release-kit" --authority "$(addr standin)" | grep -v "^Network:"
 node "$kit/rehearsal/dress.mjs" before --payer "$(key deployer)" --coins "$coins" --out "$work/before.json" | grep -v "^Network:"
 stop
 
@@ -98,6 +100,8 @@ step "4. after: the 16 Oct upgrade, then the Liquidity upgrade, each as the mult
 start
 echo "-- first upgrade (${first:0:7})"; upgrade first
 echo "-- second upgrade (${second:0:7})"; upgrade second
+echo "-- the after-upgrade check, right after the second upgrade, against the second build"
+node "$kit/after-upgrade.mjs" --release-kit "$work/second/target/release-kit" --authority "$(addr standin)" --coins "$coins" | grep -v "^Network:"
 echo "-- private creator payouts opened with admin.mjs: set by the administrator, confirmed by the wallet itself"
 solana airdrop 1 "$(addr payout)" --url "$url" >/dev/null
 node "$kit/admin.mjs" set-creator-payout-wallet "$(addr payout)" --admin-key "$(key standin)" | grep -E "PASS|STOPPED|creator payout"
