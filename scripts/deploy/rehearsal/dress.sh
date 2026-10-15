@@ -55,6 +55,10 @@ trap stop EXIT
 step "3. before: the calls on the program as it is"
 start
 echo "program room: $(solana program show 42w1jV45WeSmfM96vr6GrqSWRcyF5rVbPWjmQ89bvdhg --url "$url" | grep 'Data Length')"
+echo "-- the after-upgrade check, before the upgrade (the code check must fail: it is still the old program)"
+vault=$(node -e 'console.log("E8p8BftBH5Yy2bDGKHda4d5HXDfhVkq8oghBUbZ42pRY")')
+node "$kit/after-upgrade.mjs" --save yes --authority "$(addr standin)" --admin "$vault" | grep -v "^Network:"
+node "$kit/after-upgrade.mjs" --authority "$(addr standin)" --admin "$vault" --coins "$coins" | grep -v "^Network:" || true
 node "$kit/rehearsal/dress.mjs" before --payer "$(key deployer)" --coins "$coins" --out "$work/before.json"
 stop
 
@@ -72,6 +76,8 @@ buffer=$(grep "buffer address:" "$work/upgrade.log" | awk '{print $NF}')
 node "$kit/rehearsal/stand-in.mjs" upgrade "$buffer" --spill "$(addr deployer)" --key "$(key standin)"
 sleep 2
 ( cd "$work/owner" && node scripts/deploy/verify-code.mjs ) | grep -E "PASS|FAIL"
+echo "-- the after-upgrade check, right after the upgrade"
+node "$kit/after-upgrade.mjs" --authority "$(addr standin)" --admin "$vault" --coins "$coins" | grep -v "^Network:"
 node "$kit/rehearsal/dress.mjs" after --payer "$(key deployer)" --coins "$coins" --out "$work/after.json"
 stop
 
