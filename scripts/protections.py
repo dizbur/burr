@@ -142,9 +142,9 @@ MANUAL = [
     M("L18", "The launch price is recorded as the first reference for buy back and burn", LAUNCH,
       "ledger.burn.reference = math::Reserves { quote: curve.virtual_quote_reserves, base: curve.virtual_token_reserves };",
       "ledger.burn.reference = math::Reserves { quote: u64::MAX / 2, base: 1 };",
-      "the_first_burn_is_checked_against_the_launch_price"),
+      "liquidity_added_at_the_end_of_a_climb_does_not_raise_the_pool_burns_limit"),
     M("L19", "The first burn cannot come in the first minute", LAUNCH,
-      "ledger.burn.last_time = now;", "", "the_first_burn_is_checked_against_the_launch_price"),
+      "ledger.burn.last_time = now;", "", "a_push_before_the_first_burn_cannot_raise_what_it_spends"),
 
     M("L20", "A launch stops if the platform's fraction is above what the launcher agreed", LAUNCH,
       "cfg.platform_fraction_bps <= args.max_platform_fraction_bps && ", "",
