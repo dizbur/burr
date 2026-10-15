@@ -120,15 +120,17 @@ pub struct Launch<'info> {
 }
 
 pub fn handle_launch<'info>(ctx: Context<'info, Launch<'info>>, args: LaunchArgs) -> Result<()> {
-    handle_launch_with_burr(ctx, args, 0)
+    handle_launch_with_extras(ctx, args, 0, 0)
 }
 
-/// A launch whose fee may also buy and burn $BURR: `burr_share` counts with
-/// the four hooks' shares, and all five add to 10,000.
-pub fn handle_launch_with_burr<'info>(
+/// A launch whose fee may also buy and burn $BURR and add liquidity to the
+/// coin's own pool: `burr_share` and `liquidity_share` count with the four
+/// hooks' shares, and all six add to 10,000.
+pub fn handle_launch_with_extras<'info>(
     ctx: Context<'info, Launch<'info>>,
     args: LaunchArgs,
     burr_share: u16,
+    liquidity_share: u16,
 ) -> Result<()> {
     let a = &ctx.accounts;
     let cfg = &a.config;
@@ -143,7 +145,7 @@ pub fn handle_launch_with_burr<'info>(
     );
     require!(args.fee_bps >= cfg.min_fee_bps && args.fee_bps <= cfg.max_fee_bps, BurrpadError::FeeOutOfRange);
     require!(
-        math::weights_with_burr(cfg.platform_fraction_bps, &args.shares, burr_share).is_some(),
+        math::weights_all(cfg.platform_fraction_bps, &args.shares, burr_share, liquidity_share).is_some(),
         BurrpadError::SharesDoNotAddUp
     );
     require!(
@@ -269,6 +271,7 @@ pub fn handle_launch_with_burr<'info>(
     coin.platform_receiver = platform_receiver;
     coin.shares = args.shares;
     coin.burr_share = burr_share;
+    coin.liquidity_share = liquidity_share;
     coin.creator_receiver = args.creator_receiver;
     coin.give_receiver = args.give_receiver;
     coin.burn_cooldown_secs = BURN_COOLDOWN_SECS;

@@ -67,8 +67,11 @@ pub struct Coin {
     /// Share of the hooks' part that buys and burns $BURR. Zero for every coin
     /// launched before this field existed: they did not choose it.
     pub burr_share: u16,
+    /// Share of the hooks' part that is added to the coin's own pool for good.
+    /// Zero for every coin launched before this field existed.
+    pub liquidity_share: u16,
     /// Unused. Room for fields a later version may add without moving the account.
-    pub reserved: [u8; 62],
+    pub reserved: [u8; 60],
 }
 
 impl Coin {
@@ -101,8 +104,10 @@ pub struct Ledger {
     pub holders: HoldersState,
     /// The sixth pot, for buying and burning $BURR.
     pub burr: BurrPot,
+    /// The seventh pot, for adding liquidity to the coin's own pool.
+    pub liquidity: LiquidityPot,
     /// Unused. Room for fields a later version may add without moving the account.
-    pub reserved: [u8; 88],
+    pub reserved: [u8; 32],
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]
@@ -112,6 +117,21 @@ pub struct BurnState {
     pub reference: Reserves,
     pub total_spent: u64,
     pub total_burned: u64,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]
+pub struct LiquidityPot {
+    /// What the pot holds now.
+    pub pot: u64,
+    /// All ZEC ever credited to it.
+    pub credited: u128,
+    /// ZEC that went into the pool: the half spent buying coins and the half deposited.
+    pub total_spent: u64,
+    /// Pool receipts (LP tokens) burned, so that liquidity can never be withdrawn.
+    pub total_lp_burned: u64,
+    /// The pool's figures as recorded at the last call: the price the band is
+    /// checked against, and the reserve the limit is measured against.
+    pub reference: Reserves,
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]

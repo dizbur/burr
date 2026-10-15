@@ -4,6 +4,7 @@ pub mod burr;
 pub mod collect;
 pub mod holders;
 pub mod launch;
+pub mod liquidity;
 pub mod pay_out;
 
 pub use admin::*;
@@ -12,4 +13,5 @@ pub use burr::*;
 pub use collect::*;
 pub use holders::*;
 pub use launch::*;
+pub use liquidity::*;
 pub use pay_out::*;

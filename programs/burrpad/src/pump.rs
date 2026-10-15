@@ -35,6 +35,7 @@ pub const SEED_MAYHEM_SOL_VAULT: &[u8] = b"sol-vault";
 pub const SEED_MAYHEM_STATE: &[u8] = b"mayhem-state";
 pub const SEED_AMM_GLOBAL_CONFIG: &[u8] = b"global_config";
 pub const SEED_AMM_POOL: &[u8] = b"pool";
+pub const SEED_POOL_LP_MINT: &[u8] = b"pool_lp_mint";
 pub const SEED_AMM_CREATOR_VAULT: &[u8] = b"creator_vault";
 /// Pools made by graduation always have index 0.
 pub const CANONICAL_POOL_INDEX: [u8; 2] = [0, 0];
@@ -47,6 +48,7 @@ pub const IX_BUY_EXACT_QUOTE_IN_V3: [u8; 8] = [225, 247, 80, 30, 213, 179, 132, 
 pub const IX_INIT_USER_VOLUME: [u8; 8] = [94, 6, 202, 115, 255, 96, 232, 183];
 pub const IX_AMM_COLLECT_COIN_CREATOR_FEE: [u8; 8] = [160, 57, 89, 42, 181, 139, 43, 66];
 pub const IX_AMM_BUY_EXACT_QUOTE_IN_V2: [u8; 8] = [194, 171, 28, 70, 104, 77, 91, 47];
+pub const IX_AMM_DEPOSIT: [u8; 8] = [242, 35, 198, 137, 82, 225, 242, 182];
 
 // Account codes.
 pub const ACC_BONDING_CURVE: [u8; 8] = [23, 183, 248, 55, 96, 216, 172, 96];
@@ -139,6 +141,31 @@ pub fn read_pool(ai: &AccountInfo) -> Result<PoolView> {
         pool_quote_token_account: key_at(&d, 171),
         virtual_quote_reserves: i128::from_le_bytes(v),
         creator_fee_bps: u64_at(&d, 261),
+    })
+}
+
+/// A pool's receipts, and the fees waiting in its ZEC account.
+pub struct PoolShares {
+    pub lp_mint: Pubkey,
+    /// Receipts issued, burned ones included: a burn does not lower it.
+    pub lp_supply: u64,
+    /// Creator and protocol fees waiting in the pool's ZEC account. A deposit
+    /// counts the pool's ZEC as its balance less these (measured on the bench
+    /// against PumpSwap's own program).
+    pub fees_waiting: u64,
+}
+
+const POOL_SHARES_LEN: usize = 287;
+
+/// Reads a pool's receipt figures. Same owner and code checks as `read_pool`.
+pub fn read_pool_shares(ai: &AccountInfo) -> Result<PoolShares> {
+    require_keys_eq!(*ai.owner, PUMP_AMM_ID, BurrpadError::WrongPumpAccount);
+    let d = ai.try_borrow_data()?;
+    require!(d.len() >= POOL_SHARES_LEN && d[..8] == ACC_POOL, BurrpadError::UnreadablePumpAccount);
+    Ok(PoolShares {
+        lp_mint: key_at(&d, 107),
+        lp_supply: u64_at(&d, 203),
+        fees_waiting: u64_at(&d, 271).checked_add(u64_at(&d, 279)).ok_or(BurrpadError::Overflow)?,
     })
 }
 
@@ -654,6 +681,74 @@ pub fn buy_on_pool(a: PoolBuy, quote_in: u64, min_out: u64, signer_seeds: &[&[&[
         a.user_volume.clone(),
         a.fee_config.clone(),
         a.buyback_fee_recipient.clone(),
+        a.event_authority.clone(),
+        a.amm_program.clone(),
+    ];
+    call(a.amm_program, &PUMP_AMM_ID, metas, &infos, data, signer_seeds)
+}
+
+/// Accounts of a deposit into a pool (`deposit`).
+pub struct PoolDeposit<'a, 'info> {
+    pub amm_program: &'a AccountInfo<'info>,
+    pub pool: &'a AccountInfo<'info>,
+    pub global_config: &'a AccountInfo<'info>,
+    pub user: &'a AccountInfo<'info>,
+    pub base_mint: &'a AccountInfo<'info>,
+    pub quote_mint: &'a AccountInfo<'info>,
+    pub lp_mint: &'a AccountInfo<'info>,
+    pub user_base: &'a AccountInfo<'info>,
+    pub user_quote: &'a AccountInfo<'info>,
+    pub user_lp: &'a AccountInfo<'info>,
+    pub pool_base: &'a AccountInfo<'info>,
+    pub pool_quote: &'a AccountInfo<'info>,
+    pub token_program: &'a AccountInfo<'info>,
+    pub token_2022_program: &'a AccountInfo<'info>,
+    pub event_authority: &'a AccountInfo<'info>,
+}
+
+/// Deposits into a pool for exactly `lp_out` receipts, taking at most the two amounts.
+pub fn deposit_to_pool(
+    a: PoolDeposit,
+    lp_out: u64,
+    max_base: u64,
+    max_quote: u64,
+    signer_seeds: &[&[&[u8]]],
+) -> Result<()> {
+    let mut data = IX_AMM_DEPOSIT.to_vec();
+    for v in [lp_out, max_base, max_quote] {
+        data.extend_from_slice(&v.to_le_bytes());
+    }
+    let metas = vec![
+        rw(a.pool),
+        ro(a.global_config),
+        rws(a.user),
+        ro(a.base_mint),
+        ro(a.quote_mint),
+        rw(a.lp_mint),
+        rw(a.user_base),
+        rw(a.user_quote),
+        rw(a.user_lp),
+        rw(a.pool_base),
+        rw(a.pool_quote),
+        ro(a.token_program),
+        ro(a.token_2022_program),
+        ro(a.event_authority),
+        ro(a.amm_program),
+    ];
+    let infos = [
+        a.pool.clone(),
+        a.global_config.clone(),
+        a.user.clone(),
+        a.base_mint.clone(),
+        a.quote_mint.clone(),
+        a.lp_mint.clone(),
+        a.user_base.clone(),
+        a.user_quote.clone(),
+        a.user_lp.clone(),
+        a.pool_base.clone(),
+        a.pool_quote.clone(),
+        a.token_program.clone(),
+        a.token_2022_program.clone(),
         a.event_authority.clone(),
         a.amm_program.clone(),
     ];

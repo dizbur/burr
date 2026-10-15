@@ -55,6 +55,7 @@ pub struct LaunchPlan {
     pub platform_receiver: Option<Pubkey>,
     /// The share that buys and burns $BURR. Above 0, the launch uses `launch_v2`.
     pub burr_share: u16,
+    pub liquidity_share: u16,
 }
 
 impl Default for LaunchPlan {
@@ -69,6 +70,7 @@ impl Default for LaunchPlan {
             max_platform_fraction_bps: None,
             platform_receiver: None,
             burr_share: 0,
+            liquidity_share: 0,
         }
     }
 }
@@ -210,7 +212,14 @@ impl World {
                 max_platform_fraction_bps: plan.max_platform_fraction_bps.unwrap_or(cfg.platform_fraction_bps),
                 platform_receiver: plan.platform_receiver.unwrap_or(cfg.platform_receiver),
             };
-            if plan.burr_share > 0 {
+            if plan.liquidity_share > 0 {
+                burrpad::instruction::LaunchV3 {
+                    args,
+                    burr_share: plan.burr_share,
+                    liquidity_share: plan.liquidity_share,
+                }
+                .data()
+            } else if plan.burr_share > 0 {
                 burrpad::instruction::LaunchV2 { args, burr_share: plan.burr_share }.data()
             } else {
                 burrpad::instruction::Launch { args }.data()
@@ -266,12 +275,12 @@ impl World {
     /// says, and the pots never add up to more than the ledger's total.
     pub fn assert_sound(&self, mint: &Pubkey) {
         let l = self.ledger(mint);
-        let pots: u128 = l.pots.iter().map(|p| *p as u128).sum::<u128>() + l.burr.pot as u128;
+        let pots: u128 = l.pots.iter().map(|p| *p as u128).sum::<u128>() + l.burr.pot as u128 + l.liquidity.pot as u128;
         assert!(self.vault_balance(mint) >= l.accounted, "vault below accounted");
         assert!(pots <= l.accounted as u128, "pots above accounted");
-        assert!(l.accounted as u128 - pots < 6, "carry too large");
-        let credited: u128 = l.credited.iter().sum::<u128>() + l.burr.credited;
-        assert!(credited <= l.total_split && l.total_split - credited < 6, "credited does not match total");
+        assert!(l.accounted as u128 - pots < 7, "carry too large");
+        let credited: u128 = l.credited.iter().sum::<u128>() + l.burr.credited + l.liquidity.credited;
+        assert!(credited <= l.total_split && l.total_split - credited < 7, "credited does not match total");
     }
 
     // ---- trades made straight on pump.fun, as an ordinary trader would ----
@@ -538,6 +547,46 @@ impl World {
     }
     pub fn burn_pool(&mut self, mint: &Pubkey) -> TxResult {
         let i = ix(self.burn_pool_accounts(&self.b.payer.pubkey(), mint), burrpad::instruction::BurnPool {});
+        self.b.send(&[i], &[])
+    }
+
+    // ---- Liquidity ----
+
+    pub fn add_liquidity_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burrpad::accounts::AddLiquidity {
+        let pool = pump::pool(mint);
+        let bn = burner(mint);
+        let lp = pump::lp_mint(mint);
+        burrpad::accounts::AddLiquidity {
+            payer: *payer,
+            mint: *mint,
+            coin: coin(mint),
+            ledger: ledger(mint),
+            authority: authority(mint),
+            vault: vault(mint),
+            zec_mint: ZEC,
+            burner: bn,
+            burner_zec: ata(&bn, &ZEC, &TOKEN),
+            burner_coin: ata(&bn, mint, &TOKEN_2022),
+            lp_mint: lp,
+            burner_lp: ata(&bn, &lp, &TOKEN_2022),
+            amm_global_config: pump::amm_global_config(),
+            pool_authority: pump::pool_authority(mint),
+            pool,
+            pool_base_token_account: ata(&pool, mint, &TOKEN_2022),
+            pool_quote_token_account: ata(&pool, &ZEC, &TOKEN),
+            user_volume: pda(&[b"user_volume_accumulator", bn.as_ref()], &PUMP_AMM),
+            fee_config: pda(&[b"fee_config", PUMP_AMM.as_ref()], &PUMP_FEES),
+            buyback_fee_recipient: ata(&BUYBACK, &ZEC, &TOKEN),
+            amm_event_authority: pump::amm_event_authority(),
+            amm_program: PUMP_AMM,
+            token_program: TOKEN,
+            token_2022_program: TOKEN_2022,
+            associated_token_program: ATA_PROGRAM,
+            system_program: SYSTEM,
+        }
+    }
+    pub fn add_liquidity(&mut self, mint: &Pubkey) -> TxResult {
+        let i = ix(self.add_liquidity_accounts(&self.b.payer.pubkey(), mint), burrpad::instruction::AddLiquidity {});
         self.b.send(&[i], &[])
     }
 

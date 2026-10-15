@@ -10,23 +10,25 @@ pub const WEIGHT_TOTAL: u128 = 100_000_000;
 
 /// The split weights of a coin: the platform's, then one per hook.
 pub fn weights(platform_fraction_bps: u16, shares: &[u16; HOOKS]) -> Option<[u128; SINKS]> {
-    let w = weights_with_burr(platform_fraction_bps, shares, 0)?;
+    let w = weights_all(platform_fraction_bps, shares, 0, 0)?;
     let mut out = [0u128; SINKS];
     out.copy_from_slice(&w[..SINKS]);
     Some(out)
 }
 
-/// The weights of all six pots: the platform's, the four hooks', and the one
-/// that buys $BURR. The five shares must add to the whole.
-pub fn weights_with_burr(
+/// The weights of all seven pots: the platform's, the four hooks', the one
+/// that buys $BURR and the one that adds liquidity. The six shares must add
+/// to the whole.
+pub fn weights_all(
     platform_fraction_bps: u16,
     shares: &[u16; HOOKS],
     burr_share: u16,
+    liquidity_share: u16,
 ) -> Option<[u128; ALL_SINKS]> {
     if platform_fraction_bps > BPS {
         return None;
     }
-    let mut sum: u32 = burr_share as u32;
+    let mut sum: u32 = burr_share as u32 + liquidity_share as u32;
     for s in shares {
         sum = sum.checked_add(*s as u32)?;
     }
@@ -40,6 +42,7 @@ pub fn weights_with_burr(
         w[i + 1] = rest * (*s as u128);
     }
     w[SINK_BURR] = rest * burr_share as u128;
+    w[SINK_LIQUIDITY] = rest * liquidity_share as u128;
     Some(w)
 }
 
@@ -92,6 +95,19 @@ impl Reserves {
         let b = (self.base as u128).checked_mul(BPS as u128)? / (BPS as u128 + band_bps as u128);
         let b = b.min((self.base as u128).saturating_sub(1)).max(1);
         Some(Reserves { quote: self.quote, base: u64::try_from(b).ok()? })
+    }
+
+    /// The same reserve figure at a price `band_bps` lower, for stepping a
+    /// reference price downward. Only the coin figure moves.
+    pub fn price_lowered_by(&self, band_bps: u16) -> Option<Reserves> {
+        let b = (self.base as u128).checked_mul(BPS as u128 + band_bps as u128)? / BPS as u128;
+        let b = b.max(self.base as u128 + 1);
+        Some(Reserves { quote: self.quote, base: u64::try_from(b).ok()? })
+    }
+
+    /// True if this price is within `band_bps` of `reference`, either way.
+    pub fn within(&self, reference: &Reserves, band_bps: u16) -> Option<bool> {
+        Some(!self.above(reference, band_bps)? && !reference.above(self, band_bps)?)
     }
 
     /// The reserve figure raised by `band_bps`: the most a recorded reserve
@@ -150,6 +166,26 @@ pub fn burr_next_reserve(last: u64, after: u64, step_bps: u64) -> Option<u64> {
     let low = (last as u128).saturating_sub(move_by);
     let high = (last as u128).checked_add(move_by)?;
     u64::try_from((after as u128).clamp(low, high)).ok()
+}
+
+/// The pool receipts a deposit can take for `coins` and `zec`: the most both
+/// cover at the pool's own figures (`pool_zec` as the deposit counts it).
+pub fn lp_for(coins: u64, zec: u64, pool_coins: u64, pool_zec: u64, lp_supply: u64) -> Option<u64> {
+    if pool_coins == 0 || pool_zec == 0 {
+        return None;
+    }
+    let by_coins = (coins as u128).checked_mul(lp_supply as u128)? / pool_coins as u128;
+    let by_zec = (zec as u128).checked_mul(lp_supply as u128)? / pool_zec as u128;
+    u64::try_from(by_coins.min(by_zec)).ok()
+}
+
+/// What a deposit of `lp` receipts takes from one side holding `pool_side`:
+/// rounded up, as the pool works it out.
+pub fn deposit_side(lp: u64, pool_side: u64, lp_supply: u64) -> Option<u64> {
+    if lp_supply == 0 {
+        return None;
+    }
+    u64::try_from((lp as u128).checked_mul(pool_side as u128)?.div_ceil(lp_supply as u128)).ok()
 }
 
 /// Fewest coins a buy back accepts: the fee-free figure, less the coin's own

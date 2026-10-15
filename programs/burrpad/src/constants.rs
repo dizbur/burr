@@ -87,8 +87,14 @@ pub const SINK_HOLDERS: usize = 4;
 /// above (in spare room of the records), so that launched coins' records keep
 /// their layout. Its share counts with the four hooks': all five add to 10,000.
 pub const SINK_BURR: usize = 5;
-/// All pots, the sixth included, as the split works them out.
-pub const ALL_SINKS: usize = 6;
+/// The seventh pot: liquidity added to the coin's own pool for good. Kept
+/// apart in spare room too; all six shares add to 10,000.
+pub const SINK_LIQUIDITY: usize = 6;
+/// All pots, the sixth and seventh included, as the split works them out.
+pub const ALL_SINKS: usize = 7;
+/// The liquidity hook adds only while the pool's price is within this much of
+/// the price it recorded; otherwise it steps the record this much and waits.
+pub const LIQUIDITY_BAND_BPS: u16 = 500;
 /// $BURR, the platform's own coin: what the sixth pot buys and burns.
 pub const BURR_MINT: Pubkey = pubkey!("GiwMfYS4jHi256G8K41snZhKUovrMbyQL2hqv3fqr7WU");
 /// The reserve the first $BURR buy's limit is measured against, before any has

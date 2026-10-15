@@ -61,6 +61,31 @@ pub struct SplitBurr {
     pub credited: u64,
 }
 
+/// What a split gave the liquidity pot.
+#[event]
+pub struct SplitLiquidity {
+    pub mint: Pubkey,
+    pub credited: u64,
+}
+
+/// Liquidity added to a coin's own pool for good: ZEC and coins deposited,
+/// ZEC spent buying those coins, and pool receipts burned.
+#[event]
+pub struct LiquidityAdded {
+    pub mint: Pubkey,
+    pub zec_spent_buying: u64,
+    pub zec_deposited: u64,
+    pub coins_deposited: u64,
+    pub lp_burned: u64,
+}
+
+/// A liquidity call that found the pool's price outside the band: it only
+/// stepped the recorded price toward the pool's.
+#[event]
+pub struct LiquidityStepped {
+    pub mint: Pubkey,
+}
+
 /// $BURR was bought with a coin's sixth pot and burned.
 #[event]
 pub struct BurrBurned {

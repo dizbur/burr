@@ -85,7 +85,17 @@ pub mod burrpad {
 
     /// The same, with part of the hooks' share buying and burning $BURR.
     pub fn launch_v2<'info>(ctx: Context<'info, Launch<'info>>, args: LaunchArgs, burr_share: u16) -> Result<()> {
-        instructions::launch::handle_launch_with_burr(ctx, args, burr_share)
+        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, 0)
+    }
+
+    /// The same, with part of the hooks' share also added to the coin's own pool for good.
+    pub fn launch_v3<'info>(
+        ctx: Context<'info, Launch<'info>>,
+        args: LaunchArgs,
+        burr_share: u16,
+        liquidity_share: u16,
+    ) -> Result<()> {
+        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, liquidity_share)
     }
 
     pub fn split(ctx: Context<SplitOnly>) -> Result<()> {
@@ -122,6 +132,11 @@ pub mod burrpad {
     /// Buys $BURR with the coin's sixth pot and burns it.
     pub fn burn_burr(ctx: Context<BurnBurr>) -> Result<()> {
         instructions::burr::handle_burn_burr(ctx)
+    }
+
+    /// Adds part of a graduated coin's fee to its own pool and burns the receipts.
+    pub fn add_liquidity(ctx: Context<AddLiquidity>) -> Result<()> {
+        instructions::liquidity::handle_add_liquidity(ctx)
     }
 
     // ---- holders ----

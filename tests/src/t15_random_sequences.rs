@@ -59,9 +59,11 @@ fn open() -> Books {
     for (fee_bps, shares, burr_share, graduated) in [
         (200u16, [2_000u16, 2_000, 2_000, 2_000], 2_000u16, false),
         (300, [0, 1_000, 4_000, 5_000], 0, false),
-        (100, [4_000, 0, 3_000, 1_000], 2_000, true),
+        (100, [3_000, 0, 2_000, 1_000], 2_000, true),
     ] {
-        let plan = LaunchPlan { fee_bps, shares, burr_share, ..Default::default() };
+        // The graduated coin also adds to its own pool.
+        let liquidity_share = if graduated { 2_000 } else { 0 };
+        let plan = LaunchPlan { fee_bps, shares, burr_share, liquidity_share, ..Default::default() };
         let mint = w.launch(&plan);
         if graduated {
             w.graduate(&mint);
@@ -93,8 +95,9 @@ impl Books {
             // The vault covers the ledger; the pots add up; nothing is negative (they are unsigned, so: nothing wrapped).
             w.assert_sound(m);
             let l = w.ledger(m);
-            let pots: u128 = l.pots.iter().map(|p| *p as u128).sum::<u128>() + l.burr.pot as u128;
-            let credited: u128 = l.credited.iter().sum::<u128>() + l.burr.credited;
+            let pots: u128 =
+                l.pots.iter().map(|p| *p as u128).sum::<u128>() + l.burr.pot as u128 + l.liquidity.pot as u128;
+            let credited: u128 = l.credited.iter().sum::<u128>() + l.burr.credited + l.liquidity.credited;
             assert_eq!(
                 l.accounted as u128 - pots,
                 l.total_split - credited,
@@ -126,6 +129,11 @@ impl Books {
                 l.burr.credited,
                 l.burr.pot as u128 + l.burr.total_spent as u128,
                 "{at}: coin {i}: the $BURR pot does not close"
+            );
+            assert_eq!(
+                l.liquidity.credited,
+                l.liquidity.pot as u128 + l.liquidity.total_spent as u128,
+                "{at}: coin {i}: the liquidity pot does not close"
             );
             platform_due += l.credited[0] - l.pots[0] as u128;
             released += l.holders.total_released;
@@ -196,6 +204,31 @@ impl Books {
                     let limit = quote.min(recorded) as u128 * fee / 40_000;
                     assert!(spent > 0 && spent as u128 <= limit, "a $BURR burn spent {spent}, limit {limit}");
                     self.did[0] += 1;
+                } else {
+                    assert_eq!(spent, 0);
+                }
+            }
+            7 | 8 if grad && s.amount % 3 == 1 => {
+                // A liquidity call: never above twice the buy's limit, only from its own pot, never in the coin's burn wait.
+                let (quote, _) = self.w.pool_reserves(&m);
+                let coin = self.w.coin(&m);
+                let fee = (self.w.pool(&m).creator_fee_bps as u128).min(coin.fee_bps as u128);
+                let r = self.w.add_liquidity(&m);
+                let after = self.w.ledger(&m);
+                let spent = before.liquidity.pot - after.liquidity.pot;
+                assert_eq!(after.pots, before.pots, "a liquidity call touched another pot");
+                if r.is_ok() {
+                    assert!(
+                        now >= before.burn.last_time + coin.burn_cooldown_secs as i64,
+                        "a liquidity call inside the wait"
+                    );
+                    let limit = quote.min(before.liquidity.reference.quote) as u128 * fee / 40_000;
+                    assert!(
+                        spent as u128 <= 2 * limit,
+                        "a liquidity call spent {spent}, twice its limit is {}",
+                        2 * limit
+                    );
+                    self.did[0] += (spent > 0) as u32;
                 } else {
                     assert_eq!(spent, 0);
                 }
@@ -429,6 +462,9 @@ fn instructions_for(
     ];
     if plan.burr_share > 0 {
         v.push(("burn_burr", built(w.burn_burr_accounts(&pk, m), burrpad::instruction::BurnBurr {}), me()));
+    }
+    if graduated && plan.liquidity_share > 0 {
+        v.push(("add_liquidity", built(w.add_liquidity_accounts(&pk, m), burrpad::instruction::AddLiquidity {}), me()));
     }
     if graduated {
         v.push(("collect_pool", built(w.collect_pool_accounts(&pk, m), burrpad::instruction::CollectPool {}), me()));

@@ -39,3 +39,5 @@ mod t15_random_sequences;
 mod t16_more_attacks;
 #[cfg(test)]
 mod t17_burn_burr;
+#[cfg(test)]
+mod t18_liquidity;

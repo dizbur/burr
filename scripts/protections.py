@@ -43,6 +43,7 @@ PAY = "instructions/pay_out.rs"
 BURN = "instructions/burn.rs"
 HOLD = "instructions/holders.rs"
 BURR = "instructions/burr.rs"
+LIQ = "instructions/liquidity.rs"
 
 MANUAL = [
     # ---- the administrator ----
@@ -106,7 +107,7 @@ MANUAL = [
     M("L3", "A coin's fee cannot be above the highest allowed", LAUNCH,
       " && args.fee_bps <= cfg.max_fee_bps", "", "launch_refuses_bad_plans"),
     M("L4", "Hook shares must add up to exactly the whole", LAUNCH,
-      "require!(\n        math::weights_with_burr(cfg.platform_fraction_bps, &args.shares, burr_share).is_some(),\n        BurrpadError::SharesDoNotAddUp\n    );", "",
+      "require!(\n        math::weights_all(cfg.platform_fraction_bps, &args.shares, burr_share, liquidity_share).is_some(),\n        BurrpadError::SharesDoNotAddUp\n    );", "",
       "launch_refuses_bad_plans"),
     M("L5", "A chosen creator's share needs a receiver", LAUNCH,
       "args.shares[SINK_CREATOR - 1] == 0 || args.creator_receiver != Pubkey::default()", "true",
@@ -182,7 +183,8 @@ MANUAL = [
       "require!(d.len() >= CURVE_MIN_LEN, BurrpadError::UnreadablePumpAccount);",
       "the_curve_reader_checks_owner_code_and_length"),
     M("R3", "A pool account must be owned by PumpSwap", "pump.rs",
-      "require_keys_eq!(*ai.owner, PUMP_AMM_ID, BurrpadError::WrongPumpAccount);", "",
+      "require_keys_eq!(*ai.owner, PUMP_AMM_ID, BurrpadError::WrongPumpAccount);\n    let d = ai.try_borrow_data()?;\n    require!(d.len() >= POOL_MIN_LEN",
+      "let d = ai.try_borrow_data()?;\n    require!(d.len() >= POOL_MIN_LEN",
       "the_pool_reader_checks_owner_code_and_length"),
     M("R4", "A pool account must be long enough and carry the pool's code", "pump.rs",
       "require!(d.len() >= POOL_MIN_LEN && d[..8] == ACC_POOL, BurrpadError::UnreadablePumpAccount);",
@@ -421,7 +423,8 @@ MANUAL = [
 
     # ---- burning $BURR ----
     M("U1", "The $BURR shares count in the whole the shares must add to", "math.rs",
-      "let mut sum: u32 = burr_share as u32;", "let mut sum: u32 = 0;", "shares_with_burr_must_add_to_the_whole"),
+      "let mut sum: u32 = burr_share as u32 + liquidity_share as u32;", "let mut sum: u32 = liquidity_share as u32;",
+      "shares_with_burr_must_add_to_the_whole"),
     M("U2", "The $BURR pot gets its weight of every split", "math.rs",
       "w[SINK_BURR] = rest * burr_share as u128;", "", "a_launch_can_give_part_of_the_fee_to_burning_burr"),
     M("U3", "What the split gives the $BURR pot is added to it", "ops.rs",
@@ -471,6 +474,63 @@ MANUAL = [
     M("U14", "After a $BURR buy the time is recorded for all coins", BURR,
       "buy.ready_at = now.checked_add(wait as i64).ok_or(BurrpadError::Overflow)?;", "",
       "one_burr_buy_a_minute_across_all_coins"),
+
+    # ---- liquidity ----
+    M("Q1", "The liquidity share counts in the whole the shares must add to", "math.rs",
+      "let mut sum: u32 = burr_share as u32 + liquidity_share as u32;", "let mut sum: u32 = burr_share as u32;",
+      "a_launch_can_give_part_of_the_fee_to_its_own_pool"),
+    M("Q2", "The liquidity pot gets its weight of every split", "math.rs",
+      "w[SINK_LIQUIDITY] = rest * liquidity_share as u128;", "", "a_launch_can_give_part_of_the_fee_to_its_own_pool"),
+    M("Q3", "What the split gives the liquidity pot is added to it", "ops.rs",
+      "ledger.liquidity.pot = ledger.liquidity.pot.checked_add(all[SINK_LIQUIDITY]).ok_or(BurrpadError::Overflow)?;", "",
+      "a_launch_can_give_part_of_the_fee_to_its_own_pool"),
+    M("Q4", "The liquidity pot's running total is kept", "ops.rs",
+      "ledger.liquidity.credited = credited[SINK_LIQUIDITY];", "", "a_launch_can_give_part_of_the_fee_to_its_own_pool"),
+    M("Q5", "A coin that did not choose the hook adds nothing", LIQ,
+      "require!(ctx.accounts.coin.liquidity_share > 0, BurrpadError::HookNotChosen);", "",
+      "coins_without_the_share_and_coins_on_the_curve_add_nothing"),
+    M("Q6", "A liquidity call waits out the coin's burn wait", LIQ,
+      "require!(now >= ready, BurrpadError::BurnTooSoon);", "", "the_coins_burn_and_its_liquidity_share_one_wait"),
+    M("Q7", "The receipt mint passed is the one the pool's record names", LIQ,
+      "require_keys_eq!(shares.lp_mint, ctx.accounts.lp_mint.key(), BurrpadError::WrongPumpAccount);", "",
+      "t11_substitution::add_liquidity", "swapping lp_mint"),
+    M("Q8", "The first call only records the pool's figures", LIQ,
+      "let stepped = if last.quote == 0 || last.base == 0 {", "let stepped = if false {",
+      "an_add_buys_deposits_both_sides_and_burns_every_receipt"),
+    M("Q9", "Above the band a call only steps its record", LIQ,
+      "} else if reserves.above(&last, LIQUIDITY_BAND_BPS).ok_or(BurrpadError::Overflow)? {", "} else if false {",
+      "outside_the_band_a_call_only_steps_its_record_and_nothing_is_lost"),
+    M("Q10", "Below the band a call only steps its record", LIQ,
+      "} else if last.above(&reserves, LIQUIDITY_BAND_BPS).ok_or(BurrpadError::Overflow)? {", "} else if false {",
+      "outside_the_band_a_call_only_steps_its_record_and_nothing_is_lost"),
+    M("Q11", "A call that only steps its record still starts the wait", LIQ,
+      "        ledger.burn.last_time = now;\n        emit!(LiquidityStepped", "        emit!(LiquidityStepped",
+      "the_coins_burn_and_its_liquidity_share_one_wait"),
+    M("Q12", "The buy's limit is measured against the smaller of the reserve now and the one recorded", LIQ,
+      "reserves.quote.min(last.quote),", "reserves.quote,", "liquidity_added_just_for_one_call_does_not_raise_the_limit"),
+    M("Q13", "A call uses at most twice the buy's limit", LIQ,
+      "cap.checked_mul(2)", "cap.checked_mul(4)", "an_add_buys_deposits_both_sides_and_burns_every_receipt"),
+    M("Q14", "The buy-back receiver is checked before the liquidity buy", LIQ,
+      "pump::check_buyback_recipient(\n        &a.amm_global_config.to_account_info(),\n        &pump::PUMP_AMM_ID,\n        &pump::ACC_AMM_GLOBAL_CONFIG,\n        pump::AMM_GLOBAL_BUYBACK_OFFSET,\n        &a.buyback_fee_recipient.to_account_info(),\n        &ZEC_MINT,\n        &a.token_program.key(),\n    )?;",
+      "", "t11_substitution::add_liquidity", "swapping buyback_fee_recipient"),
+    M("Q15", "The pool may take no more of either side than its own figures ask", LIQ,
+      "require!(zec_deposited <= want_zec && coins_deposited <= want_coins, BurrpadError::DepositOffRatio);", "",
+      "an_add_buys_deposits_both_sides_and_burns_every_receipt"),
+    M("Q16", "Every pool receipt is burned", LIQ,
+      "        receipts,\n    )?;\n\n    // Booked", "        0,\n    )?;\n\n    // Booked",
+      "an_add_buys_deposits_both_sides_and_burns_every_receipt"),
+    M("Q17", "What was spent is taken off the liquidity pot", LIQ,
+      "ledger.liquidity.pot = ledger.liquidity.pot.checked_sub(spent).ok_or(BurrpadError::Overflow)?;", "",
+      "an_add_buys_deposits_both_sides_and_burns_every_receipt"),
+    M("Q18", "What was spent is taken off what the vault must cover", LIQ,
+      "ledger.accounted = ledger.accounted.checked_sub(spent).ok_or(BurrpadError::Overflow)?;", "",
+      "an_add_buys_deposits_both_sides_and_burns_every_receipt"),
+    M("Q19", "The recorded reserve moves a step at most per call", LIQ,
+      "let quote = math::burr_next_reserve(last.quote, after.quote, step).ok_or(BurrpadError::Overflow)?;",
+      "let quote = after.quote;", "liquidity_added_just_for_one_call_does_not_raise_the_limit"),
+    M("Q20", "After an add the coin's burn waits too", LIQ,
+      "ledger.burn.last_time = ledger.burn.last_time.max(held);", "let _ = held;",
+      "the_coins_burn_and_its_liquidity_share_one_wait"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -480,7 +540,7 @@ MANUAL = [
 
 STRUCT_TEST = {
     "Launch": "launch", "SplitOnly": "split", "CollectCurve": "collect_curve", "CollectPool": "collect_pool",
-    "PayOut": "pay_out", "BurnCurve": "burn_curve", "BurnPool": "burn_pool", "BurnBurr": "burn_burr",
+    "PayOut": "pay_out", "BurnCurve": "burn_curve", "BurnPool": "burn_pool", "BurnBurr": "burn_burr", "AddLiquidity": "add_liquidity",
     "ReleaseHolderRewards": "release_holder_rewards", "Recover": "recover",
 }
 CONSTRAINT_KEYS = ("seeds", "bump", "address", "associated_token::", "token::", "mint::", "has_one", "constraint")

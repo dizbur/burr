@@ -76,4 +76,6 @@ pub enum BurrpadError {
     PlatformFractionTooLow,
     #[msg("The extra account is not the launcher's own coin account")]
     WrongBuyerAccount,
+    #[msg("The pool took more for a deposit than its own figures ask")]
+    DepositOffRatio,
 }
