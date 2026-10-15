@@ -1,14 +1,24 @@
 //! Random lives of many coins at once, for the Liquidity hook upgrade: coins
 //! are launched along the way in all three forms (with random shares and
-//! payout choices), traded on the curve and the pool, graduated, collected,
-//! split, paid out, burned, used to buy $BURR and to add liquidity, in any
-//! order. After every step, for every coin:
+//! payout choices, some with a first buy in the same transaction), traded on
+//! the curve and the pool, graduated, collected, split, paid out, burned, used
+//! to buy $BURR and to add liquidity, and have holder pots released, in any
+//! order. $BURR's own coin lives alongside them.
+//!
+//! After every step, for every coin, $BURR's included:
 //! - its record is byte for byte as it was launched (no receiver ever changes);
-//! - the vault holds at least what the books say, and no pot went below zero
-//!   (they are unsigned: an underflow would have failed the call);
+//! - **the vault holds exactly what the books account for.** In these lives every
+//!   fee that arrives is split at once, so any call that moved a different
+//!   amount of ZEC than it booked, by one unit, shows here;
+//! - **each pot's credit is its share of everything split**, worked out by the
+//!   test itself from the coin's recorded shares, not by the program's arithmetic;
 //! - every pot's whole history closes to the unit: credited = still there +
-//!   paid out by its one way out;
-//! - after a split that went through, nothing is left unsplit.
+//!   paid out by its one way out (receivers' balances, the payout wallet, the
+//!   rewards wallet, the platform receiver, what burns and adds spent).
+//!
+//! A payout of a pot above zero must never be refused. Each life ends with a
+//! closing round in which a payout, a holder release, a coin burn, a $BURR buy
+//! and a liquidity add must each go through, so a life where nothing happened fails.
 //!
 //! BURRPAD_DEEP=<n> runs n lives (the ordinary suite runs 16).
 
@@ -17,12 +27,16 @@ use crate::kit::{self, LaunchPlan, World};
 use burrpad::state::Payee;
 use burrpad::BURR_MINT;
 use proptest::prelude::*;
+use solana_instruction::AccountMeta;
 use solana_keypair::Keypair;
+use solana_message::AddressLookupTableAccount;
 use solana_pubkey::Pubkey;
 use solana_signer::Signer;
 
 const ZEC1: u64 = 100_000_000;
-const MAX_COINS: usize = 6;
+const MAX_COINS: usize = 7;
+/// The seed that launches a launch_v3 with every share and every payout choice.
+const EVERY_OPTION: u64 = 0x0700_4040_4040_4041;
 
 #[derive(Debug, Clone)]
 struct Step {
@@ -33,14 +47,16 @@ struct Step {
 
 fn steps() -> impl Strategy<Value = Vec<Step>> {
     proptest::collection::vec(
-        (0u8..13, 0u8..8, any::<u64>()).prop_map(|(op, coin, seed)| Step { op, coin, seed }),
+        (0u8..14, 0u8..8, any::<u64>()).prop_map(|(op, coin, seed)| Step { op, coin, seed }),
         40..120,
     )
 }
 
 struct Coin {
     mint: Pubkey,
-    plan: LaunchPlan,
+    creator_receiver: Pubkey,
+    give_receiver: Pubkey,
+    private: bool,
     record: Vec<u8>,
 }
 
@@ -49,8 +65,11 @@ struct Life {
     coins: Vec<Coin>,
     payout_wallet: Pubkey,
     trader: Keypair,
-    /// What the launches, burns and adds did, so a run shows it did real work.
-    did: [u32; 6],
+    table: AddressLookupTableAccount,
+    /// ZEC released to the rewards wallet, over all coins.
+    released: u128,
+    /// What went through: launches, payouts, releases, burns, $BURR buys, adds, graduations.
+    did: [u32; 7],
 }
 
 /// Six shares (four hooks, $BURR, liquidity) adding to 10,000, some of them zero, from a seed.
@@ -85,10 +104,20 @@ impl Life {
         w.make_burr();
         let payout_wallet = w.open_private_payouts().pubkey();
         let trader = w.trader(1_000_000 * ZEC1);
-        let mut life = Life { w, coins: vec![], payout_wallet, trader, did: [0; 6] };
+        let table = w.b.address_table(&kit::fixed_accounts());
+        let mut life = Life { w, coins: vec![], payout_wallet, trader, table, released: 0, did: [0; 7] };
+        // $BURR's own coin, with its receivers as recorded.
+        let c = life.w.coin(&BURR_MINT);
+        let record = life.w.b.account(&kit::coin(&BURR_MINT)).unwrap().data;
+        life.coins.push(Coin {
+            mint: BURR_MINT,
+            creator_receiver: c.creator_receiver,
+            give_receiver: c.give_receiver,
+            private: false,
+            record,
+        });
         life.launch(1);
-        // A launch_v3 with every share and every payout choice.
-        life.launch(0x0700_4040_4040_4041);
+        life.launch(EVERY_OPTION);
         life
     }
 
@@ -108,7 +137,6 @@ impl Life {
             ..Default::default()
         };
         if form == 2 {
-            // Random payout choices, where they make sense.
             let bits = (seed >> 56) as u8 & 7;
             if bits & 1 == 1 && shares[0] > 0 {
                 plan.payout_options |= 1;
@@ -122,23 +150,102 @@ impl Life {
                 plan.long_holder_max_bps = 10_000;
             }
         }
-        let (mint, r) = self.w.try_launch(&plan);
-        assert!(
-            r.is_ok(),
-            "a valid plan was refused (seed {seed}, shares {:?}, $BURR {}, liquidity {}, choices {})\n{}",
-            plan.shares,
-            plan.burr_share,
-            plan.liquidity_share,
-            plan.payout_options,
-            logs(&r)
-        );
+        let mint = if (seed >> 40) & 1 == 1 && seed != EVERY_OPTION {
+            // A launch with a first buy in the same transaction, the launch making the buyer's account.
+            let k = Keypair::new();
+            let t = self.trader.insecure_clone();
+            let mut launch = self.w.launch_ix(&t.pubkey(), &k.pubkey(), &plan);
+            launch
+                .accounts
+                .push(AccountMeta::new(crate::pump::ata(&t.pubkey(), &k.pubkey(), &crate::pump::TOKEN_2022), false));
+            let buy = crate::pump::buy_exact_quote_in_v3(&k.pubkey(), &t.pubkey(), ZEC1 / 10, 1);
+            let (_, r) = self.w.b.send_with_table(&t, &[launch, buy], &[&k], &self.table);
+            assert!(r.is_ok(), "a launch with a first buy was refused (seed {seed})\n{}", logs(&r));
+            assert!(self.w.coins_of(&t.pubkey(), &k.pubkey()) > 0, "the first buy delivered");
+            k.pubkey()
+        } else {
+            let (mint, r) = self.w.try_launch(&plan);
+            assert!(
+                r.is_ok(),
+                "a valid plan was refused (seed {seed}, shares {:?}, $BURR {}, liquidity {}, choices {})\n{}",
+                plan.shares,
+                plan.burr_share,
+                plan.liquidity_share,
+                plan.payout_options,
+                logs(&r)
+            );
+            mint
+        };
         let record = self.w.b.account(&kit::coin(&mint)).unwrap().data;
-        self.coins.push(Coin { mint, plan, record });
+        self.coins.push(Coin {
+            mint,
+            creator_receiver: plan.creator_receiver,
+            give_receiver: plan.give_receiver,
+            private: plan.payout_options & 1 == 1,
+            record,
+        });
         self.did[0] += 1;
     }
 
     fn graduated(&self, m: &Pubkey) -> bool {
         self.w.b.account(&crate::pump::pool(m)).is_some()
+    }
+
+    fn graduate(&mut self, m: &Pubkey) {
+        if self.graduated(m) {
+            return;
+        }
+        let whale = self.w.trader(10_000 * ZEC1);
+        let _ = self.w.buy(&whale, m, 20 * ZEC1);
+        if self.w.b.curve(m).complete {
+            self.w.b.svm.airdrop(&crate::pump::WITHDRAW_AUTHORITY, 1_000_000_000).unwrap();
+            let r = self.w.b.send_as(Some(&whale), &[crate::pump::migrate_v2(m, &whale.pubkey())], &[]);
+            assert!(r.is_ok(), "{}", logs(&r));
+            self.did[6] += 1;
+        }
+    }
+
+    /// A payout; if the pot holds anything and has a receiver, it must go through.
+    fn pay(&mut self, m: &Pubkey, payee: Payee) -> bool {
+        let l = self.w.ledger(m);
+        let c = self.w.coin(m);
+        let (pot, receiver) = match payee {
+            Payee::Platform => (l.pots[0], c.platform_receiver),
+            Payee::Creator => (l.pots[1], c.creator_receiver),
+            Payee::Give => (l.pots[2], c.give_receiver),
+        };
+        let r = self.w.pay_out(m, payee);
+        if pot > 0 && receiver != Pubkey::default() {
+            assert!(r.is_ok(), "a payout of a pot of {pot} was refused\n{}", logs(&r));
+            assert_eq!(self.w.ledger(m).pots[payee as usize], 0, "the payout did not empty its pot");
+            self.did[1] += 1;
+            return true;
+        }
+        false
+    }
+
+    /// A holder release by the rewards wallet, of `part` of the pot (at least one unit).
+    fn release(&mut self, m: &Pubkey, part: u64) -> bool {
+        let pot = self.w.ledger(m).pots[4];
+        if pot == 0 {
+            return false;
+        }
+        let amount = (pot / part.max(1)).max(1);
+        let wallet = self.w.rewards_wallet.insecure_clone();
+        let i = kit::raw(
+            self.w.release_accounts(&wallet.pubkey(), m),
+            burrpad::instruction::ReleaseHolderRewards {
+                amount,
+                snapshot_slot: self.w.slot(),
+                snapshot_hash: [3u8; 32],
+            },
+        );
+        let r = self.w.b.send_as(Some(&wallet), &[i], &[]);
+        if r.is_ok() {
+            self.released += amount as u128;
+            self.did[2] += 1;
+        }
+        r.is_ok()
     }
 
     fn step(&mut self, s: &Step) {
@@ -165,84 +272,133 @@ impl Life {
                 }
             }
             4 => {
-                // Fee arriving straight in the vault, then split: afterwards nothing is unsplit.
                 self.w.b.give_zec(&kit::authority(&m), amount);
                 let r = self.w.split(&m);
                 assert!(r.is_ok(), "{}", logs(&r));
-                assert_eq!(self.w.vault_balance(&m), self.w.ledger(&m).accounted, "ZEC left unsplit after a split");
             }
             5 => {
                 let payee = [Payee::Platform, Payee::Creator, Payee::Give][s.seed as usize % 3];
-                let _ = self.w.pay_out(&m, payee);
+                self.pay(&m, payee);
             }
             6 => {
                 let before = self.w.ledger(&m).pots[3];
                 let _ = if grad { self.w.burn_pool(&m) } else { self.w.burn_curve(&m) };
-                self.did[1] += (self.w.ledger(&m).pots[3] < before) as u32;
+                self.did[3] += (self.w.ledger(&m).pots[3] < before) as u32;
             }
             7 => {
                 let before = self.w.ledger(&m).burr.pot;
                 let _ = self.w.burn_burr(&m);
-                self.did[2] += (self.w.ledger(&m).burr.pot < before) as u32;
+                self.did[4] += (self.w.ledger(&m).burr.pot < before) as u32;
             }
             8 => {
                 let before = self.w.ledger(&m).liquidity.pot;
                 let _ = self.w.add_liquidity(&m);
-                self.did[3] += (self.w.ledger(&m).liquidity.pot < before) as u32;
+                self.did[5] += (self.w.ledger(&m).liquidity.pot < before) as u32;
             }
-            9 => {
-                // Graduation: a whale finishes the curve, then pump.fun's migration.
-                if !grad {
-                    let whale = self.w.trader(10_000 * ZEC1);
-                    let _ = self.w.buy(&whale, &m, 20 * ZEC1);
-                    if self.w.b.curve(&m).complete {
-                        self.w.b.svm.airdrop(&crate::pump::WITHDRAW_AUTHORITY, 1_000_000_000).unwrap();
-                        let r = self.w.b.send_as(Some(&whale), &[crate::pump::migrate_v2(&m, &whale.pubkey())], &[]);
-                        assert!(r.is_ok(), "{}", logs(&r));
-                        self.did[4] += 1;
-                    }
-                }
-            }
+            9 => self.graduate(&m),
             10 => {
-                // $BURR's own life goes on too: its pool is traded.
                 let _ = self.w.pool_buy(&t, &BURR_MINT, amount);
             }
-            _ => self.w.b.wait([1, 7, 30, 61, 400, 3_600][s.seed as usize % 6]),
+            11 => {
+                self.release(&m, 1 + s.seed % 3);
+            }
+            _ => self.w.b.wait([1, 7, 30, 61, 400, 1_801, 3_600][s.seed as usize % 7]),
         }
+    }
+
+    /// The end of every life: on the coin with every option, each kind of money call must go through.
+    fn close(&mut self) {
+        let m = self.coins[2].mint;
+        self.w.b.wait(3_600);
+        let _ = self.w.collect_curve(&m);
+        self.w.b.give_zec(&kit::authority(&m), 20 * ZEC1);
+        assert!(self.w.split(&m).is_ok());
+        self.check("closing: after the fee");
+        for payee in [Payee::Platform, Payee::Give] {
+            assert!(self.pay(&m, payee), "closing: the {payee:?} payout did not go through");
+        }
+        assert!(self.pay(&m, Payee::Creator), "closing: the private creator payout did not go through");
+        assert!(self.release(&m, 1), "closing: the holder release did not go through");
+        self.check("closing: after the payouts");
+        let pot = self.w.ledger(&m).pots[3];
+        let _ = if self.graduated(&m) { self.w.burn_pool(&m) } else { self.w.burn_curve(&m) };
+        assert!(self.w.ledger(&m).pots[3] < pot, "closing: the coin burn did not buy");
+        self.w.b.wait(61);
+        let pot = self.w.ledger(&m).burr.pot;
+        let r = self.w.burn_burr(&m);
+        assert!(self.w.ledger(&m).burr.pot < pot, "closing: the $BURR buy did not go through\n{}", logs(&r));
+        self.check("closing: after the burns");
+        self.graduate(&m);
+        assert!(self.graduated(&m), "closing: the coin did not graduate");
+        self.w.b.wait(61);
+        let _ = self.w.add_liquidity(&m);
+        self.w.b.wait(61);
+        let pot = self.w.ledger(&m).liquidity.pot;
+        let r = self.w.add_liquidity(&m);
+        assert!(self.w.ledger(&m).liquidity.pot < pot, "closing: the liquidity add did not go through\n{}", logs(&r));
+        self.check("closing: after the add");
     }
 
     fn check(&self, at: &str) {
         let w = &self.w;
-        let (mut platform_due, mut private_due) = (0u128, 0u128);
+        let (mut platform_paid, mut private_paid) = (0u128, 0u128);
         for (i, c) in self.coins.iter().enumerate() {
             let m = &c.mint;
             assert_eq!(w.b.account(&kit::coin(m)).unwrap().data, c.record, "{at}: coin {i}'s record changed");
-            w.assert_sound(m);
             let l = w.ledger(m);
-            let pots: u128 =
-                l.pots.iter().map(|p| *p as u128).sum::<u128>() + l.burr.pot as u128 + l.liquidity.pot as u128;
-            let credited: u128 = l.credited.iter().sum::<u128>() + l.burr.credited + l.liquidity.credited;
-            assert_eq!(
-                l.accounted as u128 - pots,
-                l.total_split - credited,
-                "{at}: coin {i}: the carry does not match"
-            );
-            // Each pot closes: credited = still there + what its one way out paid.
-            let paid_creator = l.credited[1] - l.pots[1] as u128;
-            if c.plan.payout_options & 1 == 1 {
-                private_due += paid_creator;
-            } else {
+            // The vault holds exactly what the books account for: every fee here is split as it arrives.
+            assert_eq!(w.vault_balance(m), l.accounted, "{at}: coin {i}: the vault and the books differ");
+            // Each pot's credit is its share of everything split, worked out here from the recorded shares.
+            let r = w.coin(m);
+            let rest = (10_000 - r.platform_fraction_bps) as u128;
+            let weights = [
+                r.platform_fraction_bps as u128 * 10_000,
+                rest * r.shares[0] as u128,
+                rest * r.shares[1] as u128,
+                rest * r.shares[2] as u128,
+                rest * r.shares[3] as u128,
+                rest * r.burr_share as u128,
+                rest * r.liquidity_share as u128,
+            ];
+            assert_eq!(weights.iter().sum::<u128>(), 100_000_000, "{at}: coin {i}: the recorded shares do not add up");
+            let credited = [
+                l.credited[0],
+                l.credited[1],
+                l.credited[2],
+                l.credited[3],
+                l.credited[4],
+                l.burr.credited,
+                l.liquidity.credited,
+            ];
+            for (k, (got, weight)) in credited.iter().zip(weights).enumerate() {
                 assert_eq!(
-                    paid_creator,
-                    w.zec_of(&c.plan.creator_receiver) as u128,
-                    "{at}: coin {i}: the creator pot does not close"
+                    *got,
+                    l.total_split * weight / 100_000_000,
+                    "{at}: coin {i}: pot {k}'s credit is not its share"
                 );
             }
+            let pots: u128 =
+                l.pots.iter().map(|p| *p as u128).sum::<u128>() + l.burr.pot as u128 + l.liquidity.pot as u128;
             assert_eq!(
-                l.credited[2],
-                l.pots[2] as u128 + w.zec_of(&c.plan.give_receiver) as u128,
-                "{at}: coin {i}: give"
+                l.accounted as u128 - pots,
+                l.total_split - credited.iter().sum::<u128>(),
+                "{at}: coin {i}: the carry"
             );
+            assert!(l.total_split - credited.iter().sum::<u128>() < 7, "{at}: coin {i}: the carry is too large");
+            // Every pot closes: credited = still there + what its one way out paid.
+            let paid_creator = l.credited[1] - l.pots[1] as u128;
+            if c.private {
+                private_paid += paid_creator;
+            } else if c.creator_receiver != Pubkey::default() {
+                assert_eq!(paid_creator, w.zec_of(&c.creator_receiver) as u128, "{at}: coin {i}: the creator pot");
+            }
+            if c.give_receiver != Pubkey::default() {
+                assert_eq!(
+                    l.credited[2] - l.pots[2] as u128,
+                    w.zec_of(&c.give_receiver) as u128,
+                    "{at}: coin {i}: give"
+                );
+            }
             assert_eq!(l.credited[3], l.pots[3] as u128 + l.burn.total_spent as u128, "{at}: coin {i}: burn");
             assert_eq!(l.credited[4], l.pots[4] as u128 + l.holders.total_released as u128, "{at}: coin {i}: holders");
             assert_eq!(l.burr.credited, l.burr.pot as u128 + l.burr.total_spent as u128, "{at}: coin {i}: $BURR");
@@ -251,16 +407,11 @@ impl Life {
                 l.liquidity.pot as u128 + l.liquidity.total_spent as u128,
                 "{at}: coin {i}: liquidity"
             );
-            platform_due += l.credited[0] - l.pots[0] as u128;
+            platform_paid += l.credited[0] - l.pots[0] as u128;
         }
-        // The payout wallet holds exactly the private coins' creator payouts; the platform receiver, the platform pots'.
-        assert_eq!(w.zec_of(&self.payout_wallet) as u128, private_due, "{at}: the payout wallet's ZEC does not match");
-        assert_eq!(
-            w.zec_of(&w.platform_receiver) as u128,
-            platform_due,
-            "{at}: the platform receiver's ZEC does not match"
-        );
-        w.assert_sound(&BURR_MINT);
+        assert_eq!(w.zec_of(&self.payout_wallet) as u128, private_paid, "{at}: the payout wallet's ZEC");
+        assert_eq!(w.zec_of(&w.platform_receiver) as u128, platform_paid, "{at}: the platform receiver's ZEC");
+        assert_eq!(w.zec_of(&w.rewards_wallet.pubkey()) as u128, self.released, "{at}: the rewards wallet's ZEC");
     }
 }
 
@@ -279,8 +430,10 @@ proptest! {
             life.step(s);
             life.check(&format!("after step {n}: {s:?}"));
         }
+        life.close();
         if std::env::var("BURRPAD_DEEP").is_ok() {
-            println!("coins {}, burns {}, $BURR buys {}, adds {}, graduations {}", life.did[0], life.did[1], life.did[2], life.did[3], life.did[4]);
+            let d = life.did;
+            println!("launches {} payouts {} releases {} burns {} burr {} adds {} graduations {}", d[0], d[1], d[2], d[3], d[4], d[5], d[6]);
         }
     }
 }

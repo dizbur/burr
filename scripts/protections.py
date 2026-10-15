@@ -583,6 +583,26 @@ MANUAL = [
     M("W13", "The holders' wallet cannot be proposed as the payout wallet", ADMIN,
       "require!(wallet != ctx.accounts.config.creator_payout_wallet, BurrpadError::ReceiverNotAllowed);", "",
       "the_payout_wallet_receives_nothing_but_private_creator_pots"),
+
+    # ---- one-unit slips the random lives must catch (lane B's five, 15 Oct) ----
+    M("S1", "A payout pays exactly the pot it empties, not one unit less", "ops.rs",
+      "        amount,\n        ZEC_DECIMALS,\n    )\n}", "        amount - 1,\n        ZEC_DECIMALS,\n    )\n}",
+      "t21_random_life::many_coins_live_any_order_and_the_books_close_after_every_step"),
+    M("S2", "A split books exactly what arrived, not one unit more", "ops.rs",
+      "ledger.accounted = ledger.accounted.checked_add(new).ok_or(BurrpadError::Overflow)?;",
+      "ledger.accounted = ledger.accounted.checked_add(new + 1).ok_or(BurrpadError::Overflow)?;", "t21_random_life::many_coins_live_any_order_and_the_books_close_after_every_step"),
+    M("S3", "A split moves nothing from one pot to another", "ops.rs",
+      "    credits.copy_from_slice(&all[..SINKS]);\n",
+      "    credits.copy_from_slice(&all[..SINKS]);\n    if credits[2] > 0 {\n        credits[2] -= 1;\n        credits[1] += 1;\n    }\n",
+      "t21_random_life::many_coins_live_any_order_and_the_books_close_after_every_step"),
+    M("S4", "A burn books exactly what it spent, not one unit more", "instructions/burn.rs",
+      "    ops::debit(ledger, SINK_BURN, spent)?;\n    ledger.burn.total_spent = ledger.burn.total_spent.checked_add(spent).ok_or(BurrpadError::Overflow)?;",
+      "    let spent = (spent + 1).min(ledger.pots[SINK_BURN]);\n    ops::debit(ledger, SINK_BURN, spent)?;\n    ledger.burn.total_spent = ledger.burn.total_spent.checked_add(spent).ok_or(BurrpadError::Overflow)?;",
+      "t21_random_life::many_coins_live_any_order_and_the_books_close_after_every_step"),
+    M("S5", "Each hook's weight is exactly its share: none of the give share goes to the creator", "math.rs",
+      "    w[SINK_BURR] = rest * burr_share as u128;\n",
+      "    w[SINK_BURR] = rest * burr_share as u128;\n    if shares[1] > 0 {\n        w[1] += rest;\n        w[2] -= rest;\n    }\n",
+      "t21_random_life::many_coins_live_any_order_and_the_books_close_after_every_step"),
 ]
 
 # ---------------------------------------------------------------------------
