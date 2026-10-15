@@ -41,3 +41,5 @@ mod t16_more_attacks;
 mod t17_burn_burr;
 #[cfg(test)]
 mod t18_liquidity;
+#[cfg(test)]
+mod t19_payout_options;

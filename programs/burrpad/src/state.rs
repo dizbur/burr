@@ -34,8 +34,14 @@ pub struct Config {
     /// One waiting time and one recorded reserve for every coin's $BURR buys
     /// together, so that several coins' buys cannot be packed into one moment.
     pub burr_buy: BurrBuy,
+    /// Burrpad's one wallet for private creator payouts: it receives the
+    /// creator pot of every coin launched with that choice, and forwards it to
+    /// the creator's Zcash address. Set by the administrator, then confirmed
+    /// by the wallet itself; once confirmed it never changes.
+    pub creator_payout_wallet: Pubkey,
+    pub creator_payout_confirmed: bool,
     /// Unused. Room for fields a later version may add without moving the account.
-    pub reserved: [u8; 40],
+    pub reserved: [u8; 7],
 }
 
 /// A coin's record. Written once by `launch`. No instruction changes it.
@@ -70,8 +76,12 @@ pub struct Coin {
     /// Share of the hooks' part that is added to the coin's own pool for good.
     /// Zero for every coin launched before this field existed.
     pub liquidity_share: u16,
+    /// Payout choices made at launch, as bits (`PAYOUT_*`). Paid by Burrpad's
+    /// server; recorded here so they are fixed and public. Zero for every coin
+    /// launched before this field existed.
+    pub payout_options: u8,
     /// Unused. Room for fields a later version may add without moving the account.
-    pub reserved: [u8; 60],
+    pub reserved: [u8; 59],
 }
 
 impl Coin {

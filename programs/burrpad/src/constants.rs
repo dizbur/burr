@@ -90,6 +90,12 @@ pub const SINK_BURR: usize = 5;
 /// The seventh pot: liquidity added to the coin's own pool for good. Kept
 /// apart in spare room too; all six shares add to 10,000.
 pub const SINK_LIQUIDITY: usize = 6;
+/// Payout choice: the creator is paid in ZEC on Zcash. The creator pot goes
+/// to `Config.creator_payout_wallet`, which Burrpad's server forwards.
+pub const PAYOUT_PRIVATE_CREATOR: u8 = 1;
+/// The payout choices defined so far. Bit 1 (holders paid in $BURR) and bit 2
+/// (a long-holder bonus) are reserved, and refused until an upgrade defines them.
+pub const PAYOUT_DEFINED: u8 = PAYOUT_PRIVATE_CREATOR;
 /// All pots, the sixth and seventh included, as the split works them out.
 pub const ALL_SINKS: usize = 7;
 

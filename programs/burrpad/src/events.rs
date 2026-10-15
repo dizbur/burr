@@ -61,6 +61,18 @@ pub struct SplitBurr {
     pub credited: u64,
 }
 
+/// The administrator named Burrpad's creator payout wallet (not yet confirmed).
+#[event]
+pub struct CreatorPayoutWalletSet {
+    pub wallet: Pubkey,
+}
+
+/// The creator payout wallet confirmed itself; from now on it is fixed.
+#[event]
+pub struct CreatorPayoutWalletConfirmed {
+    pub wallet: Pubkey,
+}
+
 /// What a split gave the liquidity pot.
 #[event]
 pub struct SplitLiquidity {

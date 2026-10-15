@@ -6,7 +6,9 @@
 
 use crate::constants::*;
 use crate::error::BurrpadError;
-use crate::events::{AdminProposed, ConfigChanged, RewardsWalletProposed};
+use crate::events::{
+    AdminProposed, ConfigChanged, CreatorPayoutWalletConfirmed, CreatorPayoutWalletSet, RewardsWalletProposed,
+};
 use crate::state::Config;
 use anchor_lang::prelude::*;
 
@@ -92,6 +94,7 @@ pub fn handle_set_fee_range(ctx: Context<AdminOnly>, min_bps: u16, max_bps: u16,
 
 pub fn handle_set_platform_receiver(ctx: Context<AdminOnly>, receiver: Pubkey) -> Result<()> {
     require!(receiver != Pubkey::default(), BurrpadError::EmptyAddress);
+    require!(receiver != ctx.accounts.config.creator_payout_wallet, BurrpadError::ReceiverNotAllowed);
     ctx.accounts.config.platform_receiver = receiver;
     announce(&ctx.accounts.config);
     Ok(())
@@ -102,6 +105,7 @@ pub fn handle_set_platform_receiver(ctx: Context<AdminOnly>, receiver: Pubkey) -
 /// proposal replaces the first and starts the wait again.
 pub fn handle_propose_rewards_wallet(ctx: Context<AdminOnly>, wallet: Pubkey) -> Result<()> {
     require!(wallet != Pubkey::default(), BurrpadError::EmptyAddress);
+    require!(wallet != ctx.accounts.config.creator_payout_wallet, BurrpadError::ReceiverNotAllowed);
     let ready_at = Clock::get()?.unix_timestamp.checked_add(REWARDS_WALLET_WAIT_SECS).ok_or(BurrpadError::Overflow)?;
     let c = &mut ctx.accounts.config;
     c.pending_rewards_wallet = wallet;
@@ -158,6 +162,43 @@ pub fn handle_set_holder_releases_paused(ctx: Context<AdminOnly>, paused: bool) 
 pub fn handle_propose_admin(ctx: Context<AdminOnly>, new_admin: Pubkey) -> Result<()> {
     ctx.accounts.config.pending_admin = new_admin;
     emit!(AdminProposed { admin: ctx.accounts.config.admin, pending_admin: new_admin });
+    Ok(())
+}
+
+/// Names Burrpad's creator payout wallet. It must then confirm itself; until
+/// it does, the administrator may correct it and private launches are refused.
+/// Once confirmed it never changes.
+pub fn handle_set_creator_payout_wallet(ctx: Context<AdminOnly>, wallet: Pubkey) -> Result<()> {
+    let c = &mut ctx.accounts.config;
+    require!(!c.creator_payout_confirmed, BurrpadError::PayoutWalletFixed);
+    require!(wallet != Pubkey::default(), BurrpadError::EmptyAddress);
+    // One job per wallet: never also a platform receiver or a holders' wallet.
+    require!(
+        wallet != c.platform_receiver && wallet != c.rewards_wallet && wallet != c.pending_rewards_wallet,
+        BurrpadError::ReceiverNotAllowed
+    );
+    c.creator_payout_wallet = wallet;
+    emit!(CreatorPayoutWalletSet { wallet });
+    Ok(())
+}
+
+#[derive(Accounts)]
+pub struct ConfirmPayoutWallet<'info> {
+    pub wallet: Signer<'info>,
+    #[account(mut, seeds = [SEED_CONFIG], bump = config.bump)]
+    pub config: Account<'info, Config>,
+}
+
+/// The payout wallet signs once, proving its key exists; from then on it is fixed.
+pub fn handle_confirm_creator_payout_wallet(ctx: Context<ConfirmPayoutWallet>) -> Result<()> {
+    let c = &mut ctx.accounts.config;
+    require!(!c.creator_payout_confirmed, BurrpadError::PayoutWalletFixed);
+    require!(
+        c.creator_payout_wallet != Pubkey::default() && c.creator_payout_wallet == ctx.accounts.wallet.key(),
+        BurrpadError::NotThePayoutWallet
+    );
+    c.creator_payout_confirmed = true;
+    emit!(CreatorPayoutWalletConfirmed { wallet: c.creator_payout_wallet });
     Ok(())
 }
 

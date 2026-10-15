@@ -129,6 +129,7 @@ fn a_stranger_cannot_use_any_admin_instruction() {
         w.admin_ix(&s.pubkey(), burrpad::instruction::ApplyRewardsWallet {}),
         w.admin_ix(&s.pubkey(), burrpad::instruction::SetHolderReleasesPaused { paused: true }),
         w.admin_ix(&s.pubkey(), burrpad::instruction::ProposeAdmin { new_admin: s.pubkey() }),
+        w.admin_ix(&s.pubkey(), burrpad::instruction::SetCreatorPayoutWallet { wallet: s.pubkey() }),
     ];
     for i in tries {
         let r = w.b.send_as(Some(&s), &[i], &[]);
@@ -442,6 +443,6 @@ fn every_account_carries_a_layout_version_and_spare_room() {
     let mint = w.launch(&LaunchPlan::default());
     let (cfg, coin, ledger) = (w.config(), w.coin(&mint), w.ledger(&mint));
     assert_eq!((cfg.version, coin.version, ledger.version), (1, 1, 1));
-    assert_eq!((cfg.reserved.len(), coin.reserved.len(), ledger.reserved.len()), (40, 60, 32));
+    assert_eq!((cfg.reserved.len(), coin.reserved.len(), ledger.reserved.len()), (7, 59, 32));
     assert!(cfg.reserved.iter().chain(&coin.reserved).chain(&ledger.reserved).all(|b| *b == 0));
 }

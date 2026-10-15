@@ -78,4 +78,12 @@ pub enum BurrpadError {
     WrongBuyerAccount,
     #[msg("The pool took more for a deposit than its own figures ask")]
     DepositOffRatio,
+    #[msg("A payout choice that is not defined")]
+    PayoutOptionNotAllowed,
+    #[msg("Private creator payouts are not open: no confirmed payout wallet")]
+    PrivatePayoutsOff,
+    #[msg("The creator payout wallet is confirmed and cannot change")]
+    PayoutWalletFixed,
+    #[msg("Only the wallet named can confirm itself")]
+    NotThePayoutWallet,
 }

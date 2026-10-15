@@ -56,6 +56,7 @@ pub struct LaunchPlan {
     /// The share that buys and burns $BURR. Above 0, the launch uses `launch_v2`.
     pub burr_share: u16,
     pub liquidity_share: u16,
+    pub payout_options: u8,
 }
 
 impl Default for LaunchPlan {
@@ -71,6 +72,7 @@ impl Default for LaunchPlan {
             platform_receiver: None,
             burr_share: 0,
             liquidity_share: 0,
+            payout_options: 0,
         }
     }
 }
@@ -165,6 +167,18 @@ impl World {
         self.b.send_as(Some(&k), &[i], &[])
     }
 
+    /// Names Burrpad's creator payout wallet and has it confirm itself.
+    pub fn open_private_payouts(&mut self) -> Keypair {
+        let w = self.b.wallet();
+        assert!(self.as_admin(burrpad::instruction::SetCreatorPayoutWallet { wallet: w.pubkey() }).is_ok());
+        assert!(self.confirm_payout_wallet(&w).is_ok());
+        w
+    }
+    pub fn confirm_payout_wallet(&mut self, signer: &Keypair) -> TxResult {
+        let acc = burrpad::accounts::ConfirmPayoutWallet { wallet: signer.pubkey(), config: config() };
+        self.b.send_as(Some(signer), &[ix(acc, burrpad::instruction::ConfirmCreatorPayoutWallet {})], &[])
+    }
+
     pub fn launch_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burrpad::accounts::Launch {
         let curve = pump::curve(mint);
         let sol_vault = pda(&[b"sol-vault"], &pump::MAYHEM);
@@ -212,11 +226,12 @@ impl World {
                 max_platform_fraction_bps: plan.max_platform_fraction_bps.unwrap_or(cfg.platform_fraction_bps),
                 platform_receiver: plan.platform_receiver.unwrap_or(cfg.platform_receiver),
             };
-            if plan.liquidity_share > 0 {
+            if plan.liquidity_share > 0 || plan.payout_options > 0 {
                 burrpad::instruction::LaunchV3 {
                     args,
                     burr_share: plan.burr_share,
                     liquidity_share: plan.liquidity_share,
+                    payout_options: plan.payout_options,
                 }
                 .data()
             } else if plan.burr_share > 0 {

@@ -44,6 +44,7 @@ BURN = "instructions/burn.rs"
 HOLD = "instructions/holders.rs"
 BURR = "instructions/burr.rs"
 LIQ = "instructions/liquidity.rs"
+ADMIN_RS = ADMIN
 
 MANUAL = [
     # ---- the administrator ----
@@ -308,7 +309,8 @@ MANUAL = [
     M("H12", "The first holder release cannot come in the first half hour", LAUNCH,
       "    ledger.holders.last_release = now;\n", "", "releases_are_at_least_half_an_hour_apart"),
     M("H13", "A proposed rewards wallet cannot be the empty address", ADMIN,
-      "require!(wallet != Pubkey::default(), BurrpadError::EmptyAddress);", "",
+      "require!(wallet != Pubkey::default(), BurrpadError::EmptyAddress);\n    require!(wallet != ctx.accounts.config.creator_payout_wallet",
+      "require!(wallet != ctx.accounts.config.creator_payout_wallet",
       "a_new_rewards_wallet_is_proposed_in_the_open_and_waits_a_day"),
     M("H15", "A proposed rewards wallet cannot be applied before its wait is over", ADMIN,
       "require!(now >= c.rewards_wallet_ready_at, BurrpadError::RewardsWalletWaitNotOver);", "",
@@ -525,6 +527,49 @@ MANUAL = [
     M("Q20", "After an add the coin's burn waits too", LIQ,
       "ledger.burn.last_time = ledger.burn.last_time.max(held);", "let _ = held;",
       "the_coins_burn_and_its_liquidity_share_one_wait"),
+
+    # ---- payout choices and the creator payout wallet ----
+    M("W1", "Only payout choices that are defined may be recorded", LAUNCH,
+      "require!(payout_options & !PAYOUT_DEFINED == 0, BurrpadError::PayoutOptionNotAllowed);", "",
+      "choices_not_yet_defined_are_refused"),
+    M("W2", "A private launch needs a confirmed payout wallet", LAUNCH,
+      "require!(cfg.creator_payout_confirmed && payout_wallet != Pubkey::default(), BurrpadError::PrivatePayoutsOff);", "",
+      "a_private_launch_needs_a_confirmed_wallet_a_creator_share_and_that_wallet_as_receiver"),
+    M("W3", "A private launch needs a creator share", LAUNCH,
+      "require!(args.shares[SINK_CREATOR - 1] > 0, BurrpadError::MissingReceiver);", "",
+      "a_private_launch_needs_a_confirmed_wallet_a_creator_share_and_that_wallet_as_receiver"),
+    M("W4", "A private launch's creator receiver is the payout wallet", LAUNCH,
+      "require!(args.creator_receiver == payout_wallet, BurrpadError::WrongReceiver);", "",
+      "a_private_launch_needs_a_confirmed_wallet_a_creator_share_and_that_wallet_as_receiver"),
+    M("W5", "Without the choice, the payout wallet cannot be a creator receiver", LAUNCH,
+      "require!(args.creator_receiver != payout_wallet, BurrpadError::ReceiverNotAllowed);", "",
+      "the_payout_wallet_receives_nothing_but_private_creator_pots"),
+    M("W6", "The payout wallet can never be a give receiver", LAUNCH,
+      "payout_wallet == Pubkey::default() || args.give_receiver != payout_wallet,", "true,",
+      "the_payout_wallet_receives_nothing_but_private_creator_pots"),
+    M("W7", "The payout choices are recorded in the coin's record", LAUNCH,
+      "    coin.payout_options = payout_options;\n", "",
+      "a_private_launch_records_the_choice_and_its_creator_pot_goes_to_the_payout_wallet"),
+    M("W8", "Once confirmed, the payout wallet cannot be changed", ADMIN,
+      "    require!(!c.creator_payout_confirmed, BurrpadError::PayoutWalletFixed);\n    require!(wallet != Pubkey::default(), BurrpadError::EmptyAddress);",
+      "    require!(wallet != Pubkey::default(), BurrpadError::EmptyAddress);",
+      "the_payout_wallet_is_fixed_once_it_confirms_itself"),
+    M("W9", "The payout wallet is never also the platform receiver or a holders' wallet", ADMIN,
+      "wallet != c.platform_receiver && wallet != c.rewards_wallet && wallet != c.pending_rewards_wallet", "true",
+      "the_payout_wallet_is_fixed_once_it_confirms_itself"),
+    M("W10", "Only the wallet named can confirm itself", ADMIN,
+      "c.creator_payout_wallet != Pubkey::default() && c.creator_payout_wallet == ctx.accounts.wallet.key()", "true",
+      "the_payout_wallet_is_fixed_once_it_confirms_itself"),
+    M("W11", "A confirmed payout wallet cannot be confirmed again", ADMIN,
+      "    require!(!c.creator_payout_confirmed, BurrpadError::PayoutWalletFixed);\n    require!(\n        c.creator_payout_wallet",
+      "    require!(\n        c.creator_payout_wallet",
+      "the_payout_wallet_is_fixed_once_it_confirms_itself"),
+    M("W12", "The platform receiver cannot be set to the payout wallet", ADMIN,
+      "require!(receiver != ctx.accounts.config.creator_payout_wallet, BurrpadError::ReceiverNotAllowed);", "",
+      "the_payout_wallet_receives_nothing_but_private_creator_pots"),
+    M("W13", "The holders' wallet cannot be proposed as the payout wallet", ADMIN,
+      "require!(wallet != ctx.accounts.config.creator_payout_wallet, BurrpadError::ReceiverNotAllowed);", "",
+      "the_payout_wallet_receives_nothing_but_private_creator_pots"),
 ]
 
 # ---------------------------------------------------------------------------

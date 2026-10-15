@@ -120,17 +120,19 @@ pub struct Launch<'info> {
 }
 
 pub fn handle_launch<'info>(ctx: Context<'info, Launch<'info>>, args: LaunchArgs) -> Result<()> {
-    handle_launch_with_extras(ctx, args, 0, 0)
+    handle_launch_with_extras(ctx, args, 0, 0, 0)
 }
 
 /// A launch whose fee may also buy and burn $BURR and add liquidity to the
 /// coin's own pool: `burr_share` and `liquidity_share` count with the four
-/// hooks' shares, and all six add to 10,000.
+/// hooks' shares, and all six add to 10,000. `payout_options` records the
+/// payout choices (`PAYOUT_*`) made at launch.
 pub fn handle_launch_with_extras<'info>(
     ctx: Context<'info, Launch<'info>>,
     args: LaunchArgs,
     burr_share: u16,
     liquidity_share: u16,
+    payout_options: u8,
 ) -> Result<()> {
     let a = &ctx.accounts;
     let cfg = &a.config;
@@ -153,6 +155,22 @@ pub fn handle_launch_with_extras<'info>(
         BurrpadError::MissingReceiver
     );
     require!(args.shares[SINK_GIVE - 1] == 0 || args.give_receiver != Pubkey::default(), BurrpadError::MissingReceiver);
+    // Payout choices: only defined ones. Burrpad's creator payout wallet
+    // receives a creator pot only for a coin that chose private payouts, and
+    // never a give pot.
+    require!(payout_options & !PAYOUT_DEFINED == 0, BurrpadError::PayoutOptionNotAllowed);
+    let payout_wallet = cfg.creator_payout_wallet;
+    if payout_options & PAYOUT_PRIVATE_CREATOR != 0 {
+        require!(cfg.creator_payout_confirmed && payout_wallet != Pubkey::default(), BurrpadError::PrivatePayoutsOff);
+        require!(args.shares[SINK_CREATOR - 1] > 0, BurrpadError::MissingReceiver);
+        require!(args.creator_receiver == payout_wallet, BurrpadError::WrongReceiver);
+    } else if payout_wallet != Pubkey::default() {
+        require!(args.creator_receiver != payout_wallet, BurrpadError::ReceiverNotAllowed);
+    }
+    require!(
+        payout_wallet == Pubkey::default() || args.give_receiver != payout_wallet,
+        BurrpadError::ReceiverNotAllowed
+    );
     require!(
         args.name.len() <= MAX_NAME_LEN && args.symbol.len() <= MAX_SYMBOL_LEN && args.uri.len() <= MAX_URI_LEN,
         BurrpadError::TextTooLong
@@ -272,6 +290,7 @@ pub fn handle_launch_with_extras<'info>(
     coin.shares = args.shares;
     coin.burr_share = burr_share;
     coin.liquidity_share = liquidity_share;
+    coin.payout_options = payout_options;
     coin.creator_receiver = args.creator_receiver;
     coin.give_receiver = args.give_receiver;
     coin.burn_cooldown_secs = BURN_COOLDOWN_SECS;

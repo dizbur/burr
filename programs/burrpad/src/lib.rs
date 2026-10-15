@@ -65,6 +65,14 @@ pub mod burrpad {
         instructions::admin::handle_set_platform_receiver(ctx, receiver)
     }
 
+    pub fn set_creator_payout_wallet(ctx: Context<AdminOnly>, wallet: Pubkey) -> Result<()> {
+        instructions::admin::handle_set_creator_payout_wallet(ctx, wallet)
+    }
+
+    pub fn confirm_creator_payout_wallet(ctx: Context<ConfirmPayoutWallet>) -> Result<()> {
+        instructions::admin::handle_confirm_creator_payout_wallet(ctx)
+    }
+
     pub fn set_launches_paused(ctx: Context<AdminOnly>, paused: bool) -> Result<()> {
         instructions::admin::handle_set_launches_paused(ctx, paused)
     }
@@ -85,17 +93,19 @@ pub mod burrpad {
 
     /// The same, with part of the hooks' share buying and burning $BURR.
     pub fn launch_v2<'info>(ctx: Context<'info, Launch<'info>>, args: LaunchArgs, burr_share: u16) -> Result<()> {
-        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, 0)
+        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, 0, 0)
     }
 
-    /// The same, with part of the hooks' share also added to the coin's own pool for good.
+    /// The same, with part of the hooks' share also added to the coin's own
+    /// pool for good, and the payout choices made at launch.
     pub fn launch_v3<'info>(
         ctx: Context<'info, Launch<'info>>,
         args: LaunchArgs,
         burr_share: u16,
         liquidity_share: u16,
+        payout_options: u8,
     ) -> Result<()> {
-        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, liquidity_share)
+        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, liquidity_share, payout_options)
     }
 
     pub fn split(ctx: Context<SplitOnly>) -> Result<()> {
