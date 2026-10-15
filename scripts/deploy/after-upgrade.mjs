@@ -9,15 +9,21 @@
 //     node scripts/deploy/after-upgrade.mjs --authority <vault> --coins <mint,mint,...> --mainnet yes
 //
 // --admin <address> if the administrator is not the same as --authority.
+// --release-kit <folder> to check against a build kept elsewhere (default: target/release-kit here),
+// for example the Liquidity build in ~/burr-liquidity/target/release-kit.
 import { PublicKey, TransactionMessage, VersionedTransaction, ComputeBudgetProgram } from "@solana/web3.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { BURR, burnBurrIx, burnCurveIx, burnPoolIx, clock, collectCurveIx, collectPoolIx, curveOf, splitIx } from "./coin.mjs";
+import { addLiquidityIx, BURR, burnBurrIx, burnCurveIx, burnPoolIx, clock, collectCurveIx, collectPoolIx, curveOf, splitIx } from "./coin.mjs";
 import { address, checker, coinAddresses, configAddress, connect, decodeAccount, fail, loadIdl, need, options, programDataAddress, readAccount, ROOT, sha256 } from "./lib.mjs";
 
-const opts = options(["url", "mainnet", "authority", "admin", "coins", "save"]);
+const opts = options(["url", "mainnet", "authority", "admin", "coins", "save", "release-kit"]);
 const conn = await connect(opts);
-const idl = loadIdl();
+const kit = opts["release-kit"] ? path.resolve(opts["release-kit"]) : path.join(ROOT, "target/release-kit");
+if (!existsSync(path.join(kit, "burrpad.so"))) fail(`no release build in ${kit}`);
+// The interface file kept with that build.
+const idl = opts["release-kit"] ? JSON.parse(readFileSync(path.join(kit, "burrpad.json"), "utf8")) : loadIdl();
+idl.programId = new PublicKey(idl.address);
 const programId = new PublicKey(idl.programId);
 const authority = address(need(opts, "authority"), "--authority");
 const admin = opts.admin ? address(opts.admin, "--admin") : authority;
@@ -37,8 +43,8 @@ const t = checker();
 const trim = (b) => { let n = b.length; while (n && b[n - 1] === 0) n--; return b.subarray(0, n); };
 
 // 1. The code, against the release build kept here.
-const commit = readFileSync(path.join(ROOT, "target/release-kit/commit.txt"), "utf8").trim();
-const local = trim(readFileSync(path.join(ROOT, "target/release-kit/burrpad.so")));
+const commit = readFileSync(path.join(kit, "commit.txt"), "utf8").trim();
+const local = trim(readFileSync(path.join(kit, "burrpad.so")));
 const data = await conn.getAccountInfo(programDataAddress(programId));
 if (t.check("the program is deployed", !!data)) {
   const onChain = trim(data.data.subarray(45));
@@ -107,6 +113,7 @@ const lastBurn = (mint) => async () => {
   return BigInt(l.burn.last_time) + 60n;
 };
 const hasBurnBurr = idl.instructions.some((i) => i.name === "burn_burr");
+const hasAddLiquidity = idl.instructions.some((i) => i.name === "add_liquidity");
 const mints = (opts.coins ?? "").split(",").filter(Boolean).map((m) => address(m, "a coin"));
 if (!mints.length) console.log("      (no --coins given: the simulated calls were skipped)");
 for (const mint of mints) {
@@ -130,6 +137,13 @@ for (const mint of mints) {
       return [BigInt(c.burr_buy.ready_at), own].reduce((a, b) => (a > b ? a : b));
     });
     if (!Number(coin.burr_share ?? 0)) burnsTried--;
+  }
+  if (hasAddLiquidity && graduated) {
+    // Only a graduated coin has a pool to add to. No coin launched before the upgrade chose the liquidity
+    // hook, so for them the expected answer is "hook not chosen", with the pool's real accounts.
+    await simulate(`${name}: add liquidity to its pool`, addLiquidityIx(idl, mint, authority));
+  } else if (hasAddLiquidity) {
+    console.log(`      ${name}: add liquidity: not simulated (still on its curve: it has no pool yet)`);
   }
 }
 if (mints.length) {
