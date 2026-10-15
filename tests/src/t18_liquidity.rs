@@ -218,37 +218,46 @@ fn buying_before_an_add_and_selling_after_loses_money() {
 
 #[test]
 fn liquidity_added_just_for_one_call_does_not_raise_the_limit() {
-    let (mut w, mint) = setup(50 * ZEC1);
-    let recorded = w.ledger(&mint).liquidity.reference.quote;
-    // A large deposit of someone else's, just before the call.
+    // Someone holds coins before the first call, so they can deposit a lot at the price recorded.
+    let mut w = World::new();
+    let mint = w.launch(&liquidity_plan());
+    w.graduate(&mint);
     let lp = w.trader(100_000 * ZEC1);
     assert!(w.pool_buy(&lp, &mint, 500 * ZEC1).is_ok());
     let mk = pump::create_ata(&lp.pubkey(), &lp.pubkey(), &pump::lp_mint(&mint), &TOKEN_2022);
     assert!(w.b.send_as(Some(&lp), &[mk], &[]).is_ok());
-    // The push from that buy is stepped through first.
-    for _ in 0..40 {
-        let pot = w.ledger(&mint).liquidity.pot;
-        assert!(w.add_liquidity(&mint).is_ok());
-        w.b.wait(60);
-        if w.ledger(&mint).liquidity.pot < pot {
-            break;
-        }
-    }
-    let recorded = w.ledger(&mint).liquidity.reference.quote.max(recorded);
+    w.b.give_zec(&kit::authority(&mint), 500 * ZEC1);
+    assert!(w.split(&mint).is_ok());
+    w.b.wait(60);
+    assert!(w.add_liquidity(&mint).is_ok(), "the first call records");
+    w.b.wait(60);
+    let fee = (w.pool(&mint).creator_fee_bps as u128).min(w.coin(&mint).fee_bps as u128);
+    let mut recorded = w.ledger(&mint).liquidity.reference.quote as u128;
+    // Four times the pool's depth, just before the call; the price does not move.
     let supply = {
         let d = w.b.account(&pump::pool(&mint)).unwrap().data;
         u64::from_le_bytes(d[203..211].try_into().unwrap())
     };
     let r = w.b.send_as(Some(&lp), &[pump::pool_deposit(&mint, &lp.pubkey(), supply * 3, u64::MAX, u64::MAX)], &[]);
     assert!(r.is_ok(), "{}", logs(&r));
-    let fee = (w.pool(&mint).creator_fee_bps as u128).min(w.coin(&mint).fee_bps as u128);
-    let pot = w.ledger(&mint).liquidity.pot;
-    assert!(w.add_liquidity(&mint).is_ok());
-    let spent = (pot - w.ledger(&mint).liquidity.pot) as u128;
-    assert!(
-        spent <= 2 * (recorded as u128 * fee / 40_000) + 2,
-        "spent {spent} against a recorded reserve of {recorded}"
-    );
+    assert!(w.pool_reserves(&mint).0 as u128 > 3 * recorded);
+    // Two calls: each spends no more than twice the limit at the reserve recorded,
+    // and the record grows by one step at most in between.
+    for call in 0..2 {
+        let pot = w.ledger(&mint).liquidity.pot;
+        let r = w.add_liquidity(&mint);
+        assert!(r.is_ok(), "{}", logs(&r));
+        let spent = (pot - w.ledger(&mint).liquidity.pot) as u128;
+        assert!(spent > 0, "call {call} added");
+        assert!(
+            spent <= 2 * (recorded * fee / 40_000) + 2,
+            "call {call}: spent {spent} against a recorded reserve of {recorded}"
+        );
+        let now = w.ledger(&mint).liquidity.reference.quote as u128;
+        assert!(now <= recorded * 10_500 / 10_000 + 1, "call {call}: the record grew from {recorded} to {now}");
+        recorded = now;
+        w.b.wait(60);
+    }
 }
 
 #[test]

@@ -732,6 +732,11 @@ def worker(n, queue, results):
 # stands. Filled from the run's results, by reasoning about each one.
 def second_line(entry_id):
     """Why no test can see this check missing on its own: what else stops the same swap."""
+    if entry_id == "Q7":
+        return "the receipt mint is also pinned by its derived address from the pool's own address, which is checked"
+    if entry_id == "Q15":
+        return ("the deposit's own limits are what the burner holds, and PumpSwap takes exactly its own figures (pinned "
+                "to the unit by t12's deposit test); this check stands in case PumpSwap ever changes")
     if entry_id == "U6":
         return ("every $BURR buy also writes the same time into $BURR's own ledger, which is checked too (U15, held "
                 "alone); this one is kept so the shared record says when the next buy may run")
@@ -767,10 +772,17 @@ def second_line(entry_id):
         return "the token program refuses: the signer does not own that account"
     if field in ("pump_global", "amm_global_config"):
         return "the buy-back check reads this account and requires pump.fun's owner and its settings code"
-    if struct in ("BurnPool", "BurnBurr") and field in ("pool_base_token_account", "pool_quote_token_account"):
+    if struct in ("BurnPool", "BurnBurr", "AddLiquidity") and field in ("pool_base_token_account", "pool_quote_token_account"):
         return "the pool's own record names its two token accounts, and the burn compares them (held as B29 and B30)"
     if field == "pool_authority":
         return "the pool's own address is derived from it and checked"
+    if field == "pool" and struct == "AddLiquidity":
+        return "the pool's own record is read and must name this coin and ZEC, and it must name the receipt mint passed (Q7)"
+    if struct == "AddLiquidity" and field == "lp_mint":
+        return "the pool's own record must name the receipt mint passed (Q7)"
+    if struct == "AddLiquidity" and field in ("burner_zec", "burner_coin", "burner_lp"):
+        return ("the same constraint is what makes the account on first use, so without it every liquidity call fails "
+                "(the tests that fail are the ones that add)")
     if field == "pool" and struct == "BurnPool":
         return "the pool's own record is read and must name this coin and ZEC"
     if field == "pool" and struct == "BurnBurr":
