@@ -297,6 +297,16 @@ fn a_pool_charging_no_creator_fee_stops_both_buys_and_nothing_is_lost() {
     assert!(w.burn_burr(&mint).is_ok());
 }
 
+#[test]
+fn a_burr_pot_below_the_least_spend_is_refused_cleanly() {
+    // Below 1,000 units PumpSwap's rounded fees could fail the buy; Burrpad refuses first, and keeps the pot.
+    let (mut w, mint) = burr_world(4_000);
+    let pot = w.ledger(&mint).burr.pot;
+    assert!(pot > 0 && pot < burrpad::constants::BURR_MIN_SPEND, "a pot of {pot}");
+    assert_eq!(custom_code(&w.burn_burr(&mint)), Some(err(E::NothingToBurn)));
+    assert_eq!(w.ledger(&mint).burr.pot, pot);
+}
+
 // ---- Second round ----
 
 /// A coin with a burn pot whose curve a whale has brought to `whale` ZEC of buying.
