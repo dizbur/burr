@@ -605,13 +605,27 @@ impl World {
     pub fn watched_accounts(wallets: &[Pubkey]) -> Vec<AccountMeta> {
         wallets.iter().map(|w| AccountMeta::new_readonly(ata(w, &burrpad::BURR_MINT, &TOKEN_2022), false)).collect()
     }
+    /// Sends `i` from `payer` through an address table holding every account it
+    /// names but the signers, as a keeper or site would for a long list.
+    pub fn send_tabled(&mut self, payer: &Keypair, i: Instruction) -> TxResult {
+        let mut keys: Vec<Pubkey> = vec![i.program_id];
+        for a in &i.accounts {
+            if !a.is_signer && !keys.contains(&a.pubkey) {
+                keys.push(a.pubkey);
+            }
+        }
+        let table = self.b.address_table(&keys);
+        let (size, r) = self.b.send_with_table(payer, &[i], &[], &table);
+        assert!(size <= crate::bench::MAX_TRANSACTION, "transaction of {size} bytes would not fit on the network");
+        r
+    }
     /// `set_shadow_watch` by `launcher`, passing the old wallets' accounts then the new ones'.
     pub fn set_shadow_watch(
         &mut self,
         launcher: &Keypair,
         mint: &Pubkey,
         wallets: &[Pubkey],
-        follower: Pubkey,
+        keeper: Pubkey,
         follow: bool,
     ) -> TxResult {
         let old: Vec<Pubkey> =
@@ -623,31 +637,39 @@ impl World {
             watch: shadow(mint),
             system_program: SYSTEM,
         };
-        let mut i = ix(acc, burrpad::instruction::SetShadowWatch { wallets: wallets.to_vec(), follower, follow });
+        let mut i = ix(acc, burrpad::instruction::SetShadowWatch { wallets: wallets.to_vec(), keeper, follow });
         i.accounts.extend(Self::watched_accounts(&old));
         i.accounts.extend(Self::watched_accounts(wallets));
-        self.b.send_as(Some(launcher), &[i], &[])
+        self.send_tabled(launcher, i)
     }
-    pub fn follow_wallet(&mut self, follower: &Keypair, mint: &Pubkey, wallet: &Pubkey) -> TxResult {
+    /// `follow_wallet` by `keeper`: adds `wallet`, which watched wallet number `from` sent $BURR to.
+    pub fn follow_wallet(&mut self, keeper: &Keypair, mint: &Pubkey, from: u8, wallet: &Pubkey) -> TxResult {
         let w = self.shadow_watch(mint).expect("a watch");
-        let acc = burrpad::accounts::FollowWallet { follower: follower.pubkey(), mint: *mint, watch: shadow(mint) };
-        let mut i = ix(acc, burrpad::instruction::FollowWallet { wallet: *wallet });
-        i.accounts.extend(Self::watched_accounts(&w.wallets[..w.count as usize]));
-        i.accounts.extend(Self::watched_accounts(&[*wallet]));
-        self.b.send_as(Some(follower), &[i], &[])
+        let sender = w.wallets.get(from as usize).copied().unwrap_or_default();
+        let acc = burrpad::accounts::FollowWallet {
+            keeper: keeper.pubkey(),
+            mint: *mint,
+            watch: shadow(mint),
+            wallet: *wallet,
+            wallet_account: ata(wallet, &burrpad::BURR_MINT, &TOKEN_2022),
+            from_account: ata(&sender, &burrpad::BURR_MINT, &TOKEN_2022),
+        };
+        let i = ix(acc, burrpad::instruction::FollowWallet { from });
+        self.b.send_as(Some(keeper), &[i], &[])
     }
-    pub fn shadow_burn_ix(&self, payer: &Pubkey, mint: &Pubkey) -> Instruction {
+    pub fn shadow_burn_ix(&self, keeper: &Pubkey, mint: &Pubkey, sold: u64, received: u64) -> Instruction {
         let w = self.shadow_watch(mint);
-        let acc = burrpad::accounts::ShadowBurn { burr: self.burn_burr_accounts(payer, mint), watch: shadow(mint) };
-        let mut i = ix(acc, burrpad::instruction::ShadowBurn {});
+        let acc = burrpad::accounts::ShadowBurn { burr: self.burn_burr_accounts(keeper, mint), watch: shadow(mint) };
+        let mut i = ix(acc, burrpad::instruction::ShadowBurn { sold, received });
         if let Some(w) = w {
             i.accounts.extend(Self::watched_accounts(&w.wallets[..w.count as usize]));
         }
         i
     }
-    pub fn shadow_burn(&mut self, mint: &Pubkey) -> TxResult {
-        let i = self.shadow_burn_ix(&self.b.payer.pubkey(), mint);
-        self.b.send(&[i], &[])
+    /// `shadow_burn` by `keeper`, reporting a sale of `sold` coins for `received` ZEC (0, 0 only records).
+    pub fn shadow_burn(&mut self, keeper: &Keypair, mint: &Pubkey, sold: u64, received: u64) -> TxResult {
+        let i = self.shadow_burn_ix(&keeper.pubkey(), mint, sold, received);
+        self.send_tabled(keeper, i)
     }
 
     // ---- Liquidity ----

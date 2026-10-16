@@ -161,9 +161,9 @@ pub struct ShadowPot {
     pub credited: u128,
 }
 
-/// A coin's shadow burn: the wallets it watches, their holding of the target
-/// coin at the last record, and how many target coins they have let go of that
-/// have not yet been bought back and burned. One per coin, made by its launcher.
+/// A coin's shadow burn: the wallets it watches, each one's holding of the
+/// target coin at the last record, and how many target coins they have let go
+/// of that have not yet been bought back and burned. One per coin, made by its launcher.
 #[account]
 #[derive(InitSpace)]
 pub struct ShadowWatch {
@@ -172,16 +172,17 @@ pub struct ShadowWatch {
     pub mint: Pubkey,
     /// The coin bought back and burned ($BURR).
     pub target: Pubkey,
-    pub wallets: [Pubkey; SHADOW_MAX_WALLETS],
+    /// The key that buys back and may add wallets (Burrpad's keeper), named by the launcher.
+    pub keeper: Pubkey,
+    /// Whether the keeper may add wallets.
+    pub follow: bool,
     pub count: u8,
-    /// The watched wallets' combined holding of the target at the last record.
-    pub recorded: u64,
+    pub wallets: [Pubkey; SHADOW_MAX_WALLETS],
+    /// Each watched wallet's holding of the target at the last record.
+    pub held: [u64; SHADOW_MAX_WALLETS],
     /// Target coins let go of since the watch began, not yet bought back and burned.
     pub owed: u64,
-    /// A key the launcher allows to add watched wallets (Burrpad's keeper); none if empty.
-    pub follower: Pubkey,
-    pub follow: bool,
-    pub follower_last: i64,
+    /// ZEC the pot spent, and $BURR burned, by shadow burns.
     pub total_spent: u64,
     pub total_burned: u64,
     /// Unused. Room for fields a later version may add without moving the account.

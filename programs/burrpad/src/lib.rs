@@ -160,20 +160,21 @@ pub mod burrpad {
     pub fn set_shadow_watch<'info>(
         ctx: Context<'info, SetShadowWatch<'info>>,
         wallets: Vec<Pubkey>,
-        follower: Pubkey,
+        keeper: Pubkey,
         follow: bool,
     ) -> Result<()> {
-        instructions::shadow::handle_set_shadow_watch(ctx, wallets, follower, follow)
+        instructions::shadow::handle_set_shadow_watch(ctx, wallets, keeper, follow)
     }
 
-    /// The follower the launcher allowed adds one watched wallet.
-    pub fn follow_wallet<'info>(ctx: Context<'info, FollowWallet<'info>>, wallet: Pubkey) -> Result<()> {
-        instructions::shadow::handle_follow_wallet(ctx, wallet)
+    /// The keeper adds the plain wallet that watched wallet `from` sent $BURR to.
+    pub fn follow_wallet(ctx: Context<FollowWallet>, from: u8) -> Result<()> {
+        instructions::shadow::handle_follow_wallet(ctx, from)
     }
 
-    /// Records the watched wallets' holding, and buys back and burns $BURR up to what they let go of.
-    pub fn shadow_burn<'info>(ctx: Context<'info, ShadowBurn<'info>>) -> Result<()> {
-        instructions::shadow::handle_shadow_burn(ctx)
+    /// The keeper records the watched wallets' holding and buys back and burns
+    /// $BURR at once for a sale of `sold` coins that received `received` ZEC.
+    pub fn shadow_burn<'info>(ctx: Context<'info, ShadowBurn<'info>>, sold: u64, received: u64) -> Result<()> {
+        instructions::shadow::handle_shadow_burn(ctx, sold, received)
     }
 
     /// Adds part of a graduated coin's fee to its own pool and burns the receipts.

@@ -110,14 +110,19 @@ pub const SINK_SHADOW: usize = 7;
 pub const ALL_SINKS: usize = 8;
 /// The least ZEC (in units) a $BURR buy is tried with: 0.00001 ZEC. Below it,
 /// PumpSwap's fees, each rounded up, can leave fewer coins than the least-out
-/// allows and it refuses the buy; a shadow burn then only records, and waits.
+/// allows and it refuses the buy; a shadow burn then only records.
 pub const BURR_MIN_SPEND: u64 = 1_000;
 /// Seed of a coin's shadow-burn watch.
 pub const SEED_SHADOW: &[u8] = b"shadow";
-/// The most wallets one shadow watch follows.
-pub const SHADOW_MAX_WALLETS: usize = 4;
-/// The follower may add a watched wallet at most this often.
-pub const SHADOW_FOLLOW_WAIT_SECS: i64 = 3_600;
+/// The most wallets one shadow watch follows. With an address lookup table,
+/// a shadow burn's 29 listed accounts and 16 watched accounts stay well inside
+/// a transaction's 64 accounts, and so do a change of list's 16 old and 16 new.
+pub const SHADOW_MAX_WALLETS: usize = 16;
+/// A shadow buy must return at least the coins let go of, at the sale's own
+/// price, less this, in hundredths of a percent: 5%. It covers PumpSwap's fee
+/// on the sale and on the buy (about 1.2% each at most) and others' trades in
+/// between; a trade around the buy that moves the price more is refused.
+pub const SHADOW_SLIPPAGE_BPS: u64 = 500;
 
 /// $BURR, the platform's own coin: what the sixth pot buys and burns.
 pub const BURR_MINT: Pubkey = pubkey!("GiwMfYS4jHi256G8K41snZhKUovrMbyQL2hqv3fqr7WU");

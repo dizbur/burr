@@ -94,6 +94,12 @@ pub enum BurrpadError {
     BadWatchList,
     #[msg("A watched wallet's account is not its own account for the target coin")]
     WrongWatchedAccount,
-    #[msg("The follower may not add a wallet now")]
-    FollowerNotAllowed,
+    #[msg("Only the watch's keeper can do this")]
+    NotTheKeeper,
+    #[msg("The launcher has not allowed the keeper to add wallets")]
+    FollowingOff,
+    #[msg("Only a plain wallet can be watched: not a program, a pool or a derived address")]
+    NotAPlainWallet,
+    #[msg("The new wallet holds more than the watched wallet let go of since the last record")]
+    NotTraced,
 }

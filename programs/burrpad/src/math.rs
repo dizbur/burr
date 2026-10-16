@@ -183,6 +183,14 @@ pub fn spend_for_at_most(reserves: &Reserves, coins: u64) -> Option<u64> {
     u64::try_from(q).ok()
 }
 
+/// `a × b ÷ c`, rounded down; `None` when `c` is 0 or the result does not fit.
+pub fn mul_div(a: u64, b: u64, c: u64) -> Option<u64> {
+    if c == 0 {
+        return None;
+    }
+    u64::try_from((a as u128).checked_mul(b as u128)? / c as u128).ok()
+}
+
 /// Fewest coins a buy back accepts: the fee-free figure, less the coin's own
 /// fee and an allowance for pump.fun's.
 pub fn burn_min_out(reserves: &Reserves, spend: u64, fee_bps: u16, allowance_bps: u16) -> Option<u64> {

@@ -97,23 +97,25 @@ pub struct ShadowRecorded {
     pub owed: u64,
 }
 
-/// A shadow burn bought back and burned $BURR.
+/// A shadow burn bought back and burned $BURR, for a sale the keeper reported.
 #[event]
 pub struct ShadowBurned {
     pub mint: Pubkey,
+    pub sold: u64,
+    pub received: u64,
     pub spent: u64,
     pub burned: u64,
     pub owed: u64,
 }
 
-/// The watched wallets changed (by the launcher, or added by the follower).
+/// The watched wallets changed (by the launcher, or added by the keeper).
 #[event]
 pub struct ShadowWatchChanged {
     pub mint: Pubkey,
     pub wallets: Vec<Pubkey>,
-    pub follower: Pubkey,
+    pub keeper: Pubkey,
     pub follow: bool,
-    pub by_follower: bool,
+    pub by_keeper: bool,
 }
 
 /// Liquidity added to a coin's own pool for good: ZEC and coins deposited,
