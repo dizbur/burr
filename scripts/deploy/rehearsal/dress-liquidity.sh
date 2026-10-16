@@ -12,6 +12,7 @@
 # DRESS_SECOND_KIT=<a release-kit folder> upgrades second to that build (from the
 # commit in its commit.txt) instead of a plain build of this folder's commit:
 # the way to rehearse the exact Docker build that will be offered.
+# DRESS_ONE_JUMP=yes skips the first upgrade: the live program goes straight to the second build.
 set -euo pipefail
 cd "$(dirname "$0")/../../.."
 export PATH="$HOME/.cargo/bin:$HOME/.local/share/solana/install/active_release/bin:$PATH"
@@ -98,7 +99,8 @@ stop
 
 step "4. after: the 16 Oct upgrade, then the Liquidity upgrade, each as the multi-signature wallet will"
 start
-echo "-- first upgrade (${first:0:7})"; upgrade first
+if [ "${DRESS_ONE_JUMP:-}" = yes ]; then echo "-- one upgrade only: from the live program straight to the second build"
+else echo "-- first upgrade (${first:0:7})"; upgrade first; fi
 echo "-- second upgrade (${second:0:7})"; upgrade second
 echo "-- the after-upgrade check, right after the second upgrade, against the second build"
 node "$kit/after-upgrade.mjs" --release-kit "$work/second/target/release-kit" --authority "$(addr standin)" --coins "$coins" | grep -v "^Network:"
