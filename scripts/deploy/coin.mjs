@@ -29,8 +29,8 @@ export const coinAccount = (owner, mint) => ata(owner, mint, TOKEN_2022);
 
 // `plan`: name, symbol, uri, fee_bps, shares [creator, give, burn, holders], creator_receiver, give_receiver.
 // The platform terms are read from the settings, so the launch states the terms it saw.
-// `plan.burr_share`, `plan.liquidity_share` and `plan.payout_options` (optional):
-// the extra hooks and the payout choices, sent with `launch_v2` or `launch_v3`;
+// `plan.burr_share`, `plan.liquidity_share`, `plan.payout_options` and `plan.shadow_share` (optional):
+// the extra hooks and the payout choices, sent with `launch_v2`, `launch_v3` or `launch_v4`;
 // without them it is the plain `launch`.
 // `makeOwnAccount`: the launch also makes the launcher's own account for the
 // new coin (after the next upgrade), so a first buy needs no instruction of its own for it.
@@ -39,8 +39,8 @@ export async function launchIx(conn, idl, mint, payer, plan, { makeOwnAccount = 
   const a = coinAddresses(idl, mint);
   const curve = curveOf(mint);
   const solVault = pda(["sol-vault"], MAYHEM);
-  const { burr_share = 0, liquidity_share = 0, payout_options = 0, long_holder_step_bps = 0, long_holder_max_bps = 0, ...terms } = plan;
-  const name = liquidity_share || payout_options ? "launch_v3" : burr_share ? "launch_v2" : "launch";
+  const { burr_share = 0, liquidity_share = 0, payout_options = 0, long_holder_step_bps = 0, long_holder_max_bps = 0, shadow_share = 0, ...terms } = plan;
+  const name = shadow_share ? "launch_v4" : liquidity_share || payout_options ? "launch_v3" : burr_share ? "launch_v2" : "launch";
   const ix = instruction(idl, name, {
     payer, mint, config: configAddress(idl), coin: a.coin, ledger: a.ledger, authority: a.authority, vault: a.vault, zec_mint: ZEC,
     pump_mint_authority: pda(["mint-authority"], PUMP),
@@ -58,7 +58,7 @@ export async function launchIx(conn, idl, mint, payer, plan, { makeOwnAccount = 
     pump_program: PUMP, token_program: TOKEN, token_2022_program: TOKEN_2022,
     associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
   }, { args: { ...terms, max_platform_fraction_bps: cfg.platform_fraction_bps, platform_receiver: cfg.platform_receiver }, burr_share, liquidity_share,
-    payout: { options: payout_options, long_holder_step_bps, long_holder_max_bps } });
+    payout: { options: payout_options, long_holder_step_bps, long_holder_max_bps }, shadow_share });
   if (makeOwnAccount) ix.keys.push(meta(coinAccount(payer, mint), true));
   return ix;
 }
@@ -90,6 +90,29 @@ export const buyIx = (mint, user, zec, minCoins) => new TransactionInstruction({
 export const sellIx = (mint, user, coins, minZec) => new TransactionInstruction({
   programId: PUMP, keys: tradeKeys(mint, user),
   data: Buffer.concat([pumpDisc("sell_v3"), u64(coins), u64(minZec)]),
+});
+// A trade straight on a PumpSwap pool, as an ordinary trader makes it.
+const poolTradeKeys = (mint, user) => {
+  const pool = poolOf(mint);
+  return [
+    meta(pool, true), meta(user, true, true), meta(pda(["global_config"], PUMP_AMM)), meta(mint), meta(ZEC),
+    meta(ata(user, mint, TOKEN_2022), true), meta(ata(user, ZEC, TOKEN), true),
+    meta(ata(pool, mint, TOKEN_2022), true), meta(ata(pool, ZEC, TOKEN), true),
+    meta(TOKEN_2022), meta(TOKEN), meta(SYSTEM),
+    meta(pda(["user_volume_accumulator", user], PUMP_AMM), true), meta(pda(["fee_config", PUMP_AMM], PUMP_FEES)),
+    meta(ata(BUYBACK, ZEC, TOKEN), true), meta(pda(["__event_authority"], PUMP_AMM)), meta(PUMP_AMM),
+  ];
+};
+export const poolBuyIx = (mint, user, zec, minCoins) => new TransactionInstruction({
+  programId: PUMP_AMM, keys: poolTradeKeys(mint, user), data: Buffer.concat([pumpDisc("buy_exact_quote_in_v2"), u64(zec), u64(minCoins)]),
+});
+export const poolSellIx = (mint, user, coins, minZec) => new TransactionInstruction({
+  programId: PUMP_AMM, keys: poolTradeKeys(mint, user), data: Buffer.concat([pumpDisc("sell_v2"), u64(coins), u64(minZec)]),
+});
+// A plain transfer of a Token-2022 coin between `owner`'s account and `to`'s (which must exist).
+export const coinTransferIx = (mint, owner, to, amount, decimals) => new TransactionInstruction({
+  programId: TOKEN_2022, data: Buffer.concat([Buffer.from([12]), u64(amount), Buffer.from([decimals])]),
+  keys: [meta(coinAccount(owner, mint), true), meta(mint), meta(coinAccount(to, mint), true), meta(owner, false, true)],
 });
 // A plain ZEC transfer between two existing ZEC accounts.
 export const zecTransferIx = (from, to, owner, amount) => new TransactionInstruction({
@@ -210,6 +233,30 @@ export function burnBurrIx(idl, mint, payer) {
     ...rest, config: configAddress(idl), burr_ledger: coinAddresses(idl, BURR).ledger, burr_mint: BURR, burner_burr: burner_coin,
   });
 }
+
+// The shadow burn: the same accounts as a $BURR buy, then the coin's watch, then the watched wallets' $BURR
+// accounts. `sold` 0 only records.
+export function shadowBurnIx(idl, mint, keeper, watched = [], sold = 0n, received = 0n) {
+  const ix = burnBurrIx(idl, mint, keeper);
+  const shadow = instruction(idl, "shadow_burn", { ...accountsByName(idl, "burn_burr", ix), watch: pda(["shadow", mint], idl.programId) }, { sold, received });
+  shadow.keys.push(...watched.map((w) => ({ pubkey: ata(w, BURR, TOKEN_2022), isSigner: false, isWritable: false })));
+  return shadow;
+}
+// The launcher sets or changes a coin's shadow watch: after the listed accounts, the old wallets' $BURR accounts, then the new ones'.
+export function setShadowWatchIx(idl, mint, launcher, wallets, oldWallets, keeper, follow) {
+  const ix = instruction(idl, "set_shadow_watch", {
+    launcher, mint, coin: coinAddresses(idl, mint).coin, watch: pda(["shadow", mint], idl.programId), system_program: SYSTEM,
+  }, { wallets, keeper, follow });
+  ix.keys.push(...[...oldWallets, ...wallets].map((w) => meta(ata(w, BURR, TOKEN_2022))));
+  return ix;
+}
+// The keeper adds `wallet`, which watched wallet `sender` (number `from` on the list) sent $BURR to.
+export const followWalletIx = (idl, mint, keeper, from, sender, wallet) => instruction(idl, "follow_wallet", {
+  keeper, mint, watch: pda(["shadow", mint], idl.programId), wallet,
+  wallet_account: ata(wallet, BURR, TOKEN_2022), from_account: ata(sender, BURR, TOKEN_2022),
+}, { from });
+const accountsByName = (idl, name, ix) =>
+  Object.fromEntries(idl.instructions.find((x) => x.name === name).accounts.map((a, i) => [a.name, ix.keys[i].pubkey]));
 
 // `amount` of the holder pot, for the snapshot taken at `slot` whose fingerprint is `hash` (32 bytes).
 export function releaseIx(idl, mint, rewardsWallet, amount, slot, hash) {

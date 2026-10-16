@@ -14,7 +14,7 @@
 import { PublicKey, TransactionMessage, VersionedTransaction, ComputeBudgetProgram } from "@solana/web3.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { addLiquidityIx, BURR, burnBurrIx, burnCurveIx, burnPoolIx, clock, collectCurveIx, collectPoolIx, curveOf, splitIx } from "./coin.mjs";
+import { addLiquidityIx, BURR, burnBurrIx, shadowBurnIx, burnCurveIx, burnPoolIx, clock, collectCurveIx, collectPoolIx, curveOf, splitIx } from "./coin.mjs";
 import { address, checker, coinAddresses, configAddress, connect, decodeAccount, fail, loadIdl, need, options, programDataAddress, readAccount, ROOT, sha256 } from "./lib.mjs";
 
 const opts = options(["url", "mainnet", "authority", "admin", "coins", "save", "release-kit"]);
@@ -75,7 +75,8 @@ console.log(`      launches ${c.launches_paused ? "PAUSED" : "on"}, holder relea
 
 // 4. Collect, split and burn on live coins: simulated with the real accounts, never sent.
 // Refusals that only mean "not now" are expected: the keeper burns every minute, and a pot may be empty.
-const expected = { BurnTooSoon: "the last burn was less than a minute ago", NothingToBurn: "nothing to buy now (the pot is empty, or too small)", HookNotChosen: "the coin did not choose this hook" };
+const expected = { BurnTooSoon: "the last burn was less than a minute ago", NothingToBurn: "nothing to buy now (the pot is empty, or too small)", HookNotChosen: "the coin did not choose this hook",
+  AccountNotInitialized: "the coin has no shadow watch: it did not choose this hook" };
 let throughTheBuy = 0, burnsTried = 0;
 const run = async (ix) => {
   const { blockhash } = await conn.getLatestBlockhash();
@@ -114,6 +115,7 @@ const lastBurn = (mint) => async () => {
 };
 const hasBurnBurr = idl.instructions.some((i) => i.name === "burn_burr");
 const hasAddLiquidity = idl.instructions.some((i) => i.name === "add_liquidity");
+const hasShadow = idl.instructions.some((i) => i.name === "shadow_burn");
 const mints = (opts.coins ?? "").split(",").filter(Boolean).map((m) => address(m, "a coin"));
 if (!mints.length) console.log("      (no --coins given: the simulated calls were skipped)");
 for (const mint of mints) {
@@ -137,6 +139,11 @@ for (const mint of mints) {
       return [BigInt(c.burr_buy.ready_at), own].reduce((a, b) => (a > b ? a : b));
     });
     if (!Number(coin.burr_share ?? 0)) burnsTried--;
+  }
+  if (hasShadow && !mint.equals(BURR)) {
+    // No coin launched before the upgrade has a shadow watch: the call reaches the new instruction with a
+    // $BURR buy's real accounts, up to the coin's missing watch.
+    await simulate(`${name}: shadow burn (record only)`, shadowBurnIx(idl, mint, authority));
   }
   if (hasAddLiquidity && graduated) {
     // Only a graduated coin has a pool to add to. No coin launched before the upgrade chose the liquidity

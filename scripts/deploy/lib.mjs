@@ -157,6 +157,10 @@ function encodeValue(idl, t, v) {
     }
     throw new Error("cannot encode " + t);
   }
+  if (t.vec) {
+    const n = Buffer.alloc(4); n.writeUInt32LE(v.length);
+    return Buffer.concat([n, ...Array.from(v, (x) => encodeValue(idl, t.vec, x))]);
+  }
   if (t.array) {
     if (v.length !== t.array[1]) throw new Error(`expected ${t.array[1]} items`);
     return Buffer.concat(Array.from(v, (x) => encodeValue(idl, t.array[0], x)));
@@ -181,7 +185,9 @@ function encodeValue(idl, t, v) {
 export function instruction(idl, name, accounts, args = {}) {
   const def = idl.instructions.find((x) => x.name === name);
   if (!def) throw new Error("no instruction " + name);
-  const keys = def.accounts.map((a) => {
+  // A group of accounts nested in another (the shadow burn takes a $BURR buy's whole list) is listed flat, in order.
+  const flat = (list) => list.flatMap((a) => (a.accounts ? flat(a.accounts) : [a]));
+  const keys = flat(def.accounts).map((a) => {
     const key = accounts[a.name] ?? (a.address ? new PublicKey(a.address) : undefined);
     if (!key) throw new Error(`${name}: account ${a.name} not given`);
     return { pubkey: key, isSigner: !!a.signer, isWritable: !!a.writable };
