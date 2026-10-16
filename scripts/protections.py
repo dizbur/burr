@@ -671,7 +671,7 @@ MANUAL = [
       "w.owed = w.owed.saturating_sub(done.bought);", "", "t22_shadow_burn::a_sale_by_the_target_is_bought_back_and_burned_never_more"),
     M("K25", "The ZEC for at most the owed coins is worked out at the price before fees, rounded down", "math.rs",
       "    u64::try_from(q).ok()\n}\n\n/// Fewest coins", "    u64::try_from(q * 2).ok()\n}\n\n/// Fewest coins",
-      "t22_shadow_burn::a_pot_bigger_than_the_fall_spends_only_what_buys_the_fall"),
+      "t22_shadow_burn::a_sale_by_the_target_is_bought_back_and_burned_never_more"),
     M("K26", "A $BURR buy below the least spend is not tried", BURR,
       "if spend < BURR_MIN_SPEND || min_out == 0 {", "if min_out == 0 {", "t22_shadow_burn::a_sale_by_the_target_is_bought_back_and_burned_never_more"),
 ]
@@ -757,7 +757,8 @@ def auto_entries():
                 out.append(dict(
                     id=f"X.{struct}.{field}", what=f"{struct}: `{field}` must be the right account",
                     file=rel, span=(a, b), old=old_attr, repl=new_attr, test=test_for,
-                    msg=rf"swapping {field}( \(|\s+was)" if test_for == test else None))
+                    # Tests outside the substitution suite (named in full) do not print "swapping <field>".
+                    msg=rf"swapping {field}( \(|\s+was)" if test_for == test and test.startswith("t11_") else None))
             # program types
             for pm in re.finditer(r"pub (\w+): Program<'info, \w+>,", body):
                 field = pm.group(1)
@@ -766,7 +767,7 @@ def auto_entries():
                     id=f"Y.{struct}.{field}", what=f"{struct}: `{field}` must be the real program",
                     file=rel, span=(a, b), old=pm.group(0),
                     repl=f"/// CHECK: switched off\n    pub {field}: UncheckedAccount<'info>,", test=test,
-                    msg=rf"swapping {field}( \(|\s+was)"))
+                    msg=rf"swapping {field}( \(|\s+was)" if test.startswith("t11_") else None))
     return out
 
 
@@ -878,6 +879,9 @@ def worker(n, queue, results):
 # stands. Filled from the run's results, by reasoning about each one.
 def second_line(entry_id):
     """Why no test can see this check missing on its own: what else stops the same swap."""
+    if entry_id == "X.FollowWallet.watch":
+        return ("the watch passed is the one changed, and only that watch's own follower may change it; the mint "
+                "named beside it is not otherwise used")
     if entry_id == "Q7":
         return "the receipt mint is also pinned by its derived address from the pool's own address, which is checked"
     if entry_id == "Q15":

@@ -360,6 +360,13 @@ fn shadow_burn_takes_only_this_coins_watch_pot_and_the_watched_accounts() {
     type Change<'x> = Box<dyn Fn(&mut A, &mut Vec<AccountMeta>) + 'x>;
     let swaps: Vec<(&str, Change)> = vec![
         ("another coin's watch", Box::new(|x, _| x.watch = kit::shadow(&other))),
+        (
+            "another coin's watch, with that watch's own wallets' accounts",
+            Box::new(|x, r| {
+                x.watch = kit::shadow(&other);
+                *r = World::watched_accounts(&[them.pubkey()]);
+            }),
+        ),
         ("another coin's ledger", Box::new(|x, _| x.burr.ledger = kit::ledger(&other))),
         ("another coin's vault", Box::new(|x, _| x.burr.vault = kit::vault(&other))),
         (
