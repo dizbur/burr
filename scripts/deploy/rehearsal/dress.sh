@@ -64,10 +64,9 @@ stop
 
 step "4. after: extend and upgrade as the multi-signature wallet will, then the same calls"
 start
-( cd "$work/owner" && node scripts/deploy/extend.mjs --authority "$(addr standin)" ) > "$work/extend.txt"
-grep -E "Room now|Build|Adds|Rent|Vault has" "$work/extend.txt"
-tail -1 "$work/extend.txt" > "$work/extend-tx.txt"
-node "$kit/rehearsal/stand-in.mjs" sign "$work/extend-tx.txt" --key "$(key standin)"
+# Sent by the deploy wallet itself: the network refuses an extend made from inside Squads.
+( cd "$work/owner" && node scripts/deploy/extend.mjs --authority "$(addr standin)" --payer "$(key deployer)" --send yes ) > "$work/extend.txt"
+grep -E "Room now|Build|Adds|Rent|PASS|FAIL" "$work/extend.txt"
 sleep 2
 ( cd "$work/owner" && ./scripts/deploy/upgrade.sh --built --payer "$(key deployer)" --offer-to "$(addr standin)" ) > "$work/upgrade.log" 2>&1 || { grep -vE "^[a-z]+( [a-z]+){11}$" "$work/upgrade.log" | tail -20; exit 1; }
 grep -E "^(PASS|FAIL|STOPPED)|reproducible|buffer address" "$work/upgrade.log"

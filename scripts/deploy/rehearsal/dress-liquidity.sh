@@ -73,12 +73,12 @@ trap stop EXIT
 upgrade() {
   local dir="$work/$1" room
   room=$(solana program show 42w1jV45WeSmfM96vr6GrqSWRcyF5rVbPWjmQ89bvdhg --url "$url" | awk '/Data Length/ {print $3}')
-  ( cd "$dir" && node scripts/deploy/extend.mjs --authority "$(addr standin)" ) > "$work/extend-$1.txt"
-  grep -E "Room now|Build|Adds" "$work/extend-$1.txt"
+  # The extend is sent by the deploy wallet itself, never through the multi-signature wallet: the network
+  # refuses an extend made from inside another program (Squads), which a stand-in key signing directly cannot show.
+  node "$kit/extend.mjs" --authority "$(addr standin)" --release-kit "$dir/target/release-kit" --payer "$(key deployer)" --send yes > "$work/extend-$1.txt" 2>&1 || { tail -5 "$work/extend-$1.txt"; exit 1; }
+  grep -E "Room now|Build|Adds|PASS|FAIL|STOPPED" "$work/extend-$1.txt"
   local grow; grow=$(awk '/^Adds:/ {print $2}' "$work/extend-$1.txt")
   echo "On the main network that room costs about $(awk -v b="$grow" -v r=$MAINNET_LAMPORTS_PER_BYTE 'BEGIN { printf "%.4f", b * r / 1e9 }') SOL (the local figure above is at the local rent)."
-  tail -1 "$work/extend-$1.txt" > "$work/extend-$1-tx.txt"
-  node "$kit/rehearsal/stand-in.mjs" sign "$work/extend-$1-tx.txt" --key "$(key standin)" | grep -v "^Network:"
   sleep 2
   ( cd "$dir" && ./scripts/deploy/upgrade.sh --built --payer "$(key deployer)" --offer-to "$(addr standin)" ) > "$work/upgrade-$1.log" 2>&1 || { grep -vE "^[a-z]+( [a-z]+){11}$" "$work/upgrade-$1.log" | tail -20; exit 1; }
   grep -E "^(PASS|FAIL|STOPPED)" "$work/upgrade-$1.log"
