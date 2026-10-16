@@ -3,10 +3,11 @@
 // before and after the upgrade. Refuses the main network.
 //   node dress.mjs <before|after> --payer <file> --coins <mint,...> --out <file> [--payout-wallet <address>]
 // With --payout-wallet (set and confirmed beforehand), "after" also runs the Liquidity upgrade's new calls.
+// When the build has the shadow burn, "after" also runs its calls on $BURR's real pool.
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { writeFileSync } from "node:fs";
 import {
-  addLiquidityIx, BURR, burnBurrIx, burnCurveIx, burnPoolIx, buyIx, clock, coinAccount, collectCurveIx, collectPoolIx, curveOf, launchIx, migrateIx, poolOf,
+  addLiquidityIx, BURR, burnBurrIx, coinTransferIx, followWalletIx, poolBuyIx, poolSellIx, setShadowWatchIx, shadowBurnIx, supplyOf, burnCurveIx, burnPoolIx, buyIx, clock, coinAccount, collectCurveIx, collectPoolIx, curveOf, launchIx, migrateIx, poolOf,
   makeTokenAccountIx, payOutIx, splitIx, tokenBalance, zecAccount, zecTransferIx,
 } from "../coin.mjs";
 import { address, ata, coinAddresses, connect, fail, loadIdl, loadKey, loadTable, need, options, pda, PUMP_AMM, readAccount, readOut, send, TOKEN, TOKEN_2022, ZEC } from "../lib.mjs";
@@ -121,6 +122,35 @@ if (phase === "after" && opts["payout-wallet"]) {
   console.log(`      the payout wallet received ${results.at(-1).payoutWalletRose}`);
   await waitForBurn(BURR);
   await step("burn_burr (launch_v3 coin)", m, [burnBurrIx(idl, m, me)]);
+}
+
+// The shadow burn's calls: a launch_v4 coin watching the payer, who sells $BURR on its real pool;
+// the keeper (the payer here) buys back at once; then the payer sends $BURR to a fresh wallet, which the keeper follows.
+if (phase === "after" && idl.instructions.some((i) => i.name === "shadow_burn")) {
+  const m = await launchWithBuy("launch_v4 with a shadow share", { ...plan, shares: [2000, 2000, 2000, 2000], shadow_share: 2000 }, true);
+  await send(conn, [makeTokenAccountIx(me, me, BURR, TOKEN_2022), poolBuyIx(BURR, me, 200_000_000n, 1n)], [payer], { units: 400_000 });
+  await step("set_shadow_watch (the launcher)", m, [setShadowWatchIx(idl, m, me, [me], [], me, true)]);
+  await step("fee in + split (launch_v4 coin)", m, [zecTransferIx(zecAccount(me), coinAddresses(idl, m).vault, me, 2_000_000_000n), splitIx(idl, m)]);
+  const held = await tokenBalance(conn, coinAccount(me, BURR));
+  const sold = held / 10n;
+  const zec0 = await tokenBalance(conn, zecAccount(me));
+  await send(conn, [poolSellIx(BURR, me, sold, 0n)], [payer], { units: 400_000 });
+  const got = (await tokenBalance(conn, zecAccount(me))) - zec0;
+  const supply0 = await supplyOf(conn, BURR);
+  const pot0 = (await readAccount(conn, idl, "Ledger", coinAddresses(idl, m).ledger)).shadow.pot;
+  await step("shadow_burn: the sale bought back at once", m, [shadowBurnIx(idl, m, me, [me], sold, got)]);
+  const r = results.at(-1);
+  r.sold = String(sold); r.received = String(got);
+  r.burned = String(supply0 - (await supplyOf(conn, BURR)));
+  r.spent = String(BigInt(pot0) - BigInt((await readAccount(conn, idl, "Ledger", coinAddresses(idl, m).ledger)).shadow.pot));
+  const watch = await readAccount(conn, idl, "ShadowWatch", pda(["shadow", m], idl.programId));
+  console.log(`      sold ${r.sold} $BURR units for ${r.received} ZEC units; spent ${r.spent}, burned ${r.burned}; still owed ${watch.owed}`);
+  const fresh = Keypair.generate().publicKey;
+  const decimals = (await conn.getAccountInfo(BURR)).data[44];
+  await send(conn, [makeTokenAccountIx(me, fresh, BURR, TOKEN_2022), coinTransferIx(BURR, me, fresh, sold / 4n, decimals)], [payer], { units: 200_000 });
+  await step("follow_wallet: the keeper follows where the watched wallet sent", m, [followWalletIx(idl, m, me, 0, me, fresh)]);
+  const after = await readAccount(conn, idl, "ShadowWatch", pda(["shadow", m], idl.programId));
+  console.log(`      watched wallets now ${after.count}; the new one recorded at ${after.held[1]} (sent ${sold / 4n})`);
 }
 
 writeFileSync(need(opts, "out"), JSON.stringify(results, null, 1));
