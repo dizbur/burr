@@ -97,18 +97,30 @@ node "$kit/after-upgrade.mjs" --save yes --release-kit "$work/second/target/rele
 node "$kit/rehearsal/dress.mjs" before --payer "$(key deployer)" --coins "$coins" --out "$work/before.json" | grep -v "^Network:"
 stop
 
-step "4. after: the 16 Oct upgrade, then the Liquidity upgrade, each as the multi-signature wallet will"
+step "4. after: the upgrade(s), each as the multi-signature wallet will"
 start
 if [ "${DRESS_ONE_JUMP:-}" = yes ]; then echo "-- one upgrade only: from the live program straight to the second build"
 else echo "-- first upgrade (${first:0:7})"; upgrade first; fi
 echo "-- second upgrade (${second:0:7})"; upgrade second
 echo "-- the after-upgrade check, right after the second upgrade, against the second build"
-node "$kit/after-upgrade.mjs" --release-kit "$work/second/target/release-kit" --authority "$(addr standin)" --coins "$coins" | grep -v "^Network:"
+# The live coins' burn pots are often empty (the keeper burns every minute): then "at least one burn all the way
+# through the buy" is shown again below, on the coins launched in this rehearsal. Any other failure stops here.
+node "$kit/after-upgrade.mjs" --release-kit "$work/second/target/release-kit" --authority "$(addr standin)" --coins "$coins" > "$work/after-upgrade-1.txt" 2>&1 || true
+grep -v "^Network:" "$work/after-upgrade-1.txt"
+others=$(grep "^FAIL" "$work/after-upgrade-1.txt" | grep -v "at least one burn was simulated all the way through the buy" || true)
+[ -z "$others" ] || { echo "STOPPED: the after-upgrade check failed."; exit 1; }
 echo "-- private creator payouts opened with admin.mjs: set by the administrator, confirmed by the wallet itself"
 solana airdrop 1 "$(addr payout)" --url "$url" >/dev/null
 node "$kit/admin.mjs" set-creator-payout-wallet "$(addr payout)" --admin-key "$(key standin)" | grep -E "PASS|STOPPED|creator payout"
 node "$kit/admin.mjs" confirm-creator-payout-wallet --admin-key "$(key payout)" | grep -E "PASS|STOPPED|creator payout"
 node "$kit/rehearsal/dress.mjs" after --payer "$(key deployer)" --coins "$coins" --out "$work/after.json" --payout-wallet "$(addr payout)" | grep -v "^Network:"
+if grep -q "at least one burn was simulated all the way through the buy" <(grep "^FAIL" "$work/after-upgrade-1.txt"); then
+  echo "-- the after-upgrade check again, adding the coins launched just now (their burn pots hold ZEC)"
+  launched=$(node -e 'const r = JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")); console.log([...new Set(r.filter((x) => x.ok && /^launch/.test(x.name)).map((x) => x.mint))].join(","))' "$work/after.json")
+  # The settings changed on purpose since the first check (the payout wallet): compare from now.
+  node "$kit/after-upgrade.mjs" --save yes --release-kit "$work/second/target/release-kit" --authority "$(addr standin)" | grep -v "^Network:"
+  node "$kit/after-upgrade.mjs" --release-kit "$work/second/target/release-kit" --authority "$(addr standin)" --coins "$coins,$launched" | grep -v "^Network:"
+fi
 stop
 
 step "5. what differs"
