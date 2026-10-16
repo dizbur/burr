@@ -47,3 +47,5 @@ mod t19_payout_options;
 mod t20_edge_cases;
 #[cfg(test)]
 mod t21_random_life;
+#[cfg(test)]
+mod t22_shadow_burn;

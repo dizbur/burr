@@ -84,8 +84,11 @@ pub struct Coin {
     /// reaches, in hundredths of a percent. Zero without it.
     pub long_holder_step_bps: u16,
     pub long_holder_max_bps: u16,
+    /// Share of the hooks' part that fills the shadow-burn pot. Zero for every
+    /// coin launched before this field existed.
+    pub shadow_share: u16,
     /// Unused. Room for fields a later version may add without moving the account.
-    pub reserved: [u8; 55],
+    pub reserved: [u8; 53],
 }
 
 impl Coin {
@@ -120,8 +123,10 @@ pub struct Ledger {
     pub burr: BurrPot,
     /// The seventh pot, for adding liquidity to the coin's own pool.
     pub liquidity: LiquidityPot,
+    /// The eighth pot, for the shadow burn (its totals are in the coin's `ShadowWatch`).
+    pub shadow: ShadowPot,
     /// Unused. Room for fields a later version may add without moving the account.
-    pub reserved: [u8; 32],
+    pub reserved: [u8; 8],
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]
@@ -146,6 +151,41 @@ pub struct LiquidityPot {
     /// The pool's figures as recorded at the last call: the reserve the limit
     /// is measured against.
     pub reference: Reserves,
+}
+
+#[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]
+pub struct ShadowPot {
+    /// What the pot holds now.
+    pub pot: u64,
+    /// All ZEC ever credited to it.
+    pub credited: u128,
+}
+
+/// A coin's shadow burn: the wallets it watches, their holding of the target
+/// coin at the last record, and how many target coins they have let go of that
+/// have not yet been bought back and burned. One per coin, made by its launcher.
+#[account]
+#[derive(InitSpace)]
+pub struct ShadowWatch {
+    pub version: u8,
+    pub bump: u8,
+    pub mint: Pubkey,
+    /// The coin bought back and burned ($BURR).
+    pub target: Pubkey,
+    pub wallets: [Pubkey; SHADOW_MAX_WALLETS],
+    pub count: u8,
+    /// The watched wallets' combined holding of the target at the last record.
+    pub recorded: u64,
+    /// Target coins let go of since the watch began, not yet bought back and burned.
+    pub owed: u64,
+    /// A key the launcher allows to add watched wallets (Burrpad's keeper); none if empty.
+    pub follower: Pubkey,
+    pub follow: bool,
+    pub follower_last: i64,
+    pub total_spent: u64,
+    pub total_burned: u64,
+    /// Unused. Room for fields a later version may add without moving the account.
+    pub reserved: [u8; 64],
 }
 
 #[derive(AnchorSerialize, AnchorDeserialize, InitSpace, Clone, Copy, Default)]

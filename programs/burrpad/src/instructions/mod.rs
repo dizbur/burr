@@ -6,6 +6,7 @@ pub mod holders;
 pub mod launch;
 pub mod liquidity;
 pub mod pay_out;
+pub mod shadow;
 
 pub use admin::*;
 pub use burn::*;
@@ -15,3 +16,4 @@ pub use holders::*;
 pub use launch::*;
 pub use liquidity::*;
 pub use pay_out::*;
+pub use shadow::*;

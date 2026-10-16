@@ -289,9 +289,10 @@ fn a_vault_holding_less_than_the_ledger_says_stops_the_split() {
 fn a_pot_cannot_be_debited_below_zero() {
     let mut l = burrpad::state::Ledger {
         version: 1,
-        reserved: [0; 32],
+        reserved: [0; 8],
         burr: Default::default(),
         liquidity: Default::default(),
+        shadow: Default::default(),
         mint: Pubkey::default(),
         bump: 0,
         accounted: 100,

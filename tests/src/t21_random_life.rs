@@ -359,6 +359,7 @@ impl Life {
                 rest * r.shares[3] as u128,
                 rest * r.burr_share as u128,
                 rest * r.liquidity_share as u128,
+                rest * r.shadow_share as u128,
             ];
             assert_eq!(weights.iter().sum::<u128>(), 100_000_000, "{at}: coin {i}: the recorded shares do not add up");
             let credited = [
@@ -369,6 +370,7 @@ impl Life {
                 l.credited[4],
                 l.burr.credited,
                 l.liquidity.credited,
+                l.shadow.credited,
             ];
             for (k, (got, weight)) in credited.iter().zip(weights).enumerate() {
                 assert_eq!(
@@ -377,14 +379,18 @@ impl Life {
                     "{at}: coin {i}: pot {k}'s credit is not its share"
                 );
             }
-            let pots: u128 =
-                l.pots.iter().map(|p| *p as u128).sum::<u128>() + l.burr.pot as u128 + l.liquidity.pot as u128;
+            let pots: u128 = l.pots.iter().map(|p| *p as u128).sum::<u128>()
+                + l.burr.pot as u128
+                + l.liquidity.pot as u128
+                + l.shadow.pot as u128;
             assert_eq!(
                 l.accounted as u128 - pots,
                 l.total_split - credited.iter().sum::<u128>(),
                 "{at}: coin {i}: the carry"
             );
-            assert!(l.total_split - credited.iter().sum::<u128>() < 7, "{at}: coin {i}: the carry is too large");
+            assert!(l.total_split - credited.iter().sum::<u128>() < 8, "{at}: coin {i}: the carry is too large");
+            let shadow_spent = w.shadow_watch(m).map(|x| x.total_spent).unwrap_or(0) as u128;
+            assert_eq!(l.shadow.credited, l.shadow.pot as u128 + shadow_spent, "{at}: coin {i}: shadow");
             // Every pot closes: credited = still there + what its one way out paid.
             let paid_creator = l.credited[1] - l.pots[1] as u128;
             if c.private {

@@ -93,7 +93,7 @@ pub mod burrpad {
 
     /// The same, with part of the hooks' share buying and burning $BURR.
     pub fn launch_v2<'info>(ctx: Context<'info, Launch<'info>>, args: LaunchArgs, burr_share: u16) -> Result<()> {
-        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, 0, PayoutChoices::default())
+        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, 0, PayoutChoices::default(), 0)
     }
 
     /// The same, with part of the hooks' share also added to the coin's own
@@ -105,7 +105,19 @@ pub mod burrpad {
         liquidity_share: u16,
         payout: PayoutChoices,
     ) -> Result<()> {
-        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, liquidity_share, payout)
+        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, liquidity_share, payout, 0)
+    }
+
+    /// The same, with part of the hooks' share also filling the shadow-burn pot.
+    pub fn launch_v4<'info>(
+        ctx: Context<'info, Launch<'info>>,
+        args: LaunchArgs,
+        burr_share: u16,
+        liquidity_share: u16,
+        payout: PayoutChoices,
+        shadow_share: u16,
+    ) -> Result<()> {
+        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, liquidity_share, payout, shadow_share)
     }
 
     pub fn split(ctx: Context<SplitOnly>) -> Result<()> {
@@ -142,6 +154,26 @@ pub mod burrpad {
     /// Buys $BURR with the coin's sixth pot and burns it.
     pub fn burn_burr(ctx: Context<BurnBurr>) -> Result<()> {
         instructions::burr::handle_burn_burr(ctx)
+    }
+
+    /// Sets or changes a coin's shadow-burn watch. Only its launcher.
+    pub fn set_shadow_watch<'info>(
+        ctx: Context<'info, SetShadowWatch<'info>>,
+        wallets: Vec<Pubkey>,
+        follower: Pubkey,
+        follow: bool,
+    ) -> Result<()> {
+        instructions::shadow::handle_set_shadow_watch(ctx, wallets, follower, follow)
+    }
+
+    /// The follower the launcher allowed adds one watched wallet.
+    pub fn follow_wallet<'info>(ctx: Context<'info, FollowWallet<'info>>, wallet: Pubkey) -> Result<()> {
+        instructions::shadow::handle_follow_wallet(ctx, wallet)
+    }
+
+    /// Records the watched wallets' holding, and buys back and burns $BURR up to what they let go of.
+    pub fn shadow_burn<'info>(ctx: Context<'info, ShadowBurn<'info>>) -> Result<()> {
+        instructions::shadow::handle_shadow_burn(ctx)
     }
 
     /// Adds part of a graduated coin's fee to its own pool and burns the receipts.

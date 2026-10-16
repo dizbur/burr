@@ -6,7 +6,7 @@ use crate::pump::{self, ata, pda, ATA_PROGRAM, BUYBACK, PUMP, PUMP_AMM, PUMP_FEE
 use anchor_lang::{AccountDeserialize, InstructionData, ToAccountMetas};
 use burrpad::state::{Coin, Config, Ledger, Payee};
 use solana_account::Account;
-use solana_instruction::Instruction;
+use solana_instruction::{AccountMeta, Instruction};
 use solana_keypair::Keypair;
 use solana_pubkey::{pubkey, Pubkey};
 use solana_signer::Signer;
@@ -28,6 +28,9 @@ pub fn authority(mint: &Pubkey) -> Pubkey {
 }
 pub fn burner(mint: &Pubkey) -> Pubkey {
     pda(&[b"burner", mint.as_ref()], &BURRPAD)
+}
+pub fn shadow(mint: &Pubkey) -> Pubkey {
+    pda(&[b"shadow", mint.as_ref()], &BURRPAD)
 }
 pub fn vault(mint: &Pubkey) -> Pubkey {
     ata(&authority(mint), &ZEC, &TOKEN)
@@ -59,6 +62,7 @@ pub struct LaunchPlan {
     pub payout_options: u8,
     pub long_holder_step_bps: u16,
     pub long_holder_max_bps: u16,
+    pub shadow_share: u16,
 }
 
 impl Default for LaunchPlan {
@@ -77,6 +81,7 @@ impl Default for LaunchPlan {
             payout_options: 0,
             long_holder_step_bps: 0,
             long_holder_max_bps: 0,
+            shadow_share: 0,
         }
     }
 }
@@ -230,7 +235,20 @@ impl World {
                 max_platform_fraction_bps: plan.max_platform_fraction_bps.unwrap_or(cfg.platform_fraction_bps),
                 platform_receiver: plan.platform_receiver.unwrap_or(cfg.platform_receiver),
             };
-            if plan.liquidity_share > 0 || plan.payout_options > 0 {
+            if plan.shadow_share > 0 {
+                burrpad::instruction::LaunchV4 {
+                    args,
+                    burr_share: plan.burr_share,
+                    liquidity_share: plan.liquidity_share,
+                    payout: burrpad::instructions::PayoutChoices {
+                        options: plan.payout_options,
+                        long_holder_step_bps: plan.long_holder_step_bps,
+                        long_holder_max_bps: plan.long_holder_max_bps,
+                    },
+                    shadow_share: plan.shadow_share,
+                }
+                .data()
+            } else if plan.liquidity_share > 0 || plan.payout_options > 0 {
                 burrpad::instruction::LaunchV3 {
                     args,
                     burr_share: plan.burr_share,
@@ -298,12 +316,16 @@ impl World {
     /// says, and the pots never add up to more than the ledger's total.
     pub fn assert_sound(&self, mint: &Pubkey) {
         let l = self.ledger(mint);
-        let pots: u128 = l.pots.iter().map(|p| *p as u128).sum::<u128>() + l.burr.pot as u128 + l.liquidity.pot as u128;
+        let pots: u128 = l.pots.iter().map(|p| *p as u128).sum::<u128>()
+            + l.burr.pot as u128
+            + l.liquidity.pot as u128
+            + l.shadow.pot as u128;
         assert!(self.vault_balance(mint) >= l.accounted, "vault below accounted");
         assert!(pots <= l.accounted as u128, "pots above accounted");
-        assert!(l.accounted as u128 - pots < 7, "carry too large");
-        let credited: u128 = l.credited.iter().sum::<u128>() + l.burr.credited + l.liquidity.credited;
-        assert!(credited <= l.total_split && l.total_split - credited < 7, "credited does not match total");
+        assert!(l.accounted as u128 - pots < 8, "carry too large");
+        let credited: u128 =
+            l.credited.iter().sum::<u128>() + l.burr.credited + l.liquidity.credited + l.shadow.credited;
+        assert!(credited <= l.total_split && l.total_split - credited < 8, "credited does not match total");
     }
 
     // ---- trades made straight on pump.fun, as an ordinary trader would ----
@@ -570,6 +592,61 @@ impl World {
     }
     pub fn burn_pool(&mut self, mint: &Pubkey) -> TxResult {
         let i = ix(self.burn_pool_accounts(&self.b.payer.pubkey(), mint), burrpad::instruction::BurnPool {});
+        self.b.send(&[i], &[])
+    }
+
+    // ---- Shadow burn ----
+
+    pub fn shadow_watch(&self, mint: &Pubkey) -> Option<burrpad::state::ShadowWatch> {
+        let a = self.b.account(&shadow(mint))?;
+        Some(burrpad::state::ShadowWatch::try_deserialize(&mut a.data.as_slice()).unwrap())
+    }
+    /// The watched wallets' accounts for $BURR, in order, as the shadow instructions take them after the listed ones.
+    pub fn watched_accounts(wallets: &[Pubkey]) -> Vec<AccountMeta> {
+        wallets.iter().map(|w| AccountMeta::new_readonly(ata(w, &burrpad::BURR_MINT, &TOKEN_2022), false)).collect()
+    }
+    /// `set_shadow_watch` by `launcher`, passing the old wallets' accounts then the new ones'.
+    pub fn set_shadow_watch(
+        &mut self,
+        launcher: &Keypair,
+        mint: &Pubkey,
+        wallets: &[Pubkey],
+        follower: Pubkey,
+        follow: bool,
+    ) -> TxResult {
+        let old: Vec<Pubkey> =
+            self.shadow_watch(mint).map(|w| w.wallets[..w.count as usize].to_vec()).unwrap_or_default();
+        let acc = burrpad::accounts::SetShadowWatch {
+            launcher: launcher.pubkey(),
+            mint: *mint,
+            coin: coin(mint),
+            watch: shadow(mint),
+            system_program: SYSTEM,
+        };
+        let mut i = ix(acc, burrpad::instruction::SetShadowWatch { wallets: wallets.to_vec(), follower, follow });
+        i.accounts.extend(Self::watched_accounts(&old));
+        i.accounts.extend(Self::watched_accounts(wallets));
+        self.b.send_as(Some(launcher), &[i], &[])
+    }
+    pub fn follow_wallet(&mut self, follower: &Keypair, mint: &Pubkey, wallet: &Pubkey) -> TxResult {
+        let w = self.shadow_watch(mint).expect("a watch");
+        let acc = burrpad::accounts::FollowWallet { follower: follower.pubkey(), mint: *mint, watch: shadow(mint) };
+        let mut i = ix(acc, burrpad::instruction::FollowWallet { wallet: *wallet });
+        i.accounts.extend(Self::watched_accounts(&w.wallets[..w.count as usize]));
+        i.accounts.extend(Self::watched_accounts(&[*wallet]));
+        self.b.send_as(Some(follower), &[i], &[])
+    }
+    pub fn shadow_burn_ix(&self, payer: &Pubkey, mint: &Pubkey) -> Instruction {
+        let w = self.shadow_watch(mint);
+        let acc = burrpad::accounts::ShadowBurn { burr: self.burn_burr_accounts(payer, mint), watch: shadow(mint) };
+        let mut i = ix(acc, burrpad::instruction::ShadowBurn {});
+        if let Some(w) = w {
+            i.accounts.extend(Self::watched_accounts(&w.wallets[..w.count as usize]));
+        }
+        i
+    }
+    pub fn shadow_burn(&mut self, mint: &Pubkey) -> TxResult {
+        let i = self.shadow_burn_ix(&self.b.payer.pubkey(), mint);
         self.b.send(&[i], &[])
     }
 

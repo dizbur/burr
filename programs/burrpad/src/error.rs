@@ -88,4 +88,12 @@ pub enum BurrpadError {
     NotThePayoutWallet,
     #[msg("The long-holder bonus's step and most are out of range")]
     BonusOutOfRange,
+    #[msg("Only the coin's launcher can set its shadow watch")]
+    NotTheLauncher,
+    #[msg("Watched wallets: empty, repeated, too many, or a wallet already watched")]
+    BadWatchList,
+    #[msg("A watched wallet's account is not its own account for the target coin")]
+    WrongWatchedAccount,
+    #[msg("The follower may not add a wallet now")]
+    FollowerNotAllowed,
 }

@@ -443,6 +443,6 @@ fn every_account_carries_a_layout_version_and_spare_room() {
     let mint = w.launch(&LaunchPlan::default());
     let (cfg, coin, ledger) = (w.config(), w.coin(&mint), w.ledger(&mint));
     assert_eq!((cfg.version, coin.version, ledger.version), (1, 1, 1));
-    assert_eq!((cfg.reserved.len(), coin.reserved.len(), ledger.reserved.len()), (7, 55, 32));
+    assert_eq!((cfg.reserved.len(), coin.reserved.len(), ledger.reserved.len()), (7, 53, 8));
     assert!(cfg.reserved.iter().chain(&coin.reserved).chain(&ledger.reserved).all(|b| *b == 0));
 }

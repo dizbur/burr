@@ -10,25 +10,21 @@ pub const WEIGHT_TOTAL: u128 = 100_000_000;
 
 /// The split weights of a coin: the platform's, then one per hook.
 pub fn weights(platform_fraction_bps: u16, shares: &[u16; HOOKS]) -> Option<[u128; SINKS]> {
-    let w = weights_all(platform_fraction_bps, shares, 0, 0)?;
+    let w = weights_all(platform_fraction_bps, shares, [0, 0, 0])?;
     let mut out = [0u128; SINKS];
     out.copy_from_slice(&w[..SINKS]);
     Some(out)
 }
 
-/// The weights of all seven pots: the platform's, the four hooks', the one
-/// that buys $BURR and the one that adds liquidity. The six shares must add
-/// to the whole.
-pub fn weights_all(
-    platform_fraction_bps: u16,
-    shares: &[u16; HOOKS],
-    burr_share: u16,
-    liquidity_share: u16,
-) -> Option<[u128; ALL_SINKS]> {
+/// The weights of all eight pots: the platform's, the four hooks', and the
+/// extra ones (`extra`: $BURR, liquidity, shadow burn). The seven shares must
+/// add to the whole.
+pub fn weights_all(platform_fraction_bps: u16, shares: &[u16; HOOKS], extra: [u16; 3]) -> Option<[u128; ALL_SINKS]> {
+    let [burr_share, liquidity_share, shadow_share] = extra;
     if platform_fraction_bps > BPS {
         return None;
     }
-    let mut sum: u32 = burr_share as u32 + liquidity_share as u32;
+    let mut sum: u32 = burr_share as u32 + liquidity_share as u32 + shadow_share as u32;
     for s in shares {
         sum = sum.checked_add(*s as u32)?;
     }
@@ -43,6 +39,7 @@ pub fn weights_all(
     }
     w[SINK_BURR] = rest * burr_share as u128;
     w[SINK_LIQUIDITY] = rest * liquidity_share as u128;
+    w[SINK_SHADOW] = rest * shadow_share as u128;
     Some(w)
 }
 
@@ -173,6 +170,17 @@ pub fn deposit_side(lp: u64, pool_side: u64, lp_supply: u64) -> Option<u64> {
         return None;
     }
     u64::try_from((lp as u128).checked_mul(pool_side as u128)?.div_ceil(lp_supply as u128)).ok()
+}
+
+/// The ZEC that buys at most `coins` from `reserves` at the price before any
+/// fee: `quote × coins ÷ (base − coins)`, rounded down. Fees only make it
+/// fewer coins, so a buy of this much never takes more than `coins`.
+pub fn spend_for_at_most(reserves: &Reserves, coins: u64) -> Option<u64> {
+    if coins == 0 || coins >= reserves.base {
+        return Some(if coins == 0 { 0 } else { u64::MAX });
+    }
+    let q = (reserves.quote as u128).checked_mul(coins as u128)? / (reserves.base - coins) as u128;
+    u64::try_from(q).ok()
 }
 
 /// Fewest coins a buy back accepts: the fee-free figure, less the coin's own

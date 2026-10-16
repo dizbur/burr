@@ -3,7 +3,7 @@
 
 use crate::constants::*;
 use crate::error::BurrpadError;
-use crate::events::{Split, SplitBurr, SplitLiquidity};
+use crate::events::{Split, SplitBurr, SplitLiquidity, SplitShadow};
 use crate::math;
 use crate::state::{Coin, Ledger};
 use anchor_lang::prelude::*;
@@ -18,16 +18,22 @@ pub fn split_new(coin: &Coin, ledger: &mut Ledger, vault_amount: u64) -> Result<
     if new == 0 {
         return Ok(0);
     }
-    let w = math::weights_all(coin.platform_fraction_bps, &coin.shares, coin.burr_share, coin.liquidity_share)
-        .ok_or(BurrpadError::SharesDoNotAddUp)?;
+    let w = math::weights_all(
+        coin.platform_fraction_bps,
+        &coin.shares,
+        [coin.burr_share, coin.liquidity_share, coin.shadow_share],
+    )
+    .ok_or(BurrpadError::SharesDoNotAddUp)?;
     let mut credited = [0u128; ALL_SINKS];
     credited[..SINKS].copy_from_slice(&ledger.credited);
     credited[SINK_BURR] = ledger.burr.credited;
     credited[SINK_LIQUIDITY] = ledger.liquidity.credited;
+    credited[SINK_SHADOW] = ledger.shadow.credited;
     let all = math::split(&mut ledger.total_split, &mut credited, &w, new).ok_or(BurrpadError::Overflow)?;
     ledger.credited.copy_from_slice(&credited[..SINKS]);
     ledger.burr.credited = credited[SINK_BURR];
     ledger.liquidity.credited = credited[SINK_LIQUIDITY];
+    ledger.shadow.credited = credited[SINK_SHADOW];
     let mut credits = [0u64; SINKS];
     credits.copy_from_slice(&all[..SINKS]);
     for (pot, add) in ledger.pots.iter_mut().zip(credits.iter()) {
@@ -35,6 +41,7 @@ pub fn split_new(coin: &Coin, ledger: &mut Ledger, vault_amount: u64) -> Result<
     }
     ledger.burr.pot = ledger.burr.pot.checked_add(all[SINK_BURR]).ok_or(BurrpadError::Overflow)?;
     ledger.liquidity.pot = ledger.liquidity.pot.checked_add(all[SINK_LIQUIDITY]).ok_or(BurrpadError::Overflow)?;
+    ledger.shadow.pot = ledger.shadow.pot.checked_add(all[SINK_SHADOW]).ok_or(BurrpadError::Overflow)?;
     ledger.accounted = ledger.accounted.checked_add(new).ok_or(BurrpadError::Overflow)?;
     emit!(Split { mint: coin.mint, amount: new, credited: credits });
     if all[SINK_BURR] > 0 {
@@ -42,6 +49,9 @@ pub fn split_new(coin: &Coin, ledger: &mut Ledger, vault_amount: u64) -> Result<
     }
     if all[SINK_LIQUIDITY] > 0 {
         emit!(SplitLiquidity { mint: coin.mint, credited: all[SINK_LIQUIDITY] });
+    }
+    if all[SINK_SHADOW] > 0 {
+        emit!(SplitShadow { mint: coin.mint, credited: all[SINK_SHADOW] });
     }
     Ok(new)
 }

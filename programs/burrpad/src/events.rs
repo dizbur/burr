@@ -80,6 +80,42 @@ pub struct SplitLiquidity {
     pub credited: u64,
 }
 
+/// What a split gave the shadow-burn pot.
+#[event]
+pub struct SplitShadow {
+    pub mint: Pubkey,
+    pub credited: u64,
+}
+
+/// A shadow burn's record: what the watched wallets hold now, and what has
+/// been let go of and not yet bought back.
+#[event]
+pub struct ShadowRecorded {
+    pub mint: Pubkey,
+    pub held: u64,
+    pub fell: u64,
+    pub owed: u64,
+}
+
+/// A shadow burn bought back and burned $BURR.
+#[event]
+pub struct ShadowBurned {
+    pub mint: Pubkey,
+    pub spent: u64,
+    pub burned: u64,
+    pub owed: u64,
+}
+
+/// The watched wallets changed (by the launcher, or added by the follower).
+#[event]
+pub struct ShadowWatchChanged {
+    pub mint: Pubkey,
+    pub wallets: Vec<Pubkey>,
+    pub follower: Pubkey,
+    pub follow: bool,
+    pub by_follower: bool,
+}
+
 /// Liquidity added to a coin's own pool for good: ZEC and coins deposited,
 /// ZEC spent buying those coins, and pool receipts burned.
 #[event]

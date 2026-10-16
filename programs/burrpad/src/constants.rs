@@ -103,8 +103,21 @@ pub const PAYOUT_LONG_HOLDER_BONUS: u8 = 4;
 pub const PAYOUT_DEFINED: u8 = PAYOUT_PRIVATE_CREATOR | PAYOUT_HOLDERS_IN_BURR | PAYOUT_LONG_HOLDER_BONUS;
 /// The most a long-holder bonus may reach, in hundredths of a percent: 300%.
 pub const LONG_HOLDER_BONUS_MAX_BPS: u16 = 30_000;
-/// All pots, the sixth and seventh included, as the split works them out.
-pub const ALL_SINKS: usize = 7;
+/// The eighth pot: the shadow burn, which buys back and burns $BURR up to what
+/// the watched wallets have let go of. Kept in spare room too.
+pub const SINK_SHADOW: usize = 7;
+/// All pots, the sixth to eighth included, as the split works them out.
+pub const ALL_SINKS: usize = 8;
+/// The least ZEC (in units) a $BURR buy is tried with: 0.00001 ZEC. Below it,
+/// PumpSwap's fees, each rounded up, can leave fewer coins than the least-out
+/// allows and it refuses the buy; a shadow burn then only records, and waits.
+pub const BURR_MIN_SPEND: u64 = 1_000;
+/// Seed of a coin's shadow-burn watch.
+pub const SEED_SHADOW: &[u8] = b"shadow";
+/// The most wallets one shadow watch follows.
+pub const SHADOW_MAX_WALLETS: usize = 4;
+/// The follower may add a watched wallet at most this often.
+pub const SHADOW_FOLLOW_WAIT_SECS: i64 = 3_600;
 
 /// $BURR, the platform's own coin: what the sixth pot buys and burns.
 pub const BURR_MINT: Pubkey = pubkey!("GiwMfYS4jHi256G8K41snZhKUovrMbyQL2hqv3fqr7WU");

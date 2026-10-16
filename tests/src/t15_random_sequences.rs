@@ -95,9 +95,12 @@ impl Books {
             // The vault covers the ledger; the pots add up; nothing is negative (they are unsigned, so: nothing wrapped).
             w.assert_sound(m);
             let l = w.ledger(m);
-            let pots: u128 =
-                l.pots.iter().map(|p| *p as u128).sum::<u128>() + l.burr.pot as u128 + l.liquidity.pot as u128;
-            let credited: u128 = l.credited.iter().sum::<u128>() + l.burr.credited + l.liquidity.credited;
+            let pots: u128 = l.pots.iter().map(|p| *p as u128).sum::<u128>()
+                + l.burr.pot as u128
+                + l.liquidity.pot as u128
+                + l.shadow.pot as u128;
+            let credited: u128 =
+                l.credited.iter().sum::<u128>() + l.burr.credited + l.liquidity.credited + l.shadow.credited;
             assert_eq!(
                 l.accounted as u128 - pots,
                 l.total_split - credited,

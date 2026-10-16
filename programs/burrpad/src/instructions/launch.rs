@@ -120,7 +120,7 @@ pub struct Launch<'info> {
 }
 
 pub fn handle_launch<'info>(ctx: Context<'info, Launch<'info>>, args: LaunchArgs) -> Result<()> {
-    handle_launch_with_extras(ctx, args, 0, 0, PayoutChoices::default())
+    handle_launch_with_extras(ctx, args, 0, 0, PayoutChoices::default(), 0)
 }
 
 /// The payout choices made at launch, recorded in the coin's record. Paid by
@@ -144,6 +144,7 @@ pub fn handle_launch_with_extras<'info>(
     burr_share: u16,
     liquidity_share: u16,
     payout: PayoutChoices,
+    shadow_share: u16,
 ) -> Result<()> {
     let payout_options = payout.options;
     let a = &ctx.accounts;
@@ -159,7 +160,8 @@ pub fn handle_launch_with_extras<'info>(
     );
     require!(args.fee_bps >= cfg.min_fee_bps && args.fee_bps <= cfg.max_fee_bps, BurrpadError::FeeOutOfRange);
     require!(
-        math::weights_all(cfg.platform_fraction_bps, &args.shares, burr_share, liquidity_share).is_some(),
+        math::weights_all(cfg.platform_fraction_bps, &args.shares, [burr_share, liquidity_share, shadow_share])
+            .is_some(),
         BurrpadError::SharesDoNotAddUp
     );
     require!(
@@ -313,6 +315,7 @@ pub fn handle_launch_with_extras<'info>(
     coin.shares = args.shares;
     coin.burr_share = burr_share;
     coin.liquidity_share = liquidity_share;
+    coin.shadow_share = shadow_share;
     coin.payout_options = payout_options;
     coin.long_holder_step_bps = step;
     coin.long_holder_max_bps = most;

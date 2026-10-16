@@ -44,6 +44,7 @@ BURN = "instructions/burn.rs"
 HOLD = "instructions/holders.rs"
 BURR = "instructions/burr.rs"
 LIQ = "instructions/liquidity.rs"
+SHADOW = "instructions/shadow.rs"
 ADMIN_RS = ADMIN
 
 MANUAL = [
@@ -108,7 +109,7 @@ MANUAL = [
     M("L3", "A coin's fee cannot be above the highest allowed", LAUNCH,
       " && args.fee_bps <= cfg.max_fee_bps", "", "launch_refuses_bad_plans"),
     M("L4", "Hook shares must add up to exactly the whole", LAUNCH,
-      "require!(\n        math::weights_all(cfg.platform_fraction_bps, &args.shares, burr_share, liquidity_share).is_some(),\n        BurrpadError::SharesDoNotAddUp\n    );", "",
+      "require!(\n        math::weights_all(cfg.platform_fraction_bps, &args.shares, [burr_share, liquidity_share, shadow_share])\n            .is_some(),\n        BurrpadError::SharesDoNotAddUp\n    );", "",
       "launch_refuses_bad_plans"),
     M("L5", "A chosen creator's share needs a receiver", LAUNCH,
       "args.shares[SINK_CREATOR - 1] == 0 || args.creator_receiver != Pubkey::default()", "true",
@@ -425,7 +426,7 @@ MANUAL = [
 
     # ---- burning $BURR ----
     M("U1", "The $BURR shares count in the whole the shares must add to", "math.rs",
-      "let mut sum: u32 = burr_share as u32 + liquidity_share as u32;", "let mut sum: u32 = liquidity_share as u32;",
+      "let mut sum: u32 = burr_share as u32 + liquidity_share as u32 + shadow_share as u32;", "let mut sum: u32 = liquidity_share as u32 + shadow_share as u32;",
       "shares_with_burr_must_add_to_the_whole"),
     M("U2", "The $BURR pot gets its weight of every split", "math.rs",
       "w[SINK_BURR] = rest * burr_share as u128;", "", "a_launch_can_give_part_of_the_fee_to_burning_burr"),
@@ -438,9 +439,9 @@ MANUAL = [
       "require!(ctx.accounts.coin.burr_share > 0, BurrpadError::HookNotChosen);", "",
       "a_coin_launched_the_old_way_has_no_burr_share"),
     M("U6", "One $BURR buy a minute over all coins", BURR,
-      "now >= shared.ready_at && now >= own", "now >= own", "one_burr_buy_a_minute_across_all_coins"),
+      "now >= x.config.burr_buy.ready_at && now >= own", "now >= own", "one_burr_buy_a_minute_across_all_coins"),
     M("U15", "No $BURR buy within a minute of $BURR's own buy back", BURR,
-      "now >= shared.ready_at && now >= own", "now >= shared.ready_at", "burrs_own_buy_back_and_burn_burr_share_one_wait"),
+      "now >= x.config.burr_buy.ready_at && now >= own", "now >= x.config.burr_buy.ready_at", "burrs_own_buy_back_and_burn_burr_share_one_wait"),
     M("U16", "$BURR's own buy back waits after a $BURR buy as long as the next $BURR buy does", BURR,
       "own.last_time = own.last_time.max(held);", "let _ = (own, held);", "burrs_own_buy_back_and_burn_burr_share_one_wait"),
     M("U17", "A $BURR buy holds the next one off only in proportion to the part of its limit used", BURR,
@@ -450,7 +451,7 @@ MANUAL = [
       "math::part_used(spent, cap, BURN_RESERVE_STEP_BPS as u64)", "Some(BURN_RESERVE_STEP_BPS as u64)",
       "crumbs_can_neither_hold_the_wait_nor_walk_the_reserve"),
     M("U19", "The $BURR limit counts no more fee than a coin may launch with", BURR,
-      ".min(ctx.accounts.config.max_fee_bps)", "", "burr_limit_counts_no_more_fee_than_a_coin_may_launch_with"),
+      ".min(x.config.max_fee_bps)", "", "burr_limit_counts_no_more_fee_than_a_coin_may_launch_with"),
     M("U20", "The recorded $BURR reserve falls a step at most per buy", "math.rs",
       "(after as u128).clamp(low, high)", "(after as u128).min(high)", "the_recorded_reserve_moves_a_step_at_most_either_way"),
     M("U7", "Before any $BURR buy the limit is measured against the fixed starting reserve", BURR,
@@ -462,10 +463,10 @@ MANUAL = [
       "pump::check_buyback_recipient(\n        &a.amm_global_config.to_account_info(),\n        &pump::PUMP_AMM_ID,\n        &pump::ACC_AMM_GLOBAL_CONFIG,\n        pump::AMM_GLOBAL_BUYBACK_OFFSET,\n        &a.buyback_fee_recipient.to_account_info(),\n        &ZEC_MINT,\n        &a.token_program.key(),\n    )?;",
       "", "t11_substitution::burn_burr", "swapping buyback_fee_recipient"),
     M("U10", "What was spent is taken off the $BURR pot", BURR,
-      "ledger.burr.pot = ledger.burr.pot.checked_sub(spent).ok_or(BurrpadError::Overflow)?;", "",
+      "ledger.burr.pot = ledger.burr.pot.checked_sub(done.spent).ok_or(BurrpadError::Overflow)?;", "",
       "burn_burr_buys_burr_and_destroys_it_within_the_limit"),
     M("U11", "What was spent is taken off what the vault must cover", BURR,
-      "ledger.accounted = ledger.accounted.checked_sub(spent).ok_or(BurrpadError::Overflow)?;", "",
+      "    ledger.accounted = ledger.accounted.checked_sub(done.spent).ok_or(BurrpadError::Overflow)?;\n    ledger.burr.total_spent", "    ledger.burr.total_spent",
       "burn_burr_buys_burr_and_destroys_it_within_the_limit"),
     M("U12", "Every $BURR bought is burned", BURR,
       "        burr_after,\n        zec_after,\n    )?;", "        0,\n        zec_after,\n    )?;",
@@ -479,7 +480,7 @@ MANUAL = [
 
     # ---- liquidity ----
     M("Q1", "The liquidity share counts in the whole the shares must add to", "math.rs",
-      "let mut sum: u32 = burr_share as u32 + liquidity_share as u32;", "let mut sum: u32 = burr_share as u32;",
+      "let mut sum: u32 = burr_share as u32 + liquidity_share as u32 + shadow_share as u32;", "let mut sum: u32 = burr_share as u32 + shadow_share as u32;",
       "a_launch_can_give_part_of_the_fee_to_its_own_pool"),
     M("Q2", "The liquidity pot gets its weight of every split", "math.rs",
       "w[SINK_LIQUIDITY] = rest * liquidity_share as u128;", "", "a_launch_can_give_part_of_the_fee_to_its_own_pool"),
@@ -603,6 +604,76 @@ MANUAL = [
       "    w[SINK_BURR] = rest * burr_share as u128;\n",
       "    w[SINK_BURR] = rest * burr_share as u128;\n    if shares[1] > 0 {\n        w[1] += rest;\n        w[2] -= rest;\n    }\n",
       "t21_random_life::many_coins_live_any_order_and_the_books_close_after_every_step"),
+
+    # ---- shadow burn ----
+    M("K1", "The shadow share counts in the whole the shares must add to", "math.rs",
+      "let mut sum: u32 = burr_share as u32 + liquidity_share as u32 + shadow_share as u32;",
+      "let mut sum: u32 = burr_share as u32 + liquidity_share as u32;", "t22_shadow_burn::a_launch_can_give_part_of_the_fee_to_a_shadow_burn"),
+    M("K2", "The shadow pot gets its weight of every split", "math.rs",
+      "w[SINK_SHADOW] = rest * shadow_share as u128;", "", "t22_shadow_burn::a_launch_can_give_part_of_the_fee_to_a_shadow_burn"),
+    M("K3", "What the split gives the shadow pot is added to it", "ops.rs",
+      "ledger.shadow.pot = ledger.shadow.pot.checked_add(all[SINK_SHADOW]).ok_or(BurrpadError::Overflow)?;", "",
+      "t22_shadow_burn::a_launch_can_give_part_of_the_fee_to_a_shadow_burn"),
+    M("K4", "The shadow pot's running total is kept", "ops.rs",
+      "ledger.shadow.credited = credited[SINK_SHADOW];", "", "t22_shadow_burn::a_launch_can_give_part_of_the_fee_to_a_shadow_burn"),
+    M("K5", "A watched wallet's account must be its own account for the target", SHADOW,
+      "require_keys_eq!(account.key(), own, BurrpadError::WrongWatchedAccount);", "",
+      "t22_shadow_burn::shadow_burn_takes_only_this_coins_watch_pot_and_the_watched_accounts"),
+    M("K6", "A watched account that does not exist counts as nothing held", SHADOW,
+      "    if account.data_is_empty() {\n        return Ok(0);\n    }\n", "", "t22_shadow_burn::a_closed_target_account_counts_as_nothing_held"),
+    M("K7", "A fall since the last record is added to what is owed", SHADOW,
+      "let fell = w.recorded.saturating_sub(held);", "let fell = 0;", "t22_shadow_burn::a_sale_by_the_target_is_bought_back_and_burned_never_more"),
+    M("K8", "Each record moves to the holding now", SHADOW,
+      "    w.recorded = held;\n", "", "t22_shadow_burn::the_target_buying_back_in_moves_the_record_and_keeps_what_is_owed"),
+    M("K9", "Only a coin that chose the shadow burn has a watch", SHADOW,
+      "require!(ctx.accounts.coin.shadow_share > 0, BurrpadError::HookNotChosen);", "",
+      "t22_shadow_burn::only_the_launcher_sets_the_watch_and_only_sensible_lists"),
+    M("K10", "A watch follows one to four wallets", SHADOW,
+      "require!(!wallets.is_empty() && wallets.len() <= SHADOW_MAX_WALLETS, BurrpadError::BadWatchList);", "",
+      "t22_shadow_burn::only_the_launcher_sets_the_watch_and_only_sensible_lists"),
+    M("K11", "Watched wallets are real and not repeated", SHADOW,
+      "require!(*a != Pubkey::default() && !wallets[..i].contains(a), BurrpadError::BadWatchList);", "",
+      "t22_shadow_burn::only_the_launcher_sets_the_watch_and_only_sensible_lists"),
+    M("K12", "A change of wallets records the old ones' fall first", SHADOW,
+      "    if !old.is_empty() {\n        let held = held_by(&old, &w.target, &rest[..old.len()])?;\n        record(w, held)?;\n    }\n",
+      "", "t22_shadow_burn::a_change_of_wallets_keeps_what_is_owed_and_starts_the_new_ones_from_now"),
+    M("K13", "The new wallets start from their holding now", SHADOW,
+      "    w.recorded = held_by(&wallets, &target, &rest[old.len()..])?;\n", "",
+      "t22_shadow_burn::a_change_of_wallets_keeps_what_is_owed_and_starts_the_new_ones_from_now"),
+    M("K14", "The follower acts only while the launcher allows it", SHADOW,
+      "        w.follow\n            && w.follower == ctx.accounts.follower.key()", "        w.follower == ctx.accounts.follower.key()",
+      "t22_shadow_burn::a_follower_may_only_add_and_only_as_allowed"),
+    M("K15", "Only the follower named may add", SHADOW,
+      "        w.follow\n            && w.follower == ctx.accounts.follower.key()", "        w.follow", "t22_shadow_burn::a_follower_may_only_add_and_only_as_allowed"),
+    M("K16", "The follower adds at most once an hour", SHADOW,
+      "\n            && now >= w.follower_last.saturating_add(SHADOW_FOLLOW_WAIT_SECS)", "", "t22_shadow_burn::a_follower_may_only_add_and_only_as_allowed"),
+    M("K17", "The follower never adds past four, the empty address, or a wallet already watched", SHADOW,
+      "old.len() < SHADOW_MAX_WALLETS && wallet != Pubkey::default() && !old.contains(&wallet)", "old.len() < SHADOW_MAX_WALLETS",
+      "t22_shadow_burn::a_follower_may_only_add_and_only_as_allowed"),
+    M("K18", "Before an addition, the watched wallets' fall is recorded", SHADOW,
+      "    let held = held_by(&old, &target, &rest[..old.len()])?;\n    record(w, held)?;\n    let added",
+      "    let added", "t22_shadow_burn::a_follower_may_only_add_and_only_as_allowed"),
+    M("K19", "An added wallet is recorded from its holding now", SHADOW,
+      "    w.recorded = w.recorded.checked_add(added).ok_or(BurrpadError::Overflow)?;\n", "",
+      "t22_shadow_burn::a_follower_may_only_add_and_only_as_allowed"),
+    M("K20", "Inside the shared wait a shadow burn only records", SHADOW,
+      " || !burr_ready(&ctx.accounts.burr)?", "", "t22_shadow_burn::shadow_burns_share_the_one_wait_for_every_burr_buy"),
+    M("K21", "A shadow burn buys no more than what is owed", SHADOW,
+      "buy_and_burn_burr(&mut ctx.accounts.burr, pot, owed)", "buy_and_burn_burr(&mut ctx.accounts.burr, pot, u64::MAX)",
+      "t22_shadow_burn::a_pot_bigger_than_the_fall_spends_only_what_buys_the_fall"),
+    M("K22", "What was spent is taken off the shadow pot", SHADOW,
+      "ledger.shadow.pot = ledger.shadow.pot.checked_sub(done.spent).ok_or(BurrpadError::Overflow)?;", "",
+      "t22_shadow_burn::a_sale_by_the_target_is_bought_back_and_burned_never_more"),
+    M("K23", "What was spent is taken off what the vault must cover", SHADOW,
+      "    ledger.accounted = ledger.accounted.checked_sub(done.spent).ok_or(BurrpadError::Overflow)?;\n    let w = &mut ctx.accounts.watch;",
+      "    let w = &mut ctx.accounts.watch;", "t22_shadow_burn::a_sale_by_the_target_is_bought_back_and_burned_never_more"),
+    M("K24", "What was bought comes off what is owed", SHADOW,
+      "w.owed = w.owed.saturating_sub(done.bought);", "", "t22_shadow_burn::a_sale_by_the_target_is_bought_back_and_burned_never_more"),
+    M("K25", "The ZEC for at most the owed coins is worked out at the price before fees, rounded down", "math.rs",
+      "    u64::try_from(q).ok()\n}\n\n/// Fewest coins", "    u64::try_from(q * 2).ok()\n}\n\n/// Fewest coins",
+      "t22_shadow_burn::a_pot_bigger_than_the_fall_spends_only_what_buys_the_fall"),
+    M("K26", "A $BURR buy below the least spend is not tried", BURR,
+      "if spend < BURR_MIN_SPEND || min_out == 0 {", "if min_out == 0 {", "t22_shadow_burn::a_sale_by_the_target_is_bought_back_and_burned_never_more"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -613,6 +684,9 @@ MANUAL = [
 STRUCT_TEST = {
     "Launch": "launch", "SplitOnly": "split", "CollectCurve": "collect_curve", "CollectPool": "collect_pool",
     "PayOut": "pay_out", "BurnCurve": "burn_curve", "BurnPool": "burn_pool", "BurnBurr": "burn_burr", "AddLiquidity": "add_liquidity",
+    "SetShadowWatch": "t22_shadow_burn::only_the_launcher_sets_the_watch_and_only_sensible_lists",
+    "FollowWallet": "t22_shadow_burn::a_follower_may_only_add_and_only_as_allowed",
+    "ShadowBurn": "t22_shadow_burn::shadow_burn_takes_only_this_coins_watch_pot_and_the_watched_accounts",
     "ReleaseHolderRewards": "release_holder_rewards", "Recover": "recover",
 }
 CONSTRAINT_KEYS = ("seeds", "bump", "address", "associated_token::", "token::", "mint::", "has_one", "constraint")
@@ -647,7 +721,7 @@ def auto_entries():
             if struct not in STRUCT_TEST:
                 continue
             body = sm.group(2)
-            test = f"t11_substitution::{STRUCT_TEST[struct]}"
+            test = STRUCT_TEST[struct] if "::" in STRUCT_TEST[struct] else f"t11_substitution::{STRUCT_TEST[struct]}"
             # account attributes
             for am in re.finditer(r"#\[account\(", body):
                 i, depth = am.end(), 1
