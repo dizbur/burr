@@ -7,7 +7,7 @@
 //! named by the launcher), with the ZEC the sale received, or the whole pot if
 //! smaller. None of `burn_burr`'s limit, reserve step or shared wait applies;
 //! only a least-out: the buy must return the coins let go of, at the sale's own
-//! price, less 5%. The program cannot read past transactions, so the keeper
+//! price, less 35% (`SHADOW_SLIPPAGE_BPS`). The program cannot read past transactions, so the keeper
 //! reports the sale (`sold`, `received`); the program holds `sold` to what was
 //! recorded as let go of, and `received` to what buys those coins back at the
 //! pool's price now.
@@ -211,7 +211,7 @@ pub struct ShadowBurn<'info> {
 /// buy: with that ZEC, or the whole pot if smaller. Never more coins than are
 /// owed: `sold` is held to what is owed, and the ZEC to what buys those coins at
 /// the pool's price now. The buy must return the coins sold, at the sale's price,
-/// less 5%, or it is refused. With nothing to buy, or `sold` 0, it only records.
+/// less 35%, or it is refused. With nothing to buy, or `sold` 0, it only records.
 /// After the listed accounts: the watched wallets' target accounts, in order.
 pub fn handle_shadow_burn<'info>(ctx: Context<'info, ShadowBurn<'info>>, sold: u64, received: u64) -> Result<()> {
     require!(ctx.accounts.burr.coin.shadow_share > 0, BurrpadError::HookNotChosen);

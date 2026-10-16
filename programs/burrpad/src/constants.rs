@@ -119,10 +119,10 @@ pub const SEED_SHADOW: &[u8] = b"shadow";
 /// a transaction's 64 accounts, and so do a change of list's 16 old and 16 new.
 pub const SHADOW_MAX_WALLETS: usize = 16;
 /// A shadow buy must return at least the coins let go of, at the sale's own
-/// price, less this, in hundredths of a percent: 5%. It covers PumpSwap's fee
-/// on the sale and on the buy (about 1.2% each at most) and others' trades in
-/// between; a trade around the buy that moves the price more is refused.
-pub const SHADOW_SLIPPAGE_BPS: u64 = 500;
+/// price, less this, in hundredths of a percent: 35%, the owner's choice. A
+/// trade around the buy that moves the price more is refused. Kept as this one
+/// figure so that it is easy to change: 10,000 would remove the guard.
+pub const SHADOW_SLIPPAGE_BPS: u64 = 3_500;
 
 /// $BURR, the platform's own coin: what the sixth pot buys and burns.
 pub const BURR_MINT: Pubkey = pubkey!("GiwMfYS4jHi256G8K41snZhKUovrMbyQL2hqv3fqr7WU");

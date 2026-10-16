@@ -1,7 +1,8 @@
 //! The eighth hook, the shadow burn: part of a coin's fee buys back and burns
 //! $BURR at once when the watched wallets let go of $BURR, with the ZEC the sale
 //! received (or the whole pot), never more coins than were let go of, and with
-//! only a least-out: no limit, no reserve step, no shared wait.
+//! only a least-out (the coins at the sale's price, less 35%): no limit, no
+//! reserve step, no shared wait.
 
 use crate::bench::{custom_code, logs};
 use crate::kit::{self, err, LaunchPlan, World};
@@ -224,7 +225,7 @@ fn a_sale_is_bought_back_at_once_with_what_it_received_never_more() {
     let burned = supply - s.w.b.mint_supply(&BURR_MINT);
     assert!(spent <= got && spent > got - got / 100, "spent {spent}: the ZEC the sale received, {got}");
     assert!(burned <= sold, "burned {burned}, more than the {sold} sold");
-    assert!(burned >= sold - sold / 20, "burned {burned}: at least the {sold} sold, less 5%");
+    assert!(burned >= sold - sold / 20, "burned {burned}: nearly all the {sold} sold, at an unmoved price");
     assert_eq!(watch.owed, sold - burned, "what was bought came off what is owed");
     assert_eq!((watch.total_spent, watch.total_burned), (spent, burned));
     assert_eq!(s.w.vault_balance(&s.mint), vault - spent);
@@ -334,6 +335,39 @@ fn a_report_of_more_coins_than_are_owed_pays_only_their_share() {
     );
 }
 
+/// After the same sale in a fresh world, the coins `zec` buys on $BURR's pool.
+fn coins_bought_for(zec: u64) -> u64 {
+    let mut s = setup(50 * ZEC1);
+    let t = s.target.insecure_clone();
+    let sold = burr_of(&s.w, &t.pubkey()) / 20;
+    sell(&mut s.w, &t, sold);
+    let buyer = s.w.trader(10 * ZEC1);
+    let before = burr_of(&s.w, &buyer.pubkey());
+    assert!(s.w.pool_buy(&buyer, &BURR_MINT, zec).is_ok());
+    burr_of(&s.w, &buyer.pubkey()) - before
+}
+
+#[test]
+fn the_least_out_allows_35_percent_short_and_no_more() {
+    let mut s = setup(50 * ZEC1);
+    let t = s.target.insecure_clone();
+    let sold = burr_of(&s.w, &t.pubkey()) / 20;
+    let got = sell(&mut s.w, &t, sold);
+    // The ZEC spent buys `coins`; a report of more coins for it says the price moved against the buy.
+    let spend = got / 2;
+    let coins = coins_bought_for(spend);
+    // 36% fewer coins than the reported price gives: refused, nothing spent.
+    let pot = s.pot();
+    let r = s.burn(coins * 100 / 64, spend);
+    assert!(logs(&r).contains("BuySlippageBelowMinBaseAmountOut"), "36% short is refused");
+    assert_eq!(s.pot(), pot);
+    // 34% fewer: it fills.
+    let r = s.burn(coins * 100 / 66, spend);
+    assert!(r.is_ok(), "34% short fills: {}", logs(&r));
+    assert_eq!(pot - s.pot(), spend);
+    assert_eq!(s.watch().total_burned, coins, "the same coins as the same buy in a fresh world");
+}
+
 #[test]
 fn a_trade_around_the_instant_buy_is_refused() {
     let mut s = setup(50 * ZEC1);
@@ -344,7 +378,7 @@ fn a_trade_around_the_instant_buy_is_refused() {
     let (quote, _) = s.w.pool_reserves(&BURR_MINT);
     let front = s.w.trader(quote);
     let before = burr_of(&s.w, &front.pubkey());
-    assert!(s.w.pool_buy(&front, &BURR_MINT, quote / 25).is_ok());
+    assert!(s.w.pool_buy(&front, &BURR_MINT, quote / 3).is_ok());
     let pot = s.pot();
     let r = s.burn(sold, got);
     assert!(
