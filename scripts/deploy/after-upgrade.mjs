@@ -15,7 +15,7 @@ import { PublicKey, TransactionMessage, VersionedTransaction, ComputeBudgetProgr
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { addLiquidityIx, BURR, burnBurrIx, shadowBurnIx, burnCurveIx, burnPoolIx, clock, collectCurveIx, collectPoolIx, curveOf, splitIx } from "./coin.mjs";
-import { address, checker, coinAddresses, configAddress, connect, decodeAccount, fail, loadIdl, need, options, programDataAddress, readAccount, ROOT, sha256 } from "./lib.mjs";
+import { address, checker, coinAddresses, pda, configAddress, connect, decodeAccount, fail, loadIdl, need, options, programDataAddress, readAccount, ROOT, sha256 } from "./lib.mjs";
 
 const opts = options(["url", "mainnet", "authority", "admin", "coins", "save", "release-kit"]);
 const conn = await connect(opts);
@@ -78,10 +78,10 @@ console.log(`      launches ${c.launches_paused ? "PAUSED" : "on"}, holder relea
 const expected = { BurnTooSoon: "the last burn was less than a minute ago", NothingToBurn: "nothing to buy now (the pot is empty, or too small)", HookNotChosen: "the coin did not choose this hook",
   AccountNotInitialized: "the coin has no shadow watch: it did not choose this hook" };
 let throughTheBuy = 0, burnsTried = 0;
-const run = async (ix) => {
+const run = async (ix, payer = authority) => {
   const { blockhash } = await conn.getLatestBlockhash();
   const message = new TransactionMessage({
-    payerKey: authority, recentBlockhash: blockhash,
+    payerKey: payer, recentBlockhash: blockhash,
     instructions: [ComputeBudgetProgram.setComputeUnitLimit({ units: 600_000 }), ix],
   }).compileToV0Message();
   const r = await conn.simulateTransaction(new VersionedTransaction(message), { sigVerify: false, replaceRecentBlockhash: true });
@@ -93,7 +93,7 @@ const report = (what, r) => {
   if (r.code && expected[r.code]) return t.check(what, true, `refused as expected: ${r.code}, ${expected[r.code]}`);
   return t.check(what, false, `${r.code ?? JSON.stringify(r.err)}\n${r.logs.split("\n").slice(-6).join("\n")}`);
 };
-const simulate = async (what, ix) => report(what, await run(ix));
+const simulate = async (what, ix, payer) => report(what, await run(ix, payer));
 // A burn is simulated again once its one-minute wait is over (up to about 70 seconds), so that it is
 // tried all the way through the buy, not only up to "too soon". `readyAt` gives the moment it may run.
 const simulateBurn = async (what, build, readyAt) => {
@@ -141,9 +141,16 @@ for (const mint of mints) {
     if (!Number(coin.burr_share ?? 0)) burnsTried--;
   }
   if (hasShadow && !mint.equals(BURR)) {
-    // No coin launched before the upgrade has a shadow watch: the call reaches the new instruction with a
-    // $BURR buy's real accounts, up to the coin's missing watch.
-    await simulate(`${name}: shadow burn (record only)`, shadowBurnIx(idl, mint, authority));
+    // A coin without a watch (every coin launched before the upgrade): the call reaches the new instruction with
+    // a $BURR buy's real accounts, up to the missing watch. A coin with a watch: a record-only call as its keeper.
+    const watch = await readAccount(conn, idl, "ShadowWatch", pda(["shadow", mint], idl.programId)).catch(() => null);
+    if (watch) {
+      const keeper = new PublicKey(watch.keeper);
+      const wallets = watch.wallets.slice(0, watch.count).map((w) => new PublicKey(w));
+      await simulate(`${name}: shadow burn (record only, as its keeper)`, shadowBurnIx(idl, mint, keeper, wallets), keeper);
+    } else {
+      await simulate(`${name}: shadow burn (record only)`, shadowBurnIx(idl, mint, authority));
+    }
   }
   if (hasAddLiquidity && graduated) {
     // Only a graduated coin has a pool to add to. No coin launched before the upgrade chose the liquidity
