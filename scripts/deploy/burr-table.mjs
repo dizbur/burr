@@ -58,5 +58,5 @@ const t = checker();
 const now = new Set(s.addresses.map((a) => a.toBase58()));
 t.check("the table holds every address a $BURR launch and trade need", want.every((a) => now.has(a.toBase58())), `${want.length} addresses`);
 t.check("the table is frozen: nobody can change it", !s.authority);
-console.log(`BURRPAD_BURR_ADDRESS_TABLE = ${table.toBase58()}`);
+console.log(`BURR_ADDRESS_TABLE = ${table.toBase58()}`);
 t.finish();
