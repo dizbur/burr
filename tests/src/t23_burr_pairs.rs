@@ -93,6 +93,8 @@ fn a_launch_must_name_the_quote_and_its_accounts_as_they_are() {
     type Fix = fn(&mut Vec<AccountMeta>);
     let cases: Vec<(&str, u8, u8, Fix, E)> = vec![
         ("an undefined quote", 2, QUOTE_BURR, |_| {}, E::WrongQuote),
+        // With ZEC's accounts nothing else would stop it: the coin would be recorded with a quote nobody knows.
+        ("an undefined quote, with ZEC's accounts", 2, QUOTE_ZEC, |_| {}, E::WrongQuote),
         ("$BURR chosen, ZEC's accounts passed", QUOTE_BURR, QUOTE_ZEC, |_| {}, E::WrongQuote),
         ("ZEC chosen, $BURR's accounts passed", QUOTE_ZEC, QUOTE_BURR, |r| r.truncate(r.len() - 4), E::WrongQuote),
         (
