@@ -139,7 +139,7 @@ export function collectCurveIx(idl, mint, payer, quote = 0) {
 export function splitIx(idl, mint, quote = 0) {
   const q = quoteParts(quote);
   const a = coinAddresses(idl, mint);
-  return instruction(idl, "split", { mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: ata(a.authority, q.mint, q.program), zec_mint: q.mint, token_program: TOKEN });
+  return instruction(idl, "split", { mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: ata(a.authority, q.mint, q.program), zec_mint: q.mint, token_program: q.program });
 }
 // `payee` is "Platform", "Creator" or "Give"; `receiver` must be the one in the coin's record.
 export function payOutIx(idl, mint, payer, payee, receiver, quote = 0) {
