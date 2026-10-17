@@ -1071,7 +1071,7 @@ def second_line(entry_id):
         return ("the same constraint is what makes the account on first use, so without it every liquidity call fails "
                 "(the tests that fail are the ones that add)")
     if field == "pool" and struct == "BurnPool":
-        return "the pool's own record is read and must name this coin and ZEC"
+        return "the pool's own record is read and must name this coin and its quote coin"
     if field == "pool" and struct == "BurnBurr":
         return "the pool's own record is read and must name $BURR and ZEC"
     if struct == "BurnBurr" and field == "burner":
