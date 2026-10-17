@@ -2,21 +2,28 @@
 // needs (the first, frozen at deployment, has none of $BURR's addresses), fills
 // it, and freezes it so nobody can ever change it. It holds $BURR's mint, its
 // curve, its pool and the pool's two vaults (the four accounts a $BURR launch
-// passes), and the $BURR accounts of pump.fun's buy-back receivers. Safe to run
+// passes), and the $BURR accounts of pump.fun's buy-back receivers (curve and PumpSwap lists). Safe to run
 // again: it carries on from where it stopped. Saved as `burr_table`.
 //   node scripts/deploy/burr-table.mjs --payer <deploy wallet key file> [--table <address>] [--mainnet yes]
 import { AddressLookupTableProgram, PublicKey } from "@solana/web3.js";
 import { BURR, burrQuoteAccounts } from "./coin.mjs";
-import { address, ata, checker, connect, fail, loadKey, need, options, pda, PUMP, readOut, send, sleep, TOKEN_2022, writeOut } from "./lib.mjs";
+import { address, ata, checker, connect, fail, loadKey, need, options, pda, PUMP, PUMP_AMM, readOut, send, sleep, TOKEN_2022, writeOut } from "./lib.mjs";
 
 const opts = options(["url", "payer", "table", "mainnet"]);
 const conn = await connect(opts);
 const payer = loadKey(need(opts, "payer"), "--payer");
 const name = conn.outName;
-// pump.fun's buy-back receivers, as its curve settings list them.
-const global = (await conn.getAccountInfo(pda(["global"], PUMP))).data;
-const receivers = [...Array(8).keys()].map((i) => new PublicKey(global.subarray(741 + 32 * i, 773 + 32 * i)));
-const want = [BURR, ...burrQuoteAccounts(), ...receivers.map((r) => ata(r, BURR, TOKEN_2022))];
+// pump.fun's buy-back receivers: those on the curve's list and those on PumpSwap's (the same eight today),
+// so that trades on a graduated $BURR coin's pool stay as small as on its curve.
+const receivers = new Map();
+for (const [key, offset] of [[pda(["global"], PUMP), 741], [pda(["global_config"], PUMP_AMM), 643]]) {
+  const d = (await conn.getAccountInfo(key)).data;
+  for (let i = 0; i < 8; i++) {
+    const r = new PublicKey(d.subarray(offset + 32 * i, offset + 32 * i + 32));
+    if (!r.equals(PublicKey.default)) receivers.set(r.toBase58(), r);
+  }
+}
+const want = [BURR, ...burrQuoteAccounts(), ...[...receivers.values()].map((r) => ata(r, BURR, TOKEN_2022))];
 
 let table = opts.table ? address(opts.table, "--table") : readOut(name).burr_table ? address(readOut(name).burr_table, "saved table") : null;
 if (!table) {
