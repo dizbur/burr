@@ -361,6 +361,9 @@ impl World {
     pub fn vault_balance(&self, mint: &Pubkey) -> u64 {
         self.b.token_balance(&self.vault_of(mint))
     }
+    pub fn burr_of(&self, owner: &Pubkey) -> u64 {
+        self.b.token_balance(&ata(owner, &burrpad::BURR_MINT, &TOKEN_2022))
+    }
     pub fn zec_of(&self, owner: &Pubkey) -> u64 {
         self.b.token_balance(&ata(owner, &ZEC, &TOKEN))
     }
@@ -415,7 +418,7 @@ impl World {
         let whale = self.trader(10_000 * 100_000_000);
         if q.0 == burrpad::BURR_MINT {
             // A coin priced in $BURR: the whale buys it out in $BURR, a little at a time.
-            self.give_burr(&whale.pubkey(), u64::MAX / 4);
+            self.give_burr(&whale.pubkey(), 1 << 58);
             for _ in 0..40 {
                 if self.b.curve(mint).complete {
                     break;
@@ -436,10 +439,15 @@ impl World {
     }
 
     /// Gives `owner` test $BURR, written straight into its $BURR account.
+    /// The mint's supply grows by as much, so that burning it later stays true to the books.
     pub fn give_burr(&mut self, owner: &Pubkey, amount: u64) {
         let addr = ata(owner, &burrpad::BURR_MINT, &TOKEN_2022);
         let prev = self.b.token_balance(&addr);
         self.b.write_token_account(addr, &burrpad::BURR_MINT, owner, prev + amount, &TOKEN_2022);
+        let mut mint = self.b.account(&burrpad::BURR_MINT).expect("$BURR");
+        let supply = u64::from_le_bytes(mint.data[36..44].try_into().unwrap());
+        mint.data[36..44].copy_from_slice(&supply.checked_add(amount).expect("$BURR supply").to_le_bytes());
+        self.b.svm.set_account(burrpad::BURR_MINT, mint).unwrap();
     }
 
     pub fn pool(&self, mint: &Pubkey) -> pump::Pool {

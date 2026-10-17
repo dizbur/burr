@@ -57,6 +57,8 @@ struct Coin {
     creator_receiver: Pubkey,
     give_receiver: Pubkey,
     private: bool,
+    /// Priced in $BURR: its fee, pots and payouts are $BURR.
+    burr: bool,
     record: Vec<u8>,
 }
 
@@ -67,7 +69,8 @@ struct Life {
     trader: Keypair,
     table: AddressLookupTableAccount,
     /// ZEC released to the rewards wallet, over all coins.
-    released: u128,
+    /// Released to the rewards wallet: in ZEC, and in $BURR.
+    released: [u128; 2],
     /// What went through: launches, payouts, releases, burns, $BURR buys, adds, graduations.
     did: [u32; 7],
 }
@@ -105,7 +108,10 @@ impl Life {
         let payout_wallet = w.open_private_payouts().pubkey();
         let trader = w.trader(1_000_000 * ZEC1);
         let table = w.b.address_table(&kit::fixed_accounts());
-        let mut life = Life { w, coins: vec![], payout_wallet, trader, table, released: 0, did: [0; 7] };
+        let mut life = Life { w, coins: vec![], payout_wallet, trader, table, released: [0; 2], did: [0; 7] };
+        // Coins priced in $BURR: the trader holds $BURR, and pump.fun's buy-back receiver a $BURR account.
+        life.w.give_burr(&life.trader.pubkey(), 1 << 60);
+        life.w.give_burr(&crate::pump::BUYBACK, 0);
         // $BURR's own coin, with its receivers as recorded.
         let c = life.w.coin(&BURR_MINT);
         let record = life.w.b.account(&kit::coin(&BURR_MINT)).unwrap().data;
@@ -114,6 +120,7 @@ impl Life {
             creator_receiver: c.creator_receiver,
             give_receiver: c.give_receiver,
             private: false,
+            burr: false,
             record,
         });
         life.launch(1);
@@ -125,7 +132,9 @@ impl Life {
         if self.coins.len() >= MAX_COINS {
             return;
         }
-        let form = seed % 3;
+        // About one launch in four is priced in $BURR: the four hooks and the $BURR share only.
+        let burr_priced = (seed >> 48) & 3 == 0 && seed != EVERY_OPTION && seed != 1;
+        let form = if burr_priced { seed % 2 } else { seed % 3 };
         let (shares, burr_share, liquidity_share) = shares_from(seed >> 2, form >= 1, form == 2);
         let mut plan = LaunchPlan {
             shares,
@@ -134,6 +143,7 @@ impl Life {
             creator_receiver: Pubkey::new_unique(),
             give_receiver: Pubkey::new_unique(),
             fee_bps: [50u16, 200, 300][(seed >> 60) as usize % 3],
+            quote: if burr_priced { burrpad::QUOTE_BURR } else { burrpad::QUOTE_ZEC },
             ..Default::default()
         };
         if form == 2 {
@@ -150,7 +160,7 @@ impl Life {
                 plan.long_holder_max_bps = 10_000;
             }
         }
-        let mint = if (seed >> 40) & 1 == 1 && seed != EVERY_OPTION {
+        let mint = if (seed >> 40) & 1 == 1 && seed != EVERY_OPTION && !burr_priced {
             // A launch with a first buy in the same transaction, the launch making the buyer's account.
             let k = Keypair::new();
             let t = self.trader.insecure_clone();
@@ -182,17 +192,27 @@ impl Life {
             creator_receiver: plan.creator_receiver,
             give_receiver: plan.give_receiver,
             private: plan.payout_options & 1 == 1,
+            burr: burr_priced,
             record,
         });
         self.did[0] += 1;
     }
 
     fn graduated(&self, m: &Pubkey) -> bool {
-        self.w.b.account(&crate::pump::pool(m)).is_some()
+        self.w.b.account(&crate::pump::pool_with(m, &self.w.quote(m).0)).is_some()
+    }
+
+    fn is_burr(&self, m: &Pubkey) -> bool {
+        self.coins.iter().any(|c| c.mint == *m && c.burr)
     }
 
     fn graduate(&mut self, m: &Pubkey) {
         if self.graduated(m) {
+            return;
+        }
+        if self.is_burr(m) {
+            self.w.graduate(m);
+            self.did[6] += 1;
             return;
         }
         let whale = self.w.trader(10_000 * ZEC1);
@@ -242,7 +262,7 @@ impl Life {
         );
         let r = self.w.b.send_as(Some(&wallet), &[i], &[]);
         if r.is_ok() {
-            self.released += amount as u128;
+            self.released[self.is_burr(m) as usize] += amount as u128;
             self.did[2] += 1;
         }
         r.is_ok()
@@ -253,11 +273,13 @@ impl Life {
         let m = self.coins[i].mint;
         let grad = self.graduated(&m);
         let t = self.trader.insecure_clone();
-        let amount = s.seed % (3 * ZEC1) + 1;
+        // A $BURR coin's amounts are in $BURR units, a thousand to the ZEC unit here.
+        let amount = (s.seed % (3 * ZEC1) + 1) * if self.is_burr(&m) { 1_000 } else { 1 };
         match s.op {
             0 => self.launch(s.seed),
             1 => {
-                let _ = if grad { self.w.pool_buy(&t, &m, amount) } else { self.w.buy(&t, &m, amount.min(ZEC1 / 4)) };
+                let cap = if self.is_burr(&m) { 1_000 * ZEC1 / 4 } else { ZEC1 / 4 };
+                let _ = if grad { self.w.pool_buy(&t, &m, amount) } else { self.w.buy(&t, &m, amount.min(cap)) };
             }
             2 => {
                 let part = self.w.coins_of(&t.pubkey(), &m) / (1 + s.seed % 4);
@@ -272,7 +294,11 @@ impl Life {
                 }
             }
             4 => {
-                self.w.b.give_zec(&kit::authority(&m), amount);
+                if self.is_burr(&m) {
+                    self.w.give_burr(&kit::authority(&m), amount);
+                } else {
+                    self.w.b.give_zec(&kit::authority(&m), amount);
+                }
                 let r = self.w.split(&m);
                 assert!(r.is_ok(), "{}", logs(&r));
             }
@@ -287,7 +313,13 @@ impl Life {
             }
             7 => {
                 let before = self.w.ledger(&m).burr.pot;
-                let _ = self.w.burn_burr(&m);
+                if self.is_burr(&m) {
+                    // A $BURR coin's $BURR pot is burned as it is: whenever it holds anything.
+                    let r = self.w.burn_burr_pot(&m);
+                    assert_eq!(r.is_ok(), before > 0 && self.w.coin(&m).burr_share > 0, "{}", logs(&r));
+                } else {
+                    let _ = self.w.burn_burr(&m);
+                }
                 self.did[4] += (self.w.ledger(&m).burr.pot < before) as u32;
             }
             8 => {
@@ -341,9 +373,11 @@ impl Life {
 
     fn check(&self, at: &str) {
         let w = &self.w;
-        let (mut platform_paid, mut private_paid) = (0u128, 0u128);
+        let (mut platform_paid, mut private_paid) = ([0u128; 2], 0u128);
         for (i, c) in self.coins.iter().enumerate() {
             let m = &c.mint;
+            // A receiver is paid in the coin's own quote coin.
+            let paid_to = |owner: &Pubkey| if c.burr { w.burr_of(owner) } else { w.zec_of(owner) } as u128;
             assert_eq!(w.b.account(&kit::coin(m)).unwrap().data, c.record, "{at}: coin {i}'s record changed");
             let l = w.ledger(m);
             // The vault holds exactly what the books account for: every fee here is split as it arrives.
@@ -396,14 +430,10 @@ impl Life {
             if c.private {
                 private_paid += paid_creator;
             } else if c.creator_receiver != Pubkey::default() {
-                assert_eq!(paid_creator, w.zec_of(&c.creator_receiver) as u128, "{at}: coin {i}: the creator pot");
+                assert_eq!(paid_creator, paid_to(&c.creator_receiver), "{at}: coin {i}: the creator pot");
             }
             if c.give_receiver != Pubkey::default() {
-                assert_eq!(
-                    l.credited[2] - l.pots[2] as u128,
-                    w.zec_of(&c.give_receiver) as u128,
-                    "{at}: coin {i}: give"
-                );
+                assert_eq!(l.credited[2] - l.pots[2] as u128, paid_to(&c.give_receiver), "{at}: coin {i}: give");
             }
             assert_eq!(l.credited[3], l.pots[3] as u128 + l.burn.total_spent as u128, "{at}: coin {i}: burn");
             assert_eq!(l.credited[4], l.pots[4] as u128 + l.holders.total_released as u128, "{at}: coin {i}: holders");
@@ -413,11 +443,13 @@ impl Life {
                 l.liquidity.pot as u128 + l.liquidity.total_spent as u128,
                 "{at}: coin {i}: liquidity"
             );
-            platform_paid += l.credited[0] - l.pots[0] as u128;
+            platform_paid[c.burr as usize] += l.credited[0] - l.pots[0] as u128;
         }
         assert_eq!(w.zec_of(&self.payout_wallet) as u128, private_paid, "{at}: the payout wallet's ZEC");
-        assert_eq!(w.zec_of(&w.platform_receiver) as u128, platform_paid, "{at}: the platform receiver's ZEC");
-        assert_eq!(w.zec_of(&w.rewards_wallet.pubkey()) as u128, self.released, "{at}: the rewards wallet's ZEC");
+        assert_eq!(w.zec_of(&w.platform_receiver) as u128, platform_paid[0], "{at}: the platform receiver's ZEC");
+        assert_eq!(w.burr_of(&w.platform_receiver) as u128, platform_paid[1], "{at}: the platform receiver's $BURR");
+        assert_eq!(w.zec_of(&w.rewards_wallet.pubkey()) as u128, self.released[0], "{at}: the rewards wallet's ZEC");
+        assert_eq!(w.burr_of(&w.rewards_wallet.pubkey()) as u128, self.released[1], "{at}: the rewards wallet's $BURR");
     }
 }
 
@@ -439,7 +471,7 @@ proptest! {
         life.close();
         if std::env::var("BURRPAD_DEEP").is_ok() {
             let d = life.did;
-            println!("launches {} payouts {} releases {} burns {} burr {} adds {} graduations {}", d[0], d[1], d[2], d[3], d[4], d[5], d[6]);
+            println!("launches {} ($BURR-priced {}) payouts {} releases {} burns {} burr {} adds {} graduations {}", d[0], life.coins.iter().filter(|c| c.burr).count(), d[1], d[2], d[3], d[4], d[5], d[6]);
         }
     }
 }
