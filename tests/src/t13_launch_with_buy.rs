@@ -47,7 +47,9 @@ fn launch_with_a_first_buy_fits_one_transaction_at_every_allowed_link_length() {
         println!("link {link:>3} characters, with first buy: {size} bytes, {units} compute units");
         // Room is left for the priority-fee instruction a wallet adds.
         assert!(size + 16 <= MAX_TRANSACTION, "link {link}: {size} bytes");
-        assert!(units < 400_000);
+        // The cost moves with each fresh mint key (the program's address searches take more or
+        // fewer tries): seen up to about 414,000. The site asks for 500,000.
+        assert!(units < 500_000, "link {link}: {units} compute units");
         let (size, units, _, _) = launch_and_buy(link, 0);
         println!("link {link:>3} characters, launch only:    {size} bytes, {units} compute units");
         assert!(size <= MAX_TRANSACTION);
