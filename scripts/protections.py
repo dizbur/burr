@@ -1005,6 +1005,16 @@ def second_line(entry_id):
     if entry_id == "U6":
         return ("every $BURR buy also writes the same time into $BURR's own ledger, which is checked too (U15, held "
                 "alone); this one is kept so the shared record says when the next buy may run")
+    if entry_id in ("Z1", "Z2"):
+        return ("a launch's quote mint and its token program can only come together: the vault is made from both, by "
+                "the associated-token program, before these checks run, so with either removed the other refuses the "
+                "same launch with the same error")
+    if entry_id == "Z6":
+        return ("launch_v5 has no liquidity, Shadow Burn or payout arguments, so a $BURR coin cannot ask for them; this "
+                "check stands for a later launch version that has them")
+    if entry_id in ("Z9", "Z10"):
+        return ("a $BURR coin's liquidity and Shadow Burn shares are always 0 (launch_v5 cannot set them), so "
+                "'hook not chosen' refuses the same call; this check stands should a later version allow them")
     if entry_id == "R12":
         return "the call's target is a constant in the code, not the account passed; and the account's address is pinned too"
     m = re.match(r"([XY])\.(\w+)\.(\w+)$", entry_id)
@@ -1023,7 +1033,15 @@ def second_line(entry_id):
     if field == "mint":
         return "a record exists only for mints this program launched, all Token-2022; any other mint has no record"
     if field == "zec_mint":
-        return "the vault's own check ties it to the ZEC mint, and the token program refuses a transfer naming another mint"
+        if struct == "Launch":
+            return "the launch then checks the mint is the one its quote names (Z1)"
+        if struct in ("CollectCurve", "CollectPool", "BurnCurve", "BurnPool"):
+            return ("pump.fun's own call refuses another quote mint (the curve's and the pool's quote mint, and their "
+                    "derived accounts, are checked by pump.fun), and the vault's own check ties it to the mint passed")
+        return "the vault's own check ties it to the coin's quote mint, and the token program refuses a transfer naming another mint"
+    if kind == "X" and field == "token_program":
+        return ("the vault and every quote account are derived with the token program passed, and a Token account cannot "
+                "exist for a Token-2022 mint or the other way round, so another program finds no vault")
     if field == "coin":
         return ("the record's own mint field is used to sign for the vault, so another coin's record cannot move this "
                 "coin's money; the same address check is held alone in split and collect")
