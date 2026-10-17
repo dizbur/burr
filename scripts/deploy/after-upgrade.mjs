@@ -76,7 +76,7 @@ console.log(`      launches ${c.launches_paused ? "PAUSED" : "on"}, holder relea
 // 4. Collect, split and burn on live coins: simulated with the real accounts, never sent.
 // Refusals that only mean "not now" are expected: the keeper burns every minute, and a pot may be empty.
 const expected = { BurnTooSoon: "the last burn was less than a minute ago", NothingToBurn: "nothing to buy now (the pot is empty, or too small)", HookNotChosen: "the coin did not choose this hook",
-  AccountNotInitialized: "the coin has no shadow watch: it did not choose this hook" };
+  AccountNotInitialized: "the coin has no shadow watch: it did not choose this hook, or its launcher has not set the watch yet" };
 let throughTheBuy = 0, burnsTried = 0;
 const run = async (ix, payer = authority) => {
   const { blockhash } = await conn.getLatestBlockhash();
