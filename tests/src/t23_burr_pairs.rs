@@ -317,3 +317,44 @@ fn a_burr_coin_s_accounts_cannot_be_swapped_for_zec_ones_or_the_other_way() {
         (before.0.accounted, before.1.accounted, before.2, before.3)
     );
 }
+
+#[test]
+fn the_buy_back_receivers_account_must_be_shaped_as_its_program_makes_it() {
+    // pump.fun's buy-back receiver's $BURR account, made by the associated-token program: 170 bytes.
+    let (mut w, mint, _) = traded();
+    let key = ata(&BUYBACK, &BURR_MINT, &TOKEN_2022);
+    let real = w.b.account(&key).unwrap();
+    assert_eq!(real.data.len(), 170, "the standard Token-2022 account carries one extension");
+    w.b.wait(60);
+    // Shapes that are not an account: a type byte saying "mint", and a multisig's length.
+    let mut as_mint = real.clone();
+    as_mint.data[165] = 1;
+    let mut multisig_long = real.clone();
+    multisig_long.data.resize(355, 0);
+    for (what, shape) in [("a type byte that is not an account", as_mint), ("a multisig's length", multisig_long)] {
+        w.b.svm.set_account(key, shape).unwrap();
+        assert_eq!(custom_code(&w.burn_curve(&mint)), Some(err(E::WrongPumpAccount)), "{what}");
+    }
+    // As it really is, the burn goes through.
+    w.b.svm.set_account(key, real).unwrap();
+    let r = w.burn_curve(&mint);
+    assert!(r.is_ok(), "{}", logs(&r));
+    assert!(w.ledger(&mint).burn.total_spent > 0);
+    // A classic Token account stays exactly 165 bytes: a ZEC coin's burn refuses any other length.
+    let zec_coin = w.launch(&LaunchPlan::default());
+    let t = w.trader(10 * 100_000_000);
+    assert!(w.buy(&t, &zec_coin, 100_000_000).is_ok());
+    assert!(w.collect_curve(&zec_coin).is_ok());
+    w.b.wait(60);
+    let zkey = ata(&BUYBACK, &ZEC, &TOKEN);
+    let zreal = w.b.account(&zkey).unwrap();
+    assert_eq!(zreal.data.len(), 165);
+    let mut longer = zreal.clone();
+    longer.data.resize(170, 0);
+    longer.data[165] = 2;
+    w.b.svm.set_account(zkey, longer).unwrap();
+    assert_eq!(custom_code(&w.burn_curve(&zec_coin)), Some(err(E::WrongPumpAccount)));
+    w.b.svm.set_account(zkey, zreal).unwrap();
+    let r = w.burn_curve(&zec_coin);
+    assert!(r.is_ok(), "{}", logs(&r));
+}
