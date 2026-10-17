@@ -177,8 +177,9 @@ pub fn effective_quote_reserves(balance: u64, virtual_quote_reserves: i128) -> R
     u64::try_from(v).map_err(|_| BurrpadError::Overflow.into())
 }
 
-/// True if `token_account` is a ZEC account owned by one of the eight
-/// buy-back receivers listed in pump.fun's own settings account.
+/// True if `token_account` is an account for the coin's quote coin (ZEC, or
+/// $BURR) owned by one of the eight buy-back receivers listed in pump.fun's
+/// own settings account.
 pub fn check_buyback_recipient(
     settings: &AccountInfo,
     settings_owner: &Pubkey,
@@ -191,7 +192,17 @@ pub fn check_buyback_recipient(
     require_keys_eq!(*settings.owner, *settings_owner, BurrpadError::WrongPumpAccount);
     require_keys_eq!(*token_account.owner, *token_program, BurrpadError::WrongPumpAccount);
     let t = token_account.try_borrow_data()?;
-    require!(t.len() == 165, BurrpadError::WrongPumpAccount);
+    // A classic token account is exactly 165 bytes. A Token-2022 account has
+    // the same first 165 bytes, then, when it carries extensions (the standard
+    // account carries "immutable owner": 170 bytes), an account-type byte that
+    // says "account" (2). Token-2022 never makes an account of a multisig's
+    // length (355), so that length is never an account.
+    let account_shaped = if *token_program == anchor_spl::token_2022::ID {
+        t.len() == 165 || (t.len() > 165 && t.len() != 355 && t[165] == 2)
+    } else {
+        t.len() == 165
+    };
+    require!(account_shaped, BurrpadError::WrongPumpAccount);
     require_keys_eq!(key_at(&t, 0), *zec_mint, BurrpadError::WrongPumpAccount);
     let holder = key_at(&t, 32);
     let s = settings.try_borrow_data()?;
