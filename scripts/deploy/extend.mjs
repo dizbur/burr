@@ -46,7 +46,6 @@ console.log(`Adds:       ${extra} bytes`);
 console.log(`Rent:       ${(rent / 1e9).toFixed(6)} SOL, paid by the deploy wallet and kept in the program's record`);
 if (opts.send !== "yes" || !opts.payer) {
   console.log("\nNothing sent. To send it, paid by the deploy wallet, add: --payer <deploy wallet key file> --send yes");
-  console.log(`(The same with the network's own tool: solana program extend ${programId.toBase58()} ${extra} --keypair <deploy wallet key file> --payer <deploy wallet key file>)`);
   process.exit(0);
 }
 const payer = loadKey(opts.payer, "--payer");

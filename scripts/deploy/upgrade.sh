@@ -86,7 +86,7 @@ if [ -z "$offered" ]; then
     # A larger program needs more room, paid for once and kept. The network adds room in steps of at least 10,240 bytes.
     grow=$(( size - room )); [ "$grow" -ge 10240 ] || grow=10240
     if [ -n "$offer" ]; then
-      echo "STOPPED: the new code is $((size - room)) bytes larger than the room the program has. The multi-signature wallet must first extend the program by $grow bytes (in its app, or: solana program extend $id $grow)." >&2; exit 1
+      echo "STOPPED: the new code is $((size - room)) bytes larger than the room the program has. The deploy wallet must first extend the program by $grow bytes, directly and never through Squads: node scripts/deploy/extend.mjs (see the checklist)." >&2; exit 1
     fi
   fi
   balance_check "$signer" upgrade
