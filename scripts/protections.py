@@ -772,6 +772,12 @@ MANUAL = [
     M("Z20", "A pool's record must name the coin's own quote", BURN,
       "    let quote_key = ctx.accounts.coin.quote_mint();", "    let quote_key = ZEC_MINT;",
       "t23_burr_pairs::a_graduated_burr_coin_collects_and_burns_on_its_burr_pool"),
+    M("Z21", "A Token-2022 buy-back account must be shaped as an account", "pump.rs",
+      "t.len() == 165 || (t.len() > 165 && t.len() != 355 && t[165] == 2)", "t.len() >= 165",
+      "t23_burr_pairs::the_buy_back_receivers_account_must_be_shaped_as_its_program_makes_it"),
+    M("Z22", "A classic token buy-back account is exactly 165 bytes", "pump.rs",
+      "    } else {\n        t.len() == 165\n    };", "    } else {\n        t.len() >= 165\n    };",
+      "t23_burr_pairs::the_buy_back_receivers_account_must_be_shaped_as_its_program_makes_it"),
 ]
 
 # ---------------------------------------------------------------------------
@@ -785,6 +791,7 @@ STRUCT_TEST = {
     "SetShadowWatch": "t22_shadow_burn::only_the_launcher_sets_the_watch_and_only_sensible_lists",
     "FollowWallet": T_FOLLOW,
     "ShadowBurn": "t22_shadow_burn::shadow_burn_takes_only_this_coins_watch_pot_and_the_watched_accounts",
+    "BurnBurrPot": "t23_burr_pairs::a_burr_coin_s_burr_share_is_burned_as_it_is",
     "ReleaseHolderRewards": "release_holder_rewards", "Recover": "recover",
 }
 CONSTRAINT_KEYS = ("seeds", "bump", "address", "associated_token::", "token::", "mint::", "has_one", "constraint")
