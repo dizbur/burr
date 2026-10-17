@@ -51,3 +51,5 @@ mod t21_random_life;
 mod t22_shadow_burn;
 #[cfg(test)]
 mod t23_burr_pairs;
+#[cfg(test)]
+mod t24_burr_pairs_edges;
