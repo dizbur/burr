@@ -375,7 +375,8 @@ fn burn_burr_pot_takes_only_this_coins_record_ledger_vault_and_burr() {
     let own = ata(&auth, &mint, &TOKEN_2022);
     w.b.write_token_account(own, &mint, &auth, w.ledger(&mint).burr.pot * 10, &TOKEN_2022);
     type A = burrpad::accounts::BurnBurrPot;
-    let swaps: Vec<(&str, Box<dyn Fn(&mut A)>)> = vec![
+    type Swap<'x> = Box<dyn Fn(&mut A) + 'x>;
+    let swaps: Vec<(&str, Swap)> = vec![
         ("another coin's ledger", Box::new(|x| x.ledger = kit::ledger(&other))),
         ("another coin's record", Box::new(|x| x.coin = kit::coin(&other))),
         ("another coin's vault", Box::new(|x| x.vault = ata(&kit::authority(&other), &BURR_MINT, &TOKEN_2022))),
@@ -454,7 +455,7 @@ fn a_third_coin_in_the_place_of_the_quote_coin_is_refused_everywhere() {
         let stray = Keypair::new().pubkey();
         w.b.write_token_account(stray, &fake, &auth, 1 << 40, &program);
         let before = (w.ledger(&m), w.vault_balance(&m));
-        let mut split = burrpad::accounts::SplitOnly {
+        let split = burrpad::accounts::SplitOnly {
             mint: m,
             coin: kit::coin(&m),
             ledger: kit::ledger(&m),
@@ -463,9 +464,8 @@ fn a_third_coin_in_the_place_of_the_quote_coin_is_refused_everywhere() {
             zec_mint: fake,
             token_program: program,
         };
-        let r = w.b.send(&[kit::raw(split.clone(), burrpad::instruction::Split {})], &[]);
+        let r = w.b.send(&[kit::raw(split, burrpad::instruction::Split {})], &[]);
         assert_eq!(custom_code(&r), Some(err(E::WrongQuote)), "split\n{}", logs(&r));
-        split.vault = w.vault_of(&m);
         let mut pay = w.pay_out_accounts(&payer, &m, &w.coin(&m).creator_receiver);
         pay.zec_mint = fake;
         pay.vault = fake_vault;
