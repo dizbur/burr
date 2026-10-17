@@ -15,7 +15,7 @@ use solana_signer::Signer;
 use solana_transaction::Transaction;
 use std::path::PathBuf;
 
-use crate::pump::{self, ata, TOKEN, ZEC};
+use crate::pump::{self, ata, TOKEN, TOKEN_2022, ZEC};
 
 #[derive(serde::Deserialize)]
 struct Fixture {
@@ -187,13 +187,22 @@ impl Bench {
         addr
     }
 
+    /// Writes a token account directly, laid out as its program's standard
+    /// account is: 165 bytes for Token; for Token-2022, the same 165, the
+    /// account-type byte (2) and the "immutable owner" extension the standard
+    /// account carries: 170 bytes, as the associated-token program makes it.
     pub fn write_token_account(&mut self, addr: Pubkey, mint: &Pubkey, owner: &Pubkey, amount: u64, program: &Pubkey) {
-        let mut d = vec![0u8; 165];
+        let len = if *program == TOKEN_2022 { 170 } else { 165 };
+        let mut d = vec![0u8; len];
         d[0..32].copy_from_slice(mint.as_ref());
         d[32..64].copy_from_slice(owner.as_ref());
         d[64..72].copy_from_slice(&amount.to_le_bytes());
         d[108] = 1; // initialised
-        let lamports = self.svm.minimum_balance_for_rent_exemption(165);
+        if len == 170 {
+            d[165] = 2; // an account
+            d[166..168].copy_from_slice(&7u16.to_le_bytes()); // immutable owner, no data
+        }
+        let lamports = self.svm.minimum_balance_for_rent_exemption(len);
         self.svm
             .set_account(addr, Account { lamports, data: d, owner: *program, executable: false, rent_epoch: u64::MAX })
             .unwrap();

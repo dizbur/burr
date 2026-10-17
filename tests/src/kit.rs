@@ -440,10 +440,20 @@ impl World {
 
     /// Gives `owner` test $BURR, written straight into its $BURR account.
     /// The mint's supply grows by as much, so that burning it later stays true to the books.
+    /// The account is made by the real associated-token program if missing (170 bytes,
+    /// as on the network), then its balance is set.
     pub fn give_burr(&mut self, owner: &Pubkey, amount: u64) {
         let addr = ata(owner, &burrpad::BURR_MINT, &TOKEN_2022);
-        let prev = self.b.token_balance(&addr);
-        self.b.write_token_account(addr, &burrpad::BURR_MINT, owner, prev + amount, &TOKEN_2022);
+        if self.b.account(&addr).is_none() {
+            let payer = self.b.payer.pubkey();
+            let r = self.b.send(&[pump::create_ata(&payer, owner, &burrpad::BURR_MINT, &TOKEN_2022)], &[]);
+            assert!(r.is_ok(), "{}", crate::bench::logs(&r));
+        }
+        let mut acct = self.b.account(&addr).expect("the $BURR account");
+        assert_eq!(acct.data.len(), 170, "a standard Token-2022 account, as the network makes it");
+        let prev = u64::from_le_bytes(acct.data[64..72].try_into().unwrap());
+        acct.data[64..72].copy_from_slice(&(prev + amount).to_le_bytes());
+        self.b.svm.set_account(addr, acct).unwrap();
         let mut mint = self.b.account(&burrpad::BURR_MINT).expect("$BURR");
         let supply = u64::from_le_bytes(mint.data[36..44].try_into().unwrap());
         mint.data[36..44].copy_from_slice(&supply.checked_add(amount).expect("$BURR supply").to_le_bytes());
