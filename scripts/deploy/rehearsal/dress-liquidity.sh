@@ -52,9 +52,6 @@ echo "second: ${second:0:7} ($(cat "$work/second/target/release-kit/mode.txt") b
 step "2. the main network's state, read only (the stand-in for the vault is upgrade key and administrator)"
 BURRPAD_RPC_URL="$BURRPAD_MAINNET_READ_URL" node "$kit/rehearsal/mainnet-copy.mjs" "$work/accounts" --stand-in "$(addr standin)" --trader "$(addr deployer)" --coins "$coins" --admin-stand-in yes --rewards-stand-in "$(addr rewards)" --mainnet yes | grep -v "^Network:" > "$work/validator-args.txt"
 export BURRPAD_RPC_URL="$url"
-# The copy starts at the main network's slot, so that slots recorded in live coins (a holder release's
-# snapshot) are in its past, as they are on the network.
-warp=$(solana slot --url "$BURRPAD_MAINNET_READ_URL")
 
 validator=""
 start() {
@@ -63,7 +60,7 @@ start() {
   solana-test-validator --reset --quiet --ledger "$work/ledger" --bind-address 127.0.0.1 --rpc-port "$port" --faucet-port "$((port + 1001))" \
     --gossip-port "$((port + 1002))" --dynamic-port-range "$((port + 1003))-$((port + 1040))" \
     --deactivate-feature B8JJXCy5amZyWG9r7EnUYLwzXSXTxG7GZ1qZ1qggo83g --deactivate-feature ExtendProgCheckedWi11BeDe1eted11111111111111 \
-    --warp-slot "$warp" $(cat "$work/validator-args.txt") > "$work/validator.log" 2>&1 &
+    $(cat "$work/validator-args.txt") > "$work/validator.log" 2>&1 &
   validator=$!
   n=0; until solana cluster-version --url "$url" >/dev/null 2>&1; do n=$((n + 1)); [ $n -lt 90 ] || { echo "STOPPED: the validator did not start."; tail -5 "$work/validator.log"; exit 1; }; sleep 1; done
   solana airdrop 100 "$(addr deployer)" --url "$url" >/dev/null; solana airdrop 10 "$(addr standin)" --url "$url" >/dev/null

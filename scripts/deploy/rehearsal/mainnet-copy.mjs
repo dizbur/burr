@@ -11,7 +11,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import path from "node:path";
 import { BURR, WITHDRAW_AUTHORITY, burnBurrIx, burnCurveIx, burnPoolIx, collectCurveIx, collectPoolIx, curveOf, launchIx, payOutIx, poolOf, splitIx } from "../coin.mjs";
 import {
-  address, ata, ATA_PROGRAM, COMPUTE_BUDGET, configAddress, connect, fail, fixedAccounts, loadIdl, LOADER, MAYHEM, need,
+  address, ata, ATA_PROGRAM, COMPUTE_BUDGET, configAddress, connect, decodeAccount, fail, fixedAccounts, loadIdl, LOADER, MAYHEM, need,
   options, pda, PUMP, PUMP_AMM, PUMP_FEES, readAccount, SYSTEM, TOKEN, TOKEN_2022, ZEC,
 } from "../lib.mjs";
 
@@ -85,6 +85,20 @@ for (let i = 0; i < wanted.length; i += 100) {
     if (opts["rewards-stand-in"] && batch[j] === configAddress(idl).toBase58()) {
       data = Buffer.from(data);
       address(opts["rewards-stand-in"], "--rewards-stand-in").toBuffer().copy(data, 105);
+    }
+    // A local validator's slots start near 0, but a live coin's ledger records the main network's slot of its
+    // last holder release, which a new release's snapshot must come after. On the copy only, that slot is set
+    // to 0 so a release can be rehearsed; nothing else in the ledger is touched.
+    if (opts["rewards-stand-in"] && info.owner.equals(idl.programId)) {
+      const ledger = (() => { try { return decodeAccount(idl, "Ledger", info.data); } catch { return null; } })();
+      if (ledger && ledger.holders && BigInt(ledger.holders.last_release_slot) > 0n && batch[j] === pda(["ledger", new PublicKey(ledger.mint)], idl.programId).toBase58()) {
+        const want = Buffer.alloc(8);
+        want.writeBigUInt64LE(BigInt(ledger.holders.last_release_slot));
+        const at = data.indexOf(want);
+        if (at < 0 || data.indexOf(want, at + 1) >= 0) fail(`cannot place the last release slot of ledger ${batch[j]}`);
+        data = Buffer.from(data);
+        Buffer.alloc(8).copy(data, at);
+      }
     }
     writeAccount("a" + (i + j), batch[j], info.owner.toBase58(), Math.max(info.lamports, local), data);
     copied++;
