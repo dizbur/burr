@@ -265,7 +265,7 @@ export async function send(conn, instructions, signers, { table, units = 400_000
         ComputeBudgetProgram.setComputeUnitPrice({ microLamports: priorityFee() }),
         ...instructions,
       ],
-    }).compileToV0Message(table ? [table] : []);
+    }).compileToV0Message(!table ? [] : Array.isArray(table) ? table : [table]);
     tx = new VersionedTransaction(message);
     tx.sign(signers);
     const sim = await conn.simulateTransaction(tx, { sigVerify: true, commitment: "confirmed" });

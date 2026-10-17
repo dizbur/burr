@@ -31,6 +31,7 @@ export const coinAccount = (owner, mint) => ata(owner, mint, TOKEN_2022);
 // The platform terms are read from the settings, so the launch states the terms it saw.
 // `plan.burr_share`, `plan.liquidity_share`, `plan.payout_options` and `plan.shadow_share` (optional):
 // the extra hooks and the payout choices, sent with `launch_v2`, `launch_v3` or `launch_v4`;
+// `plan.quote` 1 prices the coin in $BURR (`launch_v5`: the four hooks and `burr_share` only);
 // without them it is the plain `launch`.
 // `makeOwnAccount`: the launch also makes the launcher's own account for the
 // new coin (after the next upgrade), so a first buy needs no instruction of its own for it.
@@ -39,10 +40,11 @@ export async function launchIx(conn, idl, mint, payer, plan, { makeOwnAccount = 
   const a = coinAddresses(idl, mint);
   const curve = curveOf(mint);
   const solVault = pda(["sol-vault"], MAYHEM);
-  const { burr_share = 0, liquidity_share = 0, payout_options = 0, long_holder_step_bps = 0, long_holder_max_bps = 0, shadow_share = 0, ...terms } = plan;
-  const name = shadow_share ? "launch_v4" : liquidity_share || payout_options ? "launch_v3" : burr_share ? "launch_v2" : "launch";
+  const { burr_share = 0, liquidity_share = 0, payout_options = 0, long_holder_step_bps = 0, long_holder_max_bps = 0, shadow_share = 0, quote = 0, ...terms } = plan;
+  const q = quoteParts(quote);
+  const name = quote ? "launch_v5" : shadow_share ? "launch_v4" : liquidity_share || payout_options ? "launch_v3" : burr_share ? "launch_v2" : "launch";
   const ix = instruction(idl, name, {
-    payer, mint, config: configAddress(idl), coin: a.coin, ledger: a.ledger, authority: a.authority, vault: a.vault, zec_mint: ZEC,
+    payer, mint, config: configAddress(idl), coin: a.coin, ledger: a.ledger, authority: a.authority, vault: ata(a.authority, q.mint, q.program), zec_mint: q.mint,
     pump_mint_authority: pda(["mint-authority"], PUMP),
     bonding_curve: curve,
     associated_bonding_curve: ata(curve, mint, TOKEN_2022),
@@ -53,12 +55,14 @@ export async function launchIx(conn, idl, mint, payer, plan, { makeOwnAccount = 
     mayhem_state: pda(["mayhem-state", mint], MAYHEM),
     mayhem_token_vault: ata(solVault, mint, TOKEN_2022),
     pump_event_authority: pda(["__event_authority"], PUMP),
-    associated_quote_bonding_curve: ata(curve, ZEC, TOKEN),
+    associated_quote_bonding_curve: ata(curve, q.mint, q.program),
     quote_control: pda(["quote-control"], PUMP),
-    pump_program: PUMP, token_program: TOKEN, token_2022_program: TOKEN_2022,
+    pump_program: PUMP, token_program: q.program, token_2022_program: TOKEN_2022,
     associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
   }, { args: { ...terms, max_platform_fraction_bps: cfg.platform_fraction_bps, platform_receiver: cfg.platform_receiver }, burr_share, liquidity_share,
-    payout: { options: payout_options, long_holder_step_bps, long_holder_max_bps }, shadow_share });
+    payout: { options: payout_options, long_holder_step_bps, long_holder_max_bps }, shadow_share, quote });
+  // A coin priced in $BURR: $BURR's curve, its pool and the pool's two vaults come first after the listed accounts.
+  if (quote === 1) ix.keys.push(...burrQuoteAccounts().map((k) => meta(k)));
   if (makeOwnAccount) ix.keys.push(meta(coinAccount(payer, mint), true));
   return ix;
 }
@@ -69,45 +73,45 @@ export const makeTokenAccountIx = (payer, owner, mint, tokenProgram) => new Tran
   keys: [meta(payer, true, true), meta(ata(owner, mint, tokenProgram), true), meta(owner), meta(mint), meta(SYSTEM), meta(tokenProgram)],
 });
 
-const tradeKeys = (mint, user) => {
+const tradeKeys = (mint, user, q = quoteParts(0)) => {
   const curve = curveOf(mint);
   return [
-    meta(pda(["global"], PUMP)), meta(mint), meta(ZEC), meta(TOKEN_2022), meta(TOKEN), meta(curve, true),
-    meta(ata(curve, mint, TOKEN_2022), true), meta(ata(curve, ZEC, TOKEN), true), meta(user, true, true),
-    meta(coinAccount(user, mint), true), meta(zecAccount(user), true), meta(pda(["user_volume_accumulator", user], PUMP), true),
-    meta(pda(["fee_config", PUMP], PUMP_FEES)), meta(ata(BUYBACK, ZEC, TOKEN), true), meta(SYSTEM),
+    meta(pda(["global"], PUMP)), meta(mint), meta(q.mint), meta(TOKEN_2022), meta(q.program), meta(curve, true),
+    meta(ata(curve, mint, TOKEN_2022), true), meta(ata(curve, q.mint, q.program), true), meta(user, true, true),
+    meta(coinAccount(user, mint), true), meta(ata(user, q.mint, q.program), true), meta(pda(["user_volume_accumulator", user], PUMP), true),
+    meta(pda(["fee_config", PUMP], PUMP_FEES)), meta(ata(BUYBACK, q.mint, q.program), true), meta(SYSTEM),
     meta(pda(["__event_authority"], PUMP)), meta(PUMP),
   ];
 };
 // pump.fun's own buy on the curve: spend `zec` units of ZEC, accept no fewer than `minCoins`.
 // There is no default for `minCoins`: a real buy must work it out from the
 // curve with a stated tolerance, or anyone ordering transactions can take the difference.
-export const buyIx = (mint, user, zec, minCoins) => new TransactionInstruction({
-  programId: PUMP, keys: tradeKeys(mint, user),
+export const buyIx = (mint, user, zec, minCoins, quote = 0) => new TransactionInstruction({
+  programId: PUMP, keys: tradeKeys(mint, user, quoteParts(quote)),
   data: Buffer.concat([pumpDisc("buy_exact_quote_in_v3"), u64(zec), u64(minCoins), Buffer.from([0])]),
 });
 // pump.fun's own sell on the curve.
-export const sellIx = (mint, user, coins, minZec) => new TransactionInstruction({
-  programId: PUMP, keys: tradeKeys(mint, user),
+export const sellIx = (mint, user, coins, minZec, quote = 0) => new TransactionInstruction({
+  programId: PUMP, keys: tradeKeys(mint, user, quoteParts(quote)),
   data: Buffer.concat([pumpDisc("sell_v3"), u64(coins), u64(minZec)]),
 });
 // A trade straight on a PumpSwap pool, as an ordinary trader makes it.
-const poolTradeKeys = (mint, user) => {
-  const pool = poolOf(mint);
+const poolTradeKeys = (mint, user, q = quoteParts(0)) => {
+  const pool = poolOf(mint, q.mint);
   return [
-    meta(pool, true), meta(user, true, true), meta(pda(["global_config"], PUMP_AMM)), meta(mint), meta(ZEC),
-    meta(ata(user, mint, TOKEN_2022), true), meta(ata(user, ZEC, TOKEN), true),
-    meta(ata(pool, mint, TOKEN_2022), true), meta(ata(pool, ZEC, TOKEN), true),
-    meta(TOKEN_2022), meta(TOKEN), meta(SYSTEM),
+    meta(pool, true), meta(user, true, true), meta(pda(["global_config"], PUMP_AMM)), meta(mint), meta(q.mint),
+    meta(ata(user, mint, TOKEN_2022), true), meta(ata(user, q.mint, q.program), true),
+    meta(ata(pool, mint, TOKEN_2022), true), meta(ata(pool, q.mint, q.program), true),
+    meta(TOKEN_2022), meta(q.program), meta(SYSTEM),
     meta(pda(["user_volume_accumulator", user], PUMP_AMM), true), meta(pda(["fee_config", PUMP_AMM], PUMP_FEES)),
-    meta(ata(BUYBACK, ZEC, TOKEN), true), meta(pda(["__event_authority"], PUMP_AMM)), meta(PUMP_AMM),
+    meta(ata(BUYBACK, q.mint, q.program), true), meta(pda(["__event_authority"], PUMP_AMM)), meta(PUMP_AMM),
   ];
 };
-export const poolBuyIx = (mint, user, zec, minCoins) => new TransactionInstruction({
-  programId: PUMP_AMM, keys: poolTradeKeys(mint, user), data: Buffer.concat([pumpDisc("buy_exact_quote_in_v2"), u64(zec), u64(minCoins)]),
+export const poolBuyIx = (mint, user, zec, minCoins, quote = 0) => new TransactionInstruction({
+  programId: PUMP_AMM, keys: poolTradeKeys(mint, user, quoteParts(quote)), data: Buffer.concat([pumpDisc("buy_exact_quote_in_v2"), u64(zec), u64(minCoins)]),
 });
-export const poolSellIx = (mint, user, coins, minZec) => new TransactionInstruction({
-  programId: PUMP_AMM, keys: poolTradeKeys(mint, user), data: Buffer.concat([pumpDisc("sell_v2"), u64(coins), u64(minZec)]),
+export const poolSellIx = (mint, user, coins, minZec, quote = 0) => new TransactionInstruction({
+  programId: PUMP_AMM, keys: poolTradeKeys(mint, user, quoteParts(quote)), data: Buffer.concat([pumpDisc("sell_v2"), u64(coins), u64(minZec)]),
 });
 // A plain transfer of a Token-2022 coin between `owner`'s account and `to`'s (which must exist).
 export const coinTransferIx = (mint, owner, to, amount, decimals) => new TransactionInstruction({
@@ -119,64 +123,69 @@ export const zecTransferIx = (from, to, owner, amount) => new TransactionInstruc
   programId: TOKEN, data: Buffer.concat([Buffer.from([3]), u64(amount)]), keys: [meta(from, true), meta(to, true), meta(owner, false, true)],
 });
 
-export function collectCurveIx(idl, mint, payer) {
+export function collectCurveIx(idl, mint, payer, quote = 0) {
+  const q = quoteParts(quote);
   const a = coinAddresses(idl, mint);
   const curve = curveOf(mint);
   const creatorVault = pda(["creator-vault", a.authority], PUMP);
   return instruction(idl, "collect_curve", {
-    payer, mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: a.vault, zec_mint: ZEC,
-    pump_global: pda(["global"], PUMP), bonding_curve: curve, associated_quote_bonding_curve: ata(curve, ZEC, TOKEN),
-    creator_vault: creatorVault, creator_vault_ata: ata(creatorVault, ZEC, TOKEN),
+    payer, mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: ata(a.authority, q.mint, q.program), zec_mint: q.mint,
+    pump_global: pda(["global"], PUMP), bonding_curve: curve, associated_quote_bonding_curve: ata(curve, q.mint, q.program),
+    creator_vault: creatorVault, creator_vault_ata: ata(creatorVault, q.mint, q.program),
     pump_event_authority: pda(["__event_authority"], PUMP), pump_program: PUMP,
-    token_program: TOKEN, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
+    token_program: q.program, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
   });
 }
-export function splitIx(idl, mint) {
+export function splitIx(idl, mint, quote = 0) {
+  const q = quoteParts(quote);
   const a = coinAddresses(idl, mint);
-  return instruction(idl, "split", { mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: a.vault, zec_mint: ZEC, token_program: TOKEN });
+  return instruction(idl, "split", { mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: ata(a.authority, q.mint, q.program), zec_mint: q.mint, token_program: TOKEN });
 }
 // `payee` is "Platform", "Creator" or "Give"; `receiver` must be the one in the coin's record.
-export function payOutIx(idl, mint, payer, payee, receiver) {
+export function payOutIx(idl, mint, payer, payee, receiver, quote = 0) {
+  const q = quoteParts(quote);
   const a = coinAddresses(idl, mint);
   return instruction(idl, "pay_out", {
-    payer, mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: a.vault, zec_mint: ZEC,
-    receiver, receiver_zec: zecAccount(receiver),
-    token_program: TOKEN, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
+    payer, mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: ata(a.authority, q.mint, q.program), zec_mint: q.mint,
+    receiver, receiver_zec: ata(receiver, q.mint, q.program),
+    token_program: q.program, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
   }, { payee });
 }
-export function burnCurveIx(idl, mint, payer) {
+export function burnCurveIx(idl, mint, payer, quote = 0) {
+  const q = quoteParts(quote);
   const a = coinAddresses(idl, mint);
   const curve = curveOf(mint);
   return instruction(idl, "burn_curve", {
-    payer, mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: a.vault, zec_mint: ZEC,
-    burner: a.burner, burner_zec: zecAccount(a.burner), burner_coin: coinAccount(a.burner, mint),
+    payer, mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: ata(a.authority, q.mint, q.program), zec_mint: q.mint,
+    burner: a.burner, burner_zec: ata(a.burner, q.mint, q.program), burner_coin: coinAccount(a.burner, mint),
     pump_global: pda(["global"], PUMP), bonding_curve: curve,
-    associated_base_bonding_curve: ata(curve, mint, TOKEN_2022), associated_quote_bonding_curve: ata(curve, ZEC, TOKEN),
+    associated_base_bonding_curve: ata(curve, mint, TOKEN_2022), associated_quote_bonding_curve: ata(curve, q.mint, q.program),
     user_volume: pda(["user_volume_accumulator", a.burner], PUMP), fee_config: pda(["fee_config", PUMP], PUMP_FEES),
-    buyback_fee_recipient: ata(BUYBACK, ZEC, TOKEN), pump_event_authority: pda(["__event_authority"], PUMP), pump_program: PUMP,
-    token_program: TOKEN, token_2022_program: TOKEN_2022, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
+    buyback_fee_recipient: ata(BUYBACK, q.mint, q.program), pump_event_authority: pda(["__event_authority"], PUMP), pump_program: PUMP,
+    token_program: q.program, token_2022_program: TOKEN_2022, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
   });
 }
 // pump.fun's `migrate_v2`: moves a completed curve to its PumpSwap pool. Open to anyone; `user` pays.
 export const WITHDRAW_AUTHORITY = new PublicKey("39azUYFWPz3VHgKCf3VChUwbpURdCHRxjWVowf5jUJjg");
-export function migrateIx(mint, user) {
+export function migrateIx(mint, user, quote = 0) {
+  const q = quoteParts(quote);
   const curve = curveOf(mint);
   const pa = pda(["pool-authority", mint], PUMP);
-  const pool = pda(["pool", Buffer.from([0, 0]), pa, mint, ZEC], PUMP_AMM);
+  const pool = poolOf(mint, q.mint);
   const lp = pda(["pool_lp_mint", pool], PUMP_AMM);
   const boost = pda(["boost_vault", pool], PUMP_AMM);
   return new TransactionInstruction({
     programId: PUMP, data: Buffer.from([187, 203, 18, 31, 206, 237, 254, 41]),
     keys: [
-      meta(pda(["global"], PUMP)), meta(WITHDRAW_AUTHORITY, true), meta(mint), meta(ZEC), meta(curve, true),
-      meta(ata(curve, mint, TOKEN_2022), true), meta(ata(curve, ZEC, TOKEN), true), meta(user, true, true), meta(SYSTEM), meta(PUMP_AMM),
-      meta(pool, true), meta(pa, true), meta(ata(pa, mint, TOKEN_2022), true), meta(ata(pa, ZEC, TOKEN), true),
+      meta(pda(["global"], PUMP)), meta(WITHDRAW_AUTHORITY, true), meta(mint), meta(q.mint), meta(curve, true),
+      meta(ata(curve, mint, TOKEN_2022), true), meta(ata(curve, q.mint, q.program), true), meta(user, true, true), meta(SYSTEM), meta(PUMP_AMM),
+      meta(pool, true), meta(pa, true), meta(ata(pa, mint, TOKEN_2022), true), meta(ata(pa, q.mint, q.program), true),
       meta(pda(["global_config"], PUMP_AMM)), meta(lp, true), meta(ata(pa, lp, TOKEN_2022), true),
-      meta(ata(pool, mint, TOKEN_2022), true), meta(ata(pool, ZEC, TOKEN), true),
-      meta(TOKEN_2022), meta(TOKEN), meta(TOKEN_2022), meta(ATA_PROGRAM), meta(pda(["__event_authority"], PUMP_AMM)),
+      meta(ata(pool, mint, TOKEN_2022), true), meta(ata(pool, q.mint, q.program), true),
+      meta(TOKEN_2022), meta(q.program), meta(TOKEN_2022), meta(ATA_PROGRAM), meta(pda(["__event_authority"], PUMP_AMM)),
       meta(new PublicKey("SysvarRent111111111111111111111111111111111")), meta(pda(["__event_authority"], PUMP)), meta(PUMP),
       // Two accounts the interface file does not list, learned from a real graduation.
-      meta(boost, true), meta(ata(boost, ZEC, TOKEN), true),
+      meta(boost, true), meta(ata(boost, q.mint, q.program), true),
     ],
   });
 }
@@ -185,36 +194,44 @@ export function migrateIx(mint, user) {
 // ---- after graduation: the coin's PumpSwap pool ----
 export const BURR = new PublicKey("GiwMfYS4jHi256G8K41snZhKUovrMbyQL2hqv3fqr7WU");
 export const poolAuthorityOf = (mint) => pda(["pool-authority", mint], PUMP);
-export const poolOf = (mint) => pda(["pool", Buffer.from([0, 0]), poolAuthorityOf(mint), mint, ZEC], PUMP_AMM);
-const poolAccounts = (mint) => {
-  const pool = poolOf(mint);
+export const poolOf = (mint, quoteMint = ZEC) => pda(["pool", Buffer.from([0, 0]), poolAuthorityOf(mint), mint, quoteMint], PUMP_AMM);
+// The four accounts a launch priced in $BURR passes after the listed ones (also what the site's second address table holds).
+export const burrQuoteAccounts = () => {
+  const pool = poolOf(BURR, ZEC);
+  return [curveOf(BURR), pool, ata(pool, BURR, TOKEN_2022), ata(pool, ZEC, TOKEN)];
+};
+// What a coin is priced in (`Coin.quote`): 0, ZEC (every coin before $BURR pairs), or 1, $BURR.
+export const quoteParts = (quote = 0) => (quote === 1 ? { mint: BURR, program: TOKEN_2022 } : { mint: ZEC, program: TOKEN });
+const poolAccounts = (mint, q = quoteParts(0)) => {
+  const pool = poolOf(mint, q.mint);
   return {
     amm_global_config: pda(["global_config"], PUMP_AMM), pool_authority: poolAuthorityOf(mint), pool,
-    pool_base_token_account: ata(pool, mint, TOKEN_2022), pool_quote_token_account: ata(pool, ZEC, TOKEN),
+    pool_base_token_account: ata(pool, mint, TOKEN_2022), pool_quote_token_account: ata(pool, q.mint, q.program),
     amm_event_authority: pda(["__event_authority"], PUMP_AMM), amm_program: PUMP_AMM,
   };
 };
-export function collectPoolIx(idl, mint, payer) {
+export function collectPoolIx(idl, mint, payer, quote = 0) {
+  const q = quoteParts(quote);
   const a = coinAddresses(idl, mint);
-  const p = poolAccounts(mint);
+  const p = poolAccounts(mint, q);
   const va = pda(["creator_vault", a.authority], PUMP_AMM);
   return instruction(idl, "collect_pool", {
-    payer, mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: a.vault, zec_mint: ZEC,
+    payer, mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: ata(a.authority, q.mint, q.program), zec_mint: q.mint,
     amm_global_config: p.amm_global_config, pool_authority: p.pool_authority, pool: p.pool,
-    pool_quote_token_account: p.pool_quote_token_account, amm_creator_vault_authority: va, amm_creator_vault_ata: ata(va, ZEC, TOKEN),
+    pool_quote_token_account: p.pool_quote_token_account, amm_creator_vault_authority: va, amm_creator_vault_ata: ata(va, q.mint, q.program),
     amm_event_authority: p.amm_event_authority, amm_program: PUMP_AMM,
-    token_program: TOKEN, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
+    token_program: q.program, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
   });
 }
-const buyOnPoolAccounts = (idl, mint, payer, burnerMint) => {
+const buyOnPoolAccounts = (idl, mint, payer, burnerMint, q = quoteParts(0)) => {
   const a = coinAddresses(idl, mint);
   return {
-    payer, mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: a.vault, zec_mint: ZEC,
-    burner: a.burner, burner_zec: zecAccount(a.burner), burner_coin: coinAccount(a.burner, burnerMint),
-    ...poolAccounts(burnerMint),
+    payer, mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: ata(a.authority, q.mint, q.program), zec_mint: q.mint,
+    burner: a.burner, burner_zec: ata(a.burner, q.mint, q.program), burner_coin: coinAccount(a.burner, burnerMint),
+    ...poolAccounts(burnerMint, q),
     user_volume: pda(["user_volume_accumulator", a.burner], PUMP_AMM), fee_config: pda(["fee_config", PUMP_AMM], PUMP_FEES),
-    buyback_fee_recipient: ata(BUYBACK, ZEC, TOKEN),
-    token_program: TOKEN, token_2022_program: TOKEN_2022, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
+    buyback_fee_recipient: ata(BUYBACK, q.mint, q.program),
+    token_program: q.program, token_2022_program: TOKEN_2022, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
   };
 };
 // The liquidity hook: after graduation, adds to the coin's own pool and burns the receipts.
@@ -224,7 +241,15 @@ export function addLiquidityIx(idl, mint, payer) {
   return instruction(idl, "add_liquidity", { ...x, lp_mint: lp, burner_lp: ata(x.burner, lp, TOKEN_2022) });
 }
 
-export const burnPoolIx = (idl, mint, payer) => instruction(idl, "burn_pool", buyOnPoolAccounts(idl, mint, payer, mint));
+export const burnPoolIx = (idl, mint, payer, quote = 0) => instruction(idl, "burn_pool", buyOnPoolAccounts(idl, mint, payer, mint, quoteParts(quote)));
+// A coin priced in $BURR burns its $BURR pot as it is.
+export function burnBurrPotIx(idl, mint) {
+  const a = coinAddresses(idl, mint);
+  return instruction(idl, "burn_burr_pot", {
+    mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: ata(a.authority, BURR, TOKEN_2022), burr_mint: BURR,
+    token_2022_program: TOKEN_2022,
+  });
+}
 // A coin's $BURR pot buys $BURR on $BURR's pool (after the 16 Oct upgrade).
 export function burnBurrIx(idl, mint, payer) {
   const x = buyOnPoolAccounts(idl, mint, payer, BURR);
@@ -259,12 +284,13 @@ const accountsByName = (idl, name, ix) =>
   Object.fromEntries(idl.instructions.find((x) => x.name === name).accounts.map((a, i) => [a.name, ix.keys[i].pubkey]));
 
 // `amount` of the holder pot, for the snapshot taken at `slot` whose fingerprint is `hash` (32 bytes).
-export function releaseIx(idl, mint, rewardsWallet, amount, slot, hash) {
+export function releaseIx(idl, mint, rewardsWallet, amount, slot, hash, quote = 0) {
+  const q = quoteParts(quote);
   const a = coinAddresses(idl, mint);
   return instruction(idl, "release_holder_rewards", {
-    rewards_wallet: rewardsWallet, config: configAddress(idl), mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: a.vault,
-    zec_mint: ZEC, rewards_zec: zecAccount(rewardsWallet),
-    token_program: TOKEN, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
+    rewards_wallet: rewardsWallet, config: configAddress(idl), mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: ata(a.authority, q.mint, q.program),
+    zec_mint: q.mint, rewards_zec: ata(rewardsWallet, q.mint, q.program),
+    token_program: q.program, associated_token_program: ATA_PROGRAM, system_program: SYSTEM,
   }, { amount, snapshot_slot: slot, snapshot_hash: hash });
 }
 // A snapshot's fingerprint: sha256 of a fixed text form. `holders` is [[wallet, balance], ...].

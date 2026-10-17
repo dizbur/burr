@@ -14,7 +14,7 @@
 import { PublicKey, TransactionMessage, VersionedTransaction, ComputeBudgetProgram } from "@solana/web3.js";
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import path from "node:path";
-import { addLiquidityIx, BURR, burnBurrIx, shadowBurnIx, burnCurveIx, burnPoolIx, clock, collectCurveIx, collectPoolIx, curveOf, splitIx } from "./coin.mjs";
+import { addLiquidityIx, BURR, burnBurrIx, burnBurrPotIx, shadowBurnIx, burnCurveIx, burnPoolIx, clock, collectCurveIx, collectPoolIx, curveOf, splitIx } from "./coin.mjs";
 import { address, checker, coinAddresses, pda, configAddress, connect, decodeAccount, fail, loadIdl, need, options, programDataAddress, readAccount, ROOT, sha256 } from "./lib.mjs";
 
 const opts = options(["url", "mainnet", "authority", "admin", "coins", "save", "release-kit"]);
@@ -122,11 +122,20 @@ for (const mint of mints) {
   const name = mint.toBase58().slice(0, 8) + "…";
   const curve = await conn.getAccountInfo(curveOf(mint));
   const graduated = !!curve && curve.data[48] !== 0;
-  await simulate(`${name}: collect from the curve`, collectCurveIx(idl, mint, authority));
-  if (graduated) await simulate(`${name}: collect from the pool`, collectPoolIx(idl, mint, authority));
-  await simulate(`${name}: split`, splitIx(idl, mint));
+  // What the coin is priced in: ZEC for every coin before $BURR pairs (the record reads 0), or $BURR.
+  const record = await readAccount(conn, idl, "Coin", coinAddresses(idl, mint).coin);
+  const quote = Number(record?.quote ?? 0);
+  if (quote) console.log(`      ${name}: priced in $BURR`);
+  await simulate(`${name}: collect from the curve`, collectCurveIx(idl, mint, authority, quote));
+  if (graduated) await simulate(`${name}: collect from the pool`, collectPoolIx(idl, mint, authority, quote));
+  await simulate(`${name}: split`, splitIx(idl, mint, quote));
   await simulateBurn(`${name}: buy back and burn (${graduated ? "pool" : "curve"})`,
-    () => (graduated ? burnPoolIx(idl, mint, authority) : burnCurveIx(idl, mint, authority)), lastBurn(mint));
+    () => (graduated ? burnPoolIx(idl, mint, authority, quote) : burnCurveIx(idl, mint, authority, quote)), lastBurn(mint));
+  if (quote === 1) {
+    // A coin priced in $BURR burns its $BURR pot as it is; Shadow Burn and Liquidity are not for it.
+    await simulate(`${name}: burn its $BURR pot`, burnBurrPotIx(idl, mint));
+    continue;
+  }
   if (hasBurnBurr && mint.equals(BURR)) {
     console.log(`      ${name}: buy and burn $BURR: not simulated ($BURR does not buy itself; the program refuses its own ledger twice)`);
   } else if (hasBurnBurr) {
