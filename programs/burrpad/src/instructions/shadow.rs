@@ -214,6 +214,7 @@ pub struct ShadowBurn<'info> {
 /// less 35%, or it is refused. With nothing to buy, or `sold` 0, it only records.
 /// After the listed accounts: the watched wallets' target accounts, in order.
 pub fn handle_shadow_burn<'info>(ctx: Context<'info, ShadowBurn<'info>>, sold: u64, received: u64) -> Result<()> {
+    require!(ctx.accounts.burr.coin.quote == QUOTE_ZEC, BurrpadError::NotForThisQuote);
     require!(ctx.accounts.burr.coin.shadow_share > 0, BurrpadError::HookNotChosen);
     let w = &mut ctx.accounts.watch;
     require_keys_eq!(ctx.accounts.burr.payer.key(), w.keeper, BurrpadError::NotTheKeeper);

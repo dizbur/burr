@@ -12,8 +12,7 @@ use crate::pump;
 use crate::state::{Coin, Ledger};
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::{get_associated_token_address_with_program_id, AssociatedToken};
-use anchor_spl::token::Token;
-use anchor_spl::token_interface::{Mint, TokenAccount};
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 /// The accounts every per-coin instruction starts from. All are derived from
 /// the one mint, so accounts of two coins cannot be mixed.
@@ -34,9 +33,10 @@ pub struct SplitOnly<'info> {
         associated_token::token_program = token_program
     )]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(address = ZEC_MINT)]
+    #[account(address = coin.quote_mint() @ BurrpadError::WrongQuote)]
     pub zec_mint: Box<InterfaceAccount<'info, Mint>>,
-    pub token_program: Program<'info, Token>,
+    #[account(address = coin.quote_program() @ BurrpadError::WrongQuote)]
+    pub token_program: Interface<'info, TokenInterface>,
 }
 
 pub fn handle_split(ctx: Context<SplitOnly>) -> Result<()> {
@@ -71,7 +71,7 @@ pub struct Recover<'info> {
         associated_token::token_program = token_program
     )]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(address = ZEC_MINT)]
+    #[account(address = coin.quote_mint() @ BurrpadError::WrongQuote)]
     pub zec_mint: Box<InterfaceAccount<'info, Mint>>,
     /// A ZEC account owned by this coin's authority that is not its vault.
     #[account(
@@ -82,7 +82,8 @@ pub struct Recover<'info> {
         constraint = stray.key() != vault.key() @ BurrpadError::NotAStrayAccount
     )]
     pub stray: Box<InterfaceAccount<'info, TokenAccount>>,
-    pub token_program: Program<'info, Token>,
+    #[account(address = coin.quote_program() @ BurrpadError::WrongQuote)]
+    pub token_program: Interface<'info, TokenInterface>,
 }
 
 pub fn handle_recover(ctx: Context<Recover>) -> Result<()> {
@@ -97,6 +98,7 @@ pub fn handle_recover(ctx: Context<Recover>) -> Result<()> {
         &a.coin.mint,
         a.coin.authority_bump,
         amount,
+        a.coin.quote_decimals(),
     )?;
     // What arrived is fee like any other: split it now.
     ctx.accounts.vault.reload()?;
@@ -126,7 +128,7 @@ pub struct CollectCurve<'info> {
         associated_token::token_program = token_program
     )]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(address = ZEC_MINT)]
+    #[account(address = coin.quote_mint() @ BurrpadError::WrongQuote)]
     pub zec_mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// CHECK: derived address of pump.fun
@@ -136,13 +138,13 @@ pub struct CollectCurve<'info> {
     #[account(mut, seeds = [pump::SEED_BONDING_CURVE, mint.key().as_ref()], bump, seeds::program = pump::PUMP_ID)]
     pub bonding_curve: UncheckedAccount<'info>,
     /// CHECK: the curve's ZEC account
-    #[account(mut, address = get_associated_token_address_with_program_id(&bonding_curve.key(), &ZEC_MINT, &token_program.key()))]
+    #[account(mut, address = get_associated_token_address_with_program_id(&bonding_curve.key(), &zec_mint.key(), &token_program.key()))]
     pub associated_quote_bonding_curve: UncheckedAccount<'info>,
     /// CHECK: pump.fun's fee vault for this coin's creator, which is our authority
     #[account(mut, seeds = [pump::SEED_CREATOR_VAULT, authority.key().as_ref()], bump, seeds::program = pump::PUMP_ID)]
     pub creator_vault: UncheckedAccount<'info>,
     /// CHECK: that vault's ZEC account
-    #[account(mut, address = get_associated_token_address_with_program_id(&creator_vault.key(), &ZEC_MINT, &token_program.key()))]
+    #[account(mut, address = get_associated_token_address_with_program_id(&creator_vault.key(), &zec_mint.key(), &token_program.key()))]
     pub creator_vault_ata: UncheckedAccount<'info>,
     /// CHECK: derived address of pump.fun
     #[account(seeds = [pump::SEED_EVENT_AUTHORITY], bump, seeds::program = pump::PUMP_ID)]
@@ -151,7 +153,8 @@ pub struct CollectCurve<'info> {
     #[account(address = pump::PUMP_ID)]
     pub pump_program: UncheckedAccount<'info>,
 
-    pub token_program: Program<'info, Token>,
+    #[account(address = coin.quote_program() @ BurrpadError::WrongQuote)]
+    pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
@@ -214,7 +217,7 @@ pub struct CollectPool<'info> {
         associated_token::token_program = token_program
     )]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(address = ZEC_MINT)]
+    #[account(address = coin.quote_mint() @ BurrpadError::WrongQuote)]
     pub zec_mint: Box<InterfaceAccount<'info, Mint>>,
 
     /// CHECK: derived address of PumpSwap
@@ -226,19 +229,19 @@ pub struct CollectPool<'info> {
     /// CHECK: the coin's one pool made by graduation, by derived address
     #[account(
         mut,
-        seeds = [pump::SEED_AMM_POOL, &pump::CANONICAL_POOL_INDEX, pool_authority.key().as_ref(), mint.key().as_ref(), ZEC_MINT.as_ref()],
+        seeds = [pump::SEED_AMM_POOL, &pump::CANONICAL_POOL_INDEX, pool_authority.key().as_ref(), mint.key().as_ref(), zec_mint.key().as_ref()],
         bump,
         seeds::program = pump::PUMP_AMM_ID
     )]
     pub pool: UncheckedAccount<'info>,
     /// CHECK: the pool's ZEC account
-    #[account(mut, address = get_associated_token_address_with_program_id(&pool.key(), &ZEC_MINT, &token_program.key()))]
+    #[account(mut, address = get_associated_token_address_with_program_id(&pool.key(), &zec_mint.key(), &token_program.key()))]
     pub pool_quote_token_account: UncheckedAccount<'info>,
     /// CHECK: PumpSwap's fee vault owner for this coin's creator, which is our authority
     #[account(seeds = [pump::SEED_AMM_CREATOR_VAULT, authority.key().as_ref()], bump, seeds::program = pump::PUMP_AMM_ID)]
     pub amm_creator_vault_authority: UncheckedAccount<'info>,
     /// CHECK: that vault's ZEC account
-    #[account(mut, address = get_associated_token_address_with_program_id(&amm_creator_vault_authority.key(), &ZEC_MINT, &token_program.key()))]
+    #[account(mut, address = get_associated_token_address_with_program_id(&amm_creator_vault_authority.key(), &zec_mint.key(), &token_program.key()))]
     pub amm_creator_vault_ata: UncheckedAccount<'info>,
     /// CHECK: derived address of PumpSwap
     #[account(seeds = [pump::SEED_EVENT_AUTHORITY], bump, seeds::program = pump::PUMP_AMM_ID)]
@@ -247,7 +250,8 @@ pub struct CollectPool<'info> {
     #[account(address = pump::PUMP_AMM_ID)]
     pub amm_program: UncheckedAccount<'info>,
 
-    pub token_program: Program<'info, Token>,
+    #[account(address = coin.quote_program() @ BurrpadError::WrongQuote)]
+    pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }

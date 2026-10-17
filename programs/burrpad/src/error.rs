@@ -102,4 +102,8 @@ pub enum BurrpadError {
     NotAPlainWallet,
     #[msg("The new wallet holds more than the watched wallet let go of since the last record")]
     NotTraced,
+    #[msg("The coin's quote coin (ZEC or $BURR), or its token program, does not match")]
+    WrongQuote,
+    #[msg("Not available for a coin priced in this quote coin")]
+    NotForThisQuote,
 }

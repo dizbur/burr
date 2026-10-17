@@ -41,6 +41,23 @@ pub const COIN_DECIMALS: u8 = 6;
 pub const EXT_METADATA_POINTER: u16 = 18;
 pub const EXT_TOKEN_METADATA: u16 = 19;
 pub const ZEC_DECIMALS: u8 = 8;
+/// $BURR, like every pump.fun coin: a Token-2022 coin with 6 decimals.
+pub const BURR_DECIMALS: u8 = 6;
+
+/// What a coin is priced in, and so what its fee is paid in and its pots hold.
+/// Written once at launch. Every coin launched before this existed reads 0: ZEC.
+pub const QUOTE_ZEC: u8 = 0;
+/// Priced in $BURR: pump.fun's "coin priced in another pump coin", one hop from ZEC.
+pub const QUOTE_BURR: u8 = 1;
+
+/// The mint, its token program and its decimals for a quote; `None` for one not defined.
+pub fn quote_parts(quote: u8) -> Option<(Pubkey, Pubkey, u8)> {
+    match quote {
+        QUOTE_ZEC => Some((ZEC_MINT, anchor_spl::token::ID, ZEC_DECIMALS)),
+        QUOTE_BURR => Some((BURR_MINT, anchor_spl::token_2022::ID, BURR_DECIMALS)),
+        _ => None,
+    }
+}
 
 // Hook settings, copied into each coin's record at launch.
 /// Buy back and burn: seconds between calls.

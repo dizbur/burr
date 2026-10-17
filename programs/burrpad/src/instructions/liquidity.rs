@@ -136,6 +136,7 @@ pub struct AddLiquidity<'info> {
 pub fn handle_add_liquidity(ctx: Context<AddLiquidity>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let mint_key = ctx.accounts.mint.key();
+    require!(ctx.accounts.coin.quote == QUOTE_ZEC, BurrpadError::NotForThisQuote);
     require!(ctx.accounts.coin.liquidity_share > 0, BurrpadError::HookNotChosen);
     require!(ctx.accounts.ledger.liquidity.pot > 0, BurrpadError::NothingToBurn);
     // One wait with the coin's own burn: the two buy on the same pool.
@@ -148,6 +149,7 @@ pub fn handle_add_liquidity(ctx: Context<AddLiquidity>) -> Result<()> {
     let quote_account_key = ctx.accounts.pool_quote_token_account.key();
     let expect = PoolExpect {
         mint: &mint_key,
+        quote_mint: &ZEC_MINT,
         pool_authority: &pool_authority_key,
         base_account: &base_account_key,
         quote_account: &quote_account_key,
@@ -349,6 +351,7 @@ pub fn handle_add_liquidity(ctx: Context<AddLiquidity>) -> Result<()> {
         burner_seeds,
         coins_left,
         zec_left,
+        ZEC_DECIMALS,
     )?;
 
     // The record moves, and the next call waits, in proportion to the part of

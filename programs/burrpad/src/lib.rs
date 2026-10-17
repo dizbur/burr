@@ -93,7 +93,15 @@ pub mod burrpad {
 
     /// The same, with part of the hooks' share buying and burning $BURR.
     pub fn launch_v2<'info>(ctx: Context<'info, Launch<'info>>, args: LaunchArgs, burr_share: u16) -> Result<()> {
-        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, 0, PayoutChoices::default(), 0)
+        instructions::launch::handle_launch_with_extras(
+            ctx,
+            args,
+            burr_share,
+            0,
+            PayoutChoices::default(),
+            0,
+            QUOTE_ZEC,
+        )
     }
 
     /// The same, with part of the hooks' share also added to the coin's own
@@ -105,7 +113,7 @@ pub mod burrpad {
         liquidity_share: u16,
         payout: PayoutChoices,
     ) -> Result<()> {
-        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, liquidity_share, payout, 0)
+        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, liquidity_share, payout, 0, QUOTE_ZEC)
     }
 
     /// The same, with part of the hooks' share also filling the shadow-burn pot.
@@ -117,7 +125,28 @@ pub mod burrpad {
         payout: PayoutChoices,
         shadow_share: u16,
     ) -> Result<()> {
-        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, liquidity_share, payout, shadow_share)
+        instructions::launch::handle_launch_with_extras(
+            ctx,
+            args,
+            burr_share,
+            liquidity_share,
+            payout,
+            shadow_share,
+            QUOTE_ZEC,
+        )
+    }
+
+    /// A launch priced in `quote`: ZEC, or $BURR (`QUOTE_BURR`). A coin priced in
+    /// $BURR may choose the four hooks and the $BURR share only, and passes
+    /// $BURR's curve, its pool and the pool's two vaults first after the listed
+    /// accounts (then, optionally, the launcher's coin account).
+    pub fn launch_v5<'info>(
+        ctx: Context<'info, Launch<'info>>,
+        args: LaunchArgs,
+        burr_share: u16,
+        quote: u8,
+    ) -> Result<()> {
+        instructions::launch::handle_launch_with_extras(ctx, args, burr_share, 0, PayoutChoices::default(), 0, quote)
     }
 
     pub fn split(ctx: Context<SplitOnly>) -> Result<()> {
@@ -154,6 +183,11 @@ pub mod burrpad {
     /// Buys $BURR with the coin's sixth pot and burns it.
     pub fn burn_burr(ctx: Context<BurnBurr>) -> Result<()> {
         instructions::burr::handle_burn_burr(ctx)
+    }
+
+    /// For a coin priced in $BURR: burns its sixth pot, already $BURR, as it is.
+    pub fn burn_burr_pot(ctx: Context<BurnBurrPot>) -> Result<()> {
+        instructions::burr::handle_burn_burr_pot(ctx)
     }
 
     /// Sets or changes a coin's shadow-burn watch. Only its launcher.

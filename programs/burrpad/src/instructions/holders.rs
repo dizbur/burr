@@ -28,8 +28,7 @@ use crate::ops;
 use crate::state::{Coin, Config, Ledger};
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::token::Token;
-use anchor_spl::token_interface::{Mint, TokenAccount};
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 #[derive(Accounts)]
 pub struct ReleaseHolderRewards<'info> {
@@ -55,12 +54,13 @@ pub struct ReleaseHolderRewards<'info> {
         associated_token::token_program = token_program
     )]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(address = ZEC_MINT)]
+    #[account(address = coin.quote_mint() @ BurrpadError::WrongQuote)]
     pub zec_mint: Box<InterfaceAccount<'info, Mint>>,
     /// CHECK: the rewards wallet's standard ZEC account, checked by address in the handler and made if missing
     #[account(mut)]
     pub rewards_zec: UncheckedAccount<'info>,
-    pub token_program: Program<'info, Token>,
+    #[account(address = coin.quote_program() @ BurrpadError::WrongQuote)]
+    pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
@@ -127,6 +127,7 @@ pub fn handle_release_holder_rewards(
         &a.coin.mint,
         a.coin.authority_bump,
         amount,
+        a.coin.quote_decimals(),
     )?;
     emit!(HolderRewardsReleased {
         mint: a.coin.mint,

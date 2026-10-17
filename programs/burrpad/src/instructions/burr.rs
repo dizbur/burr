@@ -124,6 +124,8 @@ pub struct BurnBurr<'info> {
 }
 
 pub fn handle_burn_burr(ctx: Context<BurnBurr>) -> Result<()> {
+    // A coin priced in $BURR burns its pot as it is (`burn_burr_pot`): there is nothing to buy.
+    require!(ctx.accounts.coin.quote == QUOTE_ZEC, BurrpadError::NotForThisQuote);
     require!(ctx.accounts.coin.burr_share > 0, BurrpadError::HookNotChosen);
     require!(ctx.accounts.ledger.burr.pot > 0, BurrpadError::NothingToBurn);
     let pot = ctx.accounts.ledger.burr.pot;
@@ -161,6 +163,7 @@ pub(crate) fn burr_pool(x: &BurnBurr) -> Result<(Reserves, u64)> {
     let quote_account_key = x.pool_quote_token_account.key();
     let expect = PoolExpect {
         mint: &BURR_MINT,
+        quote_mint: &ZEC_MINT,
         pool_authority: &pool_authority_key,
         base_account: &base_account_key,
         quote_account: &quote_account_key,
@@ -307,9 +310,68 @@ pub(crate) fn burr_buy_now(x: &mut BurnBurr, spend: u64, min_out: u64) -> Result
         burner_seeds,
         burr_after,
         zec_after,
+        ZEC_DECIMALS,
     )?;
 
     x.pool_base_token_account.reload()?;
     x.pool_quote_token_account.reload()?;
     Ok(BurrBuyDone { spent, bought, burned: burr_after })
+}
+
+#[derive(Accounts)]
+pub struct BurnBurrPot<'info> {
+    /// CHECK: only its address is used, to derive the coin's accounts
+    pub mint: UncheckedAccount<'info>,
+    #[account(seeds = [SEED_COIN, mint.key().as_ref()], bump = coin.bump)]
+    pub coin: Box<Account<'info, Coin>>,
+    #[account(mut, seeds = [SEED_LEDGER, mint.key().as_ref()], bump = ledger.bump)]
+    pub ledger: Box<Account<'info, Ledger>>,
+    /// CHECK: the coin's authority, a derived address; it signs the burn
+    #[account(seeds = [SEED_AUTHORITY, mint.key().as_ref()], bump = coin.authority_bump)]
+    pub authority: UncheckedAccount<'info>,
+    /// The coin's vault, which for a coin priced in $BURR holds $BURR.
+    #[account(
+        mut,
+        associated_token::mint = burr_mint,
+        associated_token::authority = authority,
+        associated_token::token_program = token_2022_program
+    )]
+    pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
+    #[account(mut, address = BURR_MINT, mint::token_program = token_2022_program)]
+    pub burr_mint: Box<InterfaceAccount<'info, Mint>>,
+    pub token_2022_program: Program<'info, Token2022>,
+}
+
+/// Burn $BURR for a coin priced in $BURR: its fee already arrives as $BURR,
+/// so the sixth pot is burned as it is, whole, straight from the vault. No
+/// buy, no pool, no wait and nothing to trade around. Open to anyone.
+pub fn handle_burn_burr_pot(ctx: Context<BurnBurrPot>) -> Result<()> {
+    let coin = &ctx.accounts.coin;
+    require!(coin.quote == QUOTE_BURR, BurrpadError::NotForThisQuote);
+    require!(coin.burr_share > 0, BurrpadError::HookNotChosen);
+    let pot = ctx.accounts.ledger.burr.pot;
+    require!(pot > 0, BurrpadError::NothingToBurn);
+    // Booked first: the pot leaves the books before the coins leave the vault.
+    let ledger = &mut ctx.accounts.ledger;
+    ledger.burr.pot = 0;
+    ledger.accounted = ledger.accounted.checked_sub(pot).ok_or(BurrpadError::Overflow)?;
+    ledger.burr.total_spent = ledger.burr.total_spent.checked_add(pot).ok_or(BurrpadError::Overflow)?;
+    ledger.burr.total_burned = ledger.burr.total_burned.checked_add(pot).ok_or(BurrpadError::Overflow)?;
+    let a = &ctx.accounts;
+    let mint_key = a.coin.mint;
+    let seeds: &[&[u8]] = &[SEED_AUTHORITY, mint_key.as_ref(), &[a.coin.authority_bump]];
+    anchor_spl::token_interface::burn(
+        CpiContext::new_with_signer(
+            a.token_2022_program.key(),
+            anchor_spl::token_interface::Burn {
+                mint: a.burr_mint.to_account_info(),
+                from: a.vault.to_account_info(),
+                authority: a.authority.to_account_info(),
+            },
+            &[seeds],
+        ),
+        pot,
+    )?;
+    emit!(BurrBurned { mint: mint_key, spent: pot, burned: pot });
+    Ok(())
 }

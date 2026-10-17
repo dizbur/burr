@@ -87,8 +87,11 @@ pub struct Coin {
     /// Share of the hooks' part that fills the shadow-burn pot. Zero for every
     /// coin launched before this field existed.
     pub shadow_share: u16,
+    /// What the coin is priced in (`QUOTE_ZEC` or `QUOTE_BURR`). Zero, ZEC, for
+    /// every coin launched before this field existed.
+    pub quote: u8,
     /// Unused. Room for fields a later version may add without moving the account.
-    pub reserved: [u8; 53],
+    pub reserved: [u8; 52],
 }
 
 impl Coin {
@@ -98,6 +101,21 @@ impl Coin {
         } else {
             0
         }
+    }
+
+    /// The coin's quote mint: ZEC or $BURR. A record only ever holds a defined quote.
+    pub fn quote_mint(&self) -> Pubkey {
+        quote_parts(self.quote).map(|q| q.0).unwrap_or_default()
+    }
+
+    /// The token program of the coin's quote mint.
+    pub fn quote_program(&self) -> Pubkey {
+        quote_parts(self.quote).map(|q| q.1).unwrap_or_default()
+    }
+
+    /// The decimals of the coin's quote mint.
+    pub fn quote_decimals(&self) -> u8 {
+        quote_parts(self.quote).map(|q| q.2).unwrap_or_default()
     }
 }
 

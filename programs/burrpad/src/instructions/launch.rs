@@ -9,9 +9,8 @@ use crate::pump;
 use crate::state::{Coin, Config, Ledger};
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::{get_associated_token_address_with_program_id, AssociatedToken};
-use anchor_spl::token::Token;
 use anchor_spl::token_2022::Token2022;
-use anchor_spl::token_interface::{Mint, TokenAccount};
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 #[derive(AnchorSerialize, AnchorDeserialize, Clone)]
 pub struct LaunchArgs {
@@ -60,7 +59,8 @@ pub struct Launch<'info> {
     /// CHECK: the coin's authority, a derived address with nothing in it. It becomes the coin's creator on pump.fun.
     #[account(seeds = [SEED_AUTHORITY, mint.key().as_ref()], bump)]
     pub authority: UncheckedAccount<'info>,
-    /// The coin's vault: the authority's own ZEC account, where pump.fun pays the fee.
+    /// The coin's vault: the authority's own account for the coin's quote coin
+    /// (ZEC, or $BURR), where pump.fun pays the fee.
     #[account(
         init_if_needed,
         payer = payer,
@@ -69,7 +69,9 @@ pub struct Launch<'info> {
         associated_token::token_program = token_program
     )]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(address = ZEC_MINT)]
+    /// The quote mint the coin is priced in: ZEC, or $BURR. Checked against the launch's choice.
+    #[account(constraint = quote_parts(QUOTE_ZEC).map(|q| q.0) == Some(zec_mint.key())
+        || quote_parts(QUOTE_BURR).map(|q| q.0) == Some(zec_mint.key()) @ BurrpadError::WrongQuote)]
     pub zec_mint: Box<InterfaceAccount<'info, Mint>>,
 
     // pump.fun's accounts, each pinned to its derived address.
@@ -103,8 +105,8 @@ pub struct Launch<'info> {
     /// CHECK: derived address of pump.fun
     #[account(seeds = [pump::SEED_EVENT_AUTHORITY], bump, seeds::program = pump::PUMP_ID)]
     pub pump_event_authority: UncheckedAccount<'info>,
-    /// CHECK: the curve's ZEC account
-    #[account(mut, address = get_associated_token_address_with_program_id(&bonding_curve.key(), &ZEC_MINT, &token_program.key()))]
+    /// CHECK: the curve's account for the quote coin
+    #[account(mut, address = get_associated_token_address_with_program_id(&bonding_curve.key(), &zec_mint.key(), &token_program.key()))]
     pub associated_quote_bonding_curve: UncheckedAccount<'info>,
     /// CHECK: derived address of pump.fun: its list of quote coins
     #[account(seeds = [pump::SEED_QUOTE_CONTROL], bump, seeds::program = pump::PUMP_ID)]
@@ -113,14 +115,15 @@ pub struct Launch<'info> {
     #[account(address = pump::PUMP_ID)]
     pub pump_program: UncheckedAccount<'info>,
 
-    pub token_program: Program<'info, Token>,
+    /// The quote mint's token program: Token for ZEC, Token-2022 for $BURR. Checked against the launch's choice.
+    pub token_program: Interface<'info, TokenInterface>,
     pub token_2022_program: Program<'info, Token2022>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
 
 pub fn handle_launch<'info>(ctx: Context<'info, Launch<'info>>, args: LaunchArgs) -> Result<()> {
-    handle_launch_with_extras(ctx, args, 0, 0, PayoutChoices::default(), 0)
+    handle_launch_with_extras(ctx, args, 0, 0, PayoutChoices::default(), 0, QUOTE_ZEC)
 }
 
 /// The payout choices made at launch, recorded in the coin's record. Paid by
@@ -137,7 +140,10 @@ pub struct PayoutChoices {
 /// A launch whose fee may also buy and burn $BURR and add liquidity to the
 /// coin's own pool: `burr_share` and `liquidity_share` count with the four
 /// hooks' shares, and all six add to 10,000. `payout_options` records the
-/// payout choices (`PAYOUT_*`) made at launch.
+/// payout choices (`PAYOUT_*`) made at launch. `quote` is what the coin is
+/// priced in: ZEC, or $BURR, for which only the four hooks and the $BURR
+/// share may be chosen, and $BURR's curve, pool and its two vaults come first
+/// after the listed accounts.
 pub fn handle_launch_with_extras<'info>(
     ctx: Context<'info, Launch<'info>>,
     args: LaunchArgs,
@@ -145,10 +151,51 @@ pub fn handle_launch_with_extras<'info>(
     liquidity_share: u16,
     payout: PayoutChoices,
     shadow_share: u16,
+    quote: u8,
 ) -> Result<()> {
     let payout_options = payout.options;
     let a = &ctx.accounts;
     let cfg = &a.config;
+
+    // 0. The quote coin, and the accounts that go with it.
+    let (quote_mint, quote_program, _) = quote_parts(quote).ok_or(BurrpadError::WrongQuote)?;
+    require_keys_eq!(a.zec_mint.key(), quote_mint, BurrpadError::WrongQuote);
+    require_keys_eq!(a.token_program.key(), quote_program, BurrpadError::WrongQuote);
+    // A coin priced in $BURR: the four hooks and the $BURR share for now, and
+    // no private creator payouts (they are paid out in ZEC on Zcash).
+    let mut rest = ctx.remaining_accounts;
+    let mut quote_extra: &[AccountInfo<'info>] = &[];
+    if quote == QUOTE_BURR {
+        require!(liquidity_share == 0 && shadow_share == 0 && payout_options == 0, BurrpadError::NotForThisQuote);
+        // pump.fun prices a coin in another pump coin from that coin's own
+        // curve and, once it has graduated, its pool: $BURR's.
+        require!(rest.len() >= 4, BurrpadError::WrongPumpAccount);
+        let (burr_curve, _) =
+            Pubkey::find_program_address(&[pump::SEED_BONDING_CURVE, BURR_MINT.as_ref()], &pump::PUMP_ID);
+        let (burr_pool_authority, _) =
+            Pubkey::find_program_address(&[pump::SEED_POOL_AUTHORITY, BURR_MINT.as_ref()], &pump::PUMP_ID);
+        let (burr_pool, _) = Pubkey::find_program_address(
+            &[
+                pump::SEED_AMM_POOL,
+                &pump::CANONICAL_POOL_INDEX,
+                burr_pool_authority.as_ref(),
+                BURR_MINT.as_ref(),
+                ZEC_MINT.as_ref(),
+            ],
+            &pump::PUMP_AMM_ID,
+        );
+        let expected = [
+            burr_curve,
+            burr_pool,
+            get_associated_token_address_with_program_id(&burr_pool, &BURR_MINT, &anchor_spl::token_2022::ID),
+            get_associated_token_address_with_program_id(&burr_pool, &ZEC_MINT, &anchor_spl::token::ID),
+        ];
+        for (acc, want) in rest[..4].iter().zip(expected.iter()) {
+            require_keys_eq!(acc.key(), *want, BurrpadError::WrongPumpAccount);
+        }
+        quote_extra = &rest[..4];
+        rest = &rest[4..];
+    }
 
     // 1. Checks before anything is created.
     require!(!cfg.launches_paused, BurrpadError::LaunchesPaused);
@@ -240,6 +287,7 @@ pub fn handle_launch_with_extras<'info>(
             associated_quote_bonding_curve: &a.associated_quote_bonding_curve.to_account_info(),
             quote_token_program: &a.token_program.to_account_info(),
             quote_control: &a.quote_control.to_account_info(),
+            quote_extra,
         },
         &args.name,
         &args.symbol,
@@ -252,7 +300,7 @@ pub fn handle_launch_with_extras<'info>(
     let curve = pump::read_curve(&a.bonding_curve.to_account_info())?;
     require!(
         curve.creator == authority_key
-            && curve.quote_mint == ZEC_MINT
+            && curve.quote_mint == quote_mint
             && curve.creator_fee_bps == args.fee_bps as u64
             && !curve.can_edit_creator_fee
             && !curve.is_holder_reward
@@ -282,7 +330,7 @@ pub fn handle_launch_with_extras<'info>(
     // The launcher's own coin account, made here when it is passed as one more
     // account after the listed ones. A launch with a first buy then needs no
     // instruction of its own for it, which leaves room in the transaction.
-    if let Some(buyer) = ctx.remaining_accounts.first() {
+    if let Some(buyer) = rest.first() {
         let own = get_associated_token_address_with_program_id(&a.payer.key(), &mint_key, &a.token_2022_program.key());
         require_keys_eq!(buyer.key(), own, BurrpadError::WrongBuyerAccount);
         anchor_spl::associated_token::create_idempotent(CpiContext::new(
@@ -316,6 +364,7 @@ pub fn handle_launch_with_extras<'info>(
     coin.burr_share = burr_share;
     coin.liquidity_share = liquidity_share;
     coin.shadow_share = shadow_share;
+    coin.quote = quote;
     coin.payout_options = payout_options;
     coin.long_holder_step_bps = step;
     coin.long_holder_max_bps = most;

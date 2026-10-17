@@ -265,7 +265,7 @@ fn put_str(v: &mut Vec<u8>, s: &str) {
     v.extend_from_slice(s.as_bytes());
 }
 
-/// Accounts of `create_v2` for a ZEC-priced coin.
+/// Accounts of `create_v2`, for a coin priced in ZEC or in $BURR.
 pub struct CreateV2<'a, 'info> {
     pub mint: &'a AccountInfo<'info>,
     pub mint_authority: &'a AccountInfo<'info>,
@@ -287,6 +287,10 @@ pub struct CreateV2<'a, 'info> {
     pub associated_quote_bonding_curve: &'a AccountInfo<'info>,
     pub quote_token_program: &'a AccountInfo<'info>,
     pub quote_control: &'a AccountInfo<'info>,
+    /// For a coin priced in another pump coin ($BURR): that coin's curve, its
+    /// pool and the pool's two vaults, which pump.fun prices the new curve from.
+    /// Empty for ZEC.
+    pub quote_extra: &'a [AccountInfo<'info>],
 }
 
 /// Creates the coin on pump.fun. Mayhem, cashback and holder-rewards are
@@ -345,6 +349,10 @@ pub fn create_v2(a: CreateV2, name: &str, symbol: &str, uri: &str, creator: &Pub
         a.quote_token_program.clone(),
         a.quote_control.clone(),
     ];
+    let mut metas = metas;
+    metas.extend(a.quote_extra.iter().map(ro));
+    let mut infos = infos.to_vec();
+    infos.extend(a.quote_extra.iter().cloned());
     call(a.pump_program, &PUMP_ID, metas, &infos, data, &[])
 }
 

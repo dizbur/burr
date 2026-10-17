@@ -8,8 +8,7 @@ use crate::ops;
 use crate::state::{Coin, Ledger, Payee};
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::AssociatedToken;
-use anchor_spl::token::Token;
-use anchor_spl::token_interface::{Mint, TokenAccount};
+use anchor_spl::token_interface::{Mint, TokenAccount, TokenInterface};
 
 #[derive(Accounts)]
 #[instruction(payee: Payee)]
@@ -33,7 +32,7 @@ pub struct PayOut<'info> {
         associated_token::token_program = token_program
     )]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(address = ZEC_MINT)]
+    #[account(address = coin.quote_mint() @ BurrpadError::WrongQuote)]
     pub zec_mint: Box<InterfaceAccount<'info, Mint>>,
     /// CHECK: must be the receiver written in the coin's record for this pot
     #[account(address = payee.receiver(&coin) @ BurrpadError::WrongReceiver)]
@@ -41,7 +40,8 @@ pub struct PayOut<'info> {
     /// CHECK: the receiver's standard ZEC account, checked by address in the handler and made if missing
     #[account(mut)]
     pub receiver_zec: UncheckedAccount<'info>,
-    pub token_program: Program<'info, Token>,
+    #[account(address = coin.quote_program() @ BurrpadError::WrongQuote)]
+    pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
@@ -67,6 +67,7 @@ pub fn handle_pay_out(ctx: Context<PayOut>, payee: Payee) -> Result<()> {
         &a.coin.mint,
         a.coin.authority_bump,
         amount,
+        a.coin.quote_decimals(),
     )?;
     emit!(PaidOut { mint: a.coin.mint, pot: sink as u8, receiver: a.receiver.key(), amount });
     Ok(())

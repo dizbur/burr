@@ -16,9 +16,8 @@ use crate::pump;
 use crate::state::{Coin, Ledger};
 use anchor_lang::prelude::*;
 use anchor_spl::associated_token::{get_associated_token_address_with_program_id, AssociatedToken};
-use anchor_spl::token::Token;
 use anchor_spl::token_2022::Token2022;
-use anchor_spl::token_interface::{self, Burn, Mint, TokenAccount, TransferChecked};
+use anchor_spl::token_interface::{self, Burn, Mint, TokenAccount, TokenInterface, TransferChecked};
 
 /// Decides how much to buy now, and the fewest coins to accept. It no longer
 /// returns `None` (that was the old price check refusing); the callers' branch
@@ -87,7 +86,7 @@ pub struct BurnCurve<'info> {
         associated_token::token_program = token_program
     )]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(address = ZEC_MINT)]
+    #[account(address = coin.quote_mint() @ BurrpadError::WrongQuote)]
     pub zec_mint: Box<InterfaceAccount<'info, Mint>>,
     /// CHECK: the coin's burner, a derived address that makes the trade
     #[account(mut, seeds = [SEED_BURNER, mint.key().as_ref()], bump = coin.burner_bump)]
@@ -119,7 +118,7 @@ pub struct BurnCurve<'info> {
     #[account(mut, address = get_associated_token_address_with_program_id(&bonding_curve.key(), &mint.key(), &token_2022_program.key()))]
     pub associated_base_bonding_curve: UncheckedAccount<'info>,
     /// CHECK: the curve's ZEC account
-    #[account(mut, address = get_associated_token_address_with_program_id(&bonding_curve.key(), &ZEC_MINT, &token_program.key()))]
+    #[account(mut, address = get_associated_token_address_with_program_id(&bonding_curve.key(), &zec_mint.key(), &token_program.key()))]
     pub associated_quote_bonding_curve: UncheckedAccount<'info>,
     /// CHECK: pump.fun's volume record for the burner
     #[account(mut, seeds = [pump::SEED_USER_VOLUME, burner.key().as_ref()], bump, seeds::program = pump::PUMP_ID)]
@@ -137,7 +136,8 @@ pub struct BurnCurve<'info> {
     #[account(address = pump::PUMP_ID)]
     pub pump_program: UncheckedAccount<'info>,
 
-    pub token_program: Program<'info, Token>,
+    #[account(address = coin.quote_program() @ BurrpadError::WrongQuote)]
+    pub token_program: Interface<'info, TokenInterface>,
     pub token_2022_program: Program<'info, Token2022>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -146,7 +146,7 @@ pub struct BurnCurve<'info> {
 pub fn handle_burn_curve(ctx: Context<BurnCurve>) -> Result<()> {
     let now = Clock::get()?.unix_timestamp;
     let curve = pump::read_curve(&ctx.accounts.bonding_curve.to_account_info())?;
-    require!(!curve.complete && curve.quote_mint == ZEC_MINT, BurrpadError::WrongVenue);
+    require!(!curve.complete && curve.quote_mint == ctx.accounts.coin.quote_mint(), BurrpadError::WrongVenue);
     let reserves = Reserves { quote: curve.virtual_quote_reserves, base: curve.virtual_token_reserves };
     let Some((spend, min_out)) =
         plan(&ctx.accounts.coin, &mut ctx.accounts.ledger, reserves, curve.creator_fee_bps, now)?
@@ -161,7 +161,7 @@ pub fn handle_burn_curve(ctx: Context<BurnCurve>) -> Result<()> {
         &pump::ACC_GLOBAL,
         pump::GLOBAL_BUYBACK_OFFSET,
         &a.buyback_fee_recipient.to_account_info(),
-        &ZEC_MINT,
+        &a.zec_mint.key(),
         &a.token_program.key(),
     )?;
     if a.user_volume.data_is_empty() {
@@ -240,6 +240,7 @@ pub fn handle_burn_curve(ctx: Context<BurnCurve>) -> Result<()> {
         burner_seeds,
         a.burner_coin.amount,
         a.burner_zec.amount,
+        a.coin.quote_decimals(),
     )?;
 
     // Record the price after our own buy as the next reference.
@@ -275,7 +276,7 @@ pub struct BurnPool<'info> {
         associated_token::token_program = token_program
     )]
     pub vault: Box<InterfaceAccount<'info, TokenAccount>>,
-    #[account(address = ZEC_MINT)]
+    #[account(address = coin.quote_mint() @ BurrpadError::WrongQuote)]
     pub zec_mint: Box<InterfaceAccount<'info, Mint>>,
     /// CHECK: the coin's burner, a derived address that makes the trade
     #[account(mut, seeds = [SEED_BURNER, mint.key().as_ref()], bump = coin.burner_bump)]
@@ -306,7 +307,7 @@ pub struct BurnPool<'info> {
     /// CHECK: the coin's one pool made by graduation, by derived address; read here
     #[account(
         mut,
-        seeds = [pump::SEED_AMM_POOL, &pump::CANONICAL_POOL_INDEX, pool_authority.key().as_ref(), mint.key().as_ref(), ZEC_MINT.as_ref()],
+        seeds = [pump::SEED_AMM_POOL, &pump::CANONICAL_POOL_INDEX, pool_authority.key().as_ref(), mint.key().as_ref(), zec_mint.key().as_ref()],
         bump,
         seeds::program = pump::PUMP_AMM_ID
     )]
@@ -341,7 +342,8 @@ pub struct BurnPool<'info> {
     #[account(address = pump::PUMP_AMM_ID)]
     pub amm_program: UncheckedAccount<'info>,
 
-    pub token_program: Program<'info, Token>,
+    #[account(address = coin.quote_program() @ BurrpadError::WrongQuote)]
+    pub token_program: Interface<'info, TokenInterface>,
     pub token_2022_program: Program<'info, Token2022>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
@@ -350,6 +352,8 @@ pub struct BurnPool<'info> {
 /// What a pool's own record must say for us to believe the figures read from it.
 pub struct PoolExpect<'a> {
     pub mint: &'a Pubkey,
+    /// The pool's quote mint: the coin's own quote, or ZEC for $BURR's pool.
+    pub quote_mint: &'a Pubkey,
     pub pool_authority: &'a Pubkey,
     pub base_account: &'a Pubkey,
     pub quote_account: &'a Pubkey,
@@ -371,7 +375,7 @@ pub fn pool_reserves(
     let p = pump::read_pool(pool)?;
     require!(
         p.base_mint == *expect.mint
-            && p.quote_mint == ZEC_MINT
+            && p.quote_mint == *expect.quote_mint
             && p.pool_creator == *expect.pool_authority
             && p.pool_base_token_account == *expect.base_account
             && p.pool_quote_token_account == *expect.quote_account,
@@ -387,8 +391,10 @@ pub fn handle_burn_pool(ctx: Context<BurnPool>) -> Result<()> {
     let pool_authority_key = ctx.accounts.pool_authority.key();
     let base_account_key = ctx.accounts.pool_base_token_account.key();
     let quote_account_key = ctx.accounts.pool_quote_token_account.key();
+    let quote_key = ctx.accounts.coin.quote_mint();
     let expect = PoolExpect {
         mint: &mint_key,
+        quote_mint: &quote_key,
         pool_authority: &pool_authority_key,
         base_account: &base_account_key,
         quote_account: &quote_account_key,
@@ -411,7 +417,7 @@ pub fn handle_burn_pool(ctx: Context<BurnPool>) -> Result<()> {
         &pump::ACC_AMM_GLOBAL_CONFIG,
         pump::AMM_GLOBAL_BUYBACK_OFFSET,
         &a.buyback_fee_recipient.to_account_info(),
-        &ZEC_MINT,
+        &a.zec_mint.key(),
         &a.token_program.key(),
     )?;
     if a.user_volume.data_is_empty() {
@@ -489,6 +495,7 @@ pub fn handle_burn_pool(ctx: Context<BurnPool>) -> Result<()> {
         burner_seeds,
         a.burner_coin.amount,
         a.burner_zec.amount,
+        a.coin.quote_decimals(),
     )?;
 
     ctx.accounts.pool_base_token_account.reload()?;
@@ -526,7 +533,17 @@ pub(crate) fn fund_burner<'info>(
     coin: &Coin,
     spend: u64,
 ) -> Result<()> {
-    ops::pay_from_vault(token_program, vault, zec_mint, burner_zec, authority, &coin.mint, coin.authority_bump, spend)
+    ops::pay_from_vault(
+        token_program,
+        vault,
+        zec_mint,
+        burner_zec,
+        authority,
+        &coin.mint,
+        coin.authority_bump,
+        spend,
+        coin.quote_decimals(),
+    )
 }
 
 /// Checks the trade by balances and books it. Returns (ZEC spent, coins to burn).
@@ -549,8 +566,8 @@ fn finish(
     Ok((spent, coin_after))
 }
 
-/// Burns every coin the burner holds and sends any ZEC it still holds back
-/// to the vault.
+/// Burns every coin the burner holds and sends any of the quote coin it
+/// still holds back to the vault. `decimals` are the quote mint's.
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn burn_and_return<'info>(
     token_2022_program: &AccountInfo<'info>,
@@ -564,6 +581,7 @@ pub(crate) fn burn_and_return<'info>(
     burner_seeds: &[&[u8]],
     coins: u64,
     zec_left: u64,
+    decimals: u8,
 ) -> Result<()> {
     if coins > 0 {
         token_interface::burn(
@@ -588,7 +606,7 @@ pub(crate) fn burn_and_return<'info>(
                 &[burner_seeds],
             ),
             zec_left,
-            ZEC_DECIMALS,
+            decimals,
         )?;
     }
     Ok(())
