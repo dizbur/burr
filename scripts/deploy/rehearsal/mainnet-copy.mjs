@@ -15,7 +15,7 @@ import {
   options, pda, PUMP, PUMP_AMM, PUMP_FEES, readAccount, SYSTEM, TOKEN, TOKEN_2022, ZEC,
 } from "../lib.mjs";
 
-const opts = options(["url", "mainnet", "stand-in", "trader", "coins", "admin-stand-in"]);
+const opts = options(["url", "mainnet", "stand-in", "trader", "coins", "admin-stand-in", "rewards-stand-in"]);
 const out = opts._[0] ?? fail("give the output folder");
 const conn = await connect(opts);
 if (!conn.isMainnet) fail("this copies from the main network; add --mainnet yes with a main-network connection");
@@ -79,6 +79,12 @@ for (let i = 0; i < wanted.length; i += 100) {
     if (opts["admin-stand-in"] === "yes" && batch[j] === configAddress(idl).toBase58()) {
       data = Buffer.from(data);
       standIn.toBuffer().copy(data, 9);
+    }
+    // With --rewards-stand-in <address>, that throwaway key becomes the rewards wallet (bytes 105 to 137), so
+    // the rehearsal can release live coins' holder pots, which only the rewards wallet may do.
+    if (opts["rewards-stand-in"] && batch[j] === configAddress(idl).toBase58()) {
+      data = Buffer.from(data);
+      address(opts["rewards-stand-in"], "--rewards-stand-in").toBuffer().copy(data, 105);
     }
     writeAccount("a" + (i + j), batch[j], info.owner.toBase58(), Math.max(info.lamports, local), data);
     copied++;

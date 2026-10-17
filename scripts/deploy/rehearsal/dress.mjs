@@ -4,15 +4,15 @@
 //   node dress.mjs <before|after> --payer <file> --coins <mint,...> --out <file> [--payout-wallet <address>]
 // With --payout-wallet (set and confirmed beforehand), "after" also runs the Liquidity upgrade's new calls.
 // When the build has the shadow burn, "after" also runs its calls on $BURR's real pool.
-import { Keypair, PublicKey } from "@solana/web3.js";
+import { Keypair, PublicKey, SystemProgram, TransactionInstruction } from "@solana/web3.js";
 import { writeFileSync } from "node:fs";
 import {
-  addLiquidityIx, BURR, burnBurrIx, burnBurrPotIx, quoteParts, coinTransferIx, followWalletIx, poolBuyIx, poolSellIx, setShadowWatchIx, shadowBurnIx, supplyOf, burnCurveIx, burnPoolIx, buyIx, clock, coinAccount, collectCurveIx, collectPoolIx, curveOf, launchIx, migrateIx, poolOf,
+  addLiquidityIx, BURR, burnBurrIx, recoverIx, releaseIx, burnBurrPotIx, quoteParts, coinTransferIx, followWalletIx, poolBuyIx, poolSellIx, setShadowWatchIx, shadowBurnIx, supplyOf, burnCurveIx, burnPoolIx, buyIx, clock, coinAccount, collectCurveIx, collectPoolIx, curveOf, launchIx, migrateIx, poolOf,
   makeTokenAccountIx, payOutIx, sellIx, splitIx, tokenBalance, zecAccount, zecTransferIx,
 } from "../coin.mjs";
 import { address, ata, coinAddresses, connect, fail, loadIdl, loadKey, loadTable, need, options, pda, PUMP_AMM, readAccount, readOut, send, TOKEN, TOKEN_2022, ZEC } from "../lib.mjs";
 
-const opts = options(["url", "payer", "coins", "out", "payout-wallet"]);
+const opts = options(["url", "payer", "coins", "out", "payout-wallet", "rewards-key"]);
 const phase = opts._[0];
 if (!["before", "after"].includes(phase)) fail("say: before or after");
 const conn = await connect(opts);
@@ -61,6 +61,21 @@ for (const mint of mints) {
   await step("fee in + split", mint, [zecTransferIx(zecAccount(me), coinAddresses(idl, mint).vault, me, 200_000_000n), splitIx(idl, mint)]);
   for (const [payee, receiver] of [["Platform", coin.platform_receiver], ["Creator", coin.creator_receiver], ["Give", coin.give_receiver]]) {
     if (receiver !== PublicKey.default.toBase58()) await step(`pay_out ${payee}`, mint, [payOutIx(idl, mint, me, payee, new PublicKey(receiver))]);
+  }
+  // recover: a side ZEC account of the coin's authority (anyone can make one), filled, then brought home and split.
+  const stray = Keypair.generate();
+  const init = new TransactionInstruction({ programId: TOKEN, data: Buffer.concat([Buffer.from([18]), coinAddresses(idl, mint).authority.toBuffer()]),
+    keys: [{ pubkey: stray.publicKey, isSigner: false, isWritable: true }, { pubkey: ZEC, isSigner: false, isWritable: false }] });
+  await step("recover a side ZEC account", mint, [
+    SystemProgram.createAccount({ fromPubkey: me, newAccountPubkey: stray.publicKey, lamports: 2_039_280, space: 165, programId: TOKEN }),
+    init, zecTransferIx(zecAccount(me), stray.publicKey, me, 50_000_000n), recoverIx(idl, mint, stray.publicKey),
+  ], [payer, stray]);
+  // The holder pot, released by the rewards wallet (a stand-in on this copy) for a named snapshot.
+  if (opts["rewards-key"] && Number(coin.shares[3]) > 0) {
+    const rewards = loadKey(opts["rewards-key"], "--rewards-key");
+    const l = await readAccount(conn, idl, "Ledger", coinAddresses(idl, mint).ledger);
+    const slot = BigInt(await conn.getSlot("confirmed"));
+    await step("release_holder_rewards (the whole pot)", mint, [releaseIx(idl, mint, rewards.publicKey, BigInt(l.pots[4]), slot, Buffer.alloc(32, 7))], [rewards]);
   }
   await waitForBurn(mint);
   await step(graduated ? "burn_pool" : "burn_curve", mint, [graduated ? burnPoolIx(idl, mint, me) : burnCurveIx(idl, mint, me)]);

@@ -283,6 +283,16 @@ export const followWalletIx = (idl, mint, keeper, from, sender, wallet) => instr
 const accountsByName = (idl, name, ix) =>
   Object.fromEntries(idl.instructions.find((x) => x.name === name).accounts.map((a, i) => [a.name, ix.keys[i].pubkey]));
 
+// Brings home the quote coin that sits in another account of the coin's authority (`stray`), and splits it.
+export function recoverIx(idl, mint, stray, quote = 0) {
+  const q = quoteParts(quote);
+  const a = coinAddresses(idl, mint);
+  return instruction(idl, "recover", {
+    mint, coin: a.coin, ledger: a.ledger, authority: a.authority, vault: ata(a.authority, q.mint, q.program), zec_mint: q.mint, stray,
+    token_program: q.program,
+  });
+}
+
 // `amount` of the holder pot, for the snapshot taken at `slot` whose fingerprint is `hash` (32 bytes).
 export function releaseIx(idl, mint, rewardsWallet, amount, slot, hash, quote = 0) {
   const q = quoteParts(quote);
