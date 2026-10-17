@@ -410,3 +410,75 @@ fn burn_burr_pot_takes_only_this_coins_record_ledger_vault_and_burr() {
     w.assert_sound(&mint);
     w.assert_sound(&other);
 }
+
+/// A made-up coin of the given token program, nobody able to mint it, with `supply` units.
+fn third_mint(w: &mut World, program: &Pubkey, supply: u64) -> Pubkey {
+    let key = Keypair::new().pubkey();
+    let mut d = vec![0u8; 82];
+    d[36..44].copy_from_slice(&supply.to_le_bytes());
+    d[44] = 6;
+    d[45] = 1; // initialised
+    let lamports = w.b.svm.minimum_balance_for_rent_exemption(82);
+    let a = solana_account::Account { lamports, data: d, owner: *program, executable: false, rent_epoch: u64::MAX };
+    w.b.svm.set_account(key, a).unwrap();
+    key
+}
+
+#[test]
+fn a_third_coin_in_the_place_of_the_quote_coin_is_refused_everywhere() {
+    // Someone makes a worthless coin on the same token program as a coin's quote, makes the coin's
+    // authority an account for it, and fills it. Only the quote mint check stands in the way.
+    let (mut w, burr_coin, _) = traded();
+    let zec_coin = w.launch(&LaunchPlan::default());
+    w.b.give_zec(&kit::authority(&zec_coin), 100_000_000);
+    assert!(w.split(&zec_coin).is_ok());
+    let payer = w.b.payer.pubkey();
+    let wallet = w.rewards_wallet.insecure_clone();
+    for (m, program) in [(zec_coin, TOKEN), (burr_coin, TOKEN_2022)] {
+        let fake = third_mint(&mut w, &program, 1 << 50);
+        let auth = kit::authority(&m);
+        let fake_vault = ata(&auth, &fake, &program);
+        w.b.write_token_account(fake_vault, &fake, &auth, 1 << 40, &program);
+        let stray = Keypair::new().pubkey();
+        w.b.write_token_account(stray, &fake, &auth, 1 << 40, &program);
+        let before = (w.ledger(&m), w.vault_balance(&m));
+        let mut split = burrpad::accounts::SplitOnly {
+            mint: m,
+            coin: kit::coin(&m),
+            ledger: kit::ledger(&m),
+            authority: auth,
+            vault: fake_vault,
+            zec_mint: fake,
+            token_program: program,
+        };
+        let r = w.b.send(&[kit::raw(split.clone(), burrpad::instruction::Split {})], &[]);
+        assert_eq!(custom_code(&r), Some(err(E::WrongQuote)), "split\n{}", logs(&r));
+        split.vault = w.vault_of(&m);
+        let mut pay = w.pay_out_accounts(&payer, &m, &w.coin(&m).creator_receiver);
+        pay.zec_mint = fake;
+        pay.vault = fake_vault;
+        pay.receiver_zec = ata(&w.coin(&m).creator_receiver, &fake, &program);
+        let r = w.b.send(&[kit::raw(pay, burrpad::instruction::PayOut { payee: Payee::Creator })], &[]);
+        assert_eq!(custom_code(&r), Some(err(E::WrongQuote)), "pay out\n{}", logs(&r));
+        let mut rel = w.release_accounts(&wallet.pubkey(), &m);
+        rel.zec_mint = fake;
+        rel.vault = fake_vault;
+        rel.rewards_zec = ata(&wallet.pubkey(), &fake, &program);
+        let i = kit::raw(
+            rel,
+            burrpad::instruction::ReleaseHolderRewards { amount: 1, snapshot_slot: 1, snapshot_hash: [7; 32] },
+        );
+        let r = w.b.send_as(Some(&wallet), &[i], &[]);
+        assert_eq!(custom_code(&r), Some(err(E::WrongQuote)), "release\n{}", logs(&r));
+        let mut rec = w.recover_accounts(&m, &stray);
+        rec.zec_mint = fake;
+        rec.vault = fake_vault;
+        let r = w.b.send(&[kit::raw(rec, burrpad::instruction::Recover {})], &[]);
+        assert_eq!(custom_code(&r), Some(err(E::WrongQuote)), "recover\n{}", logs(&r));
+        let after = (w.ledger(&m), w.vault_balance(&m));
+        assert_eq!(
+            (after.0.total_split, after.0.accounted, after.1),
+            (before.0.total_split, before.0.accounted, before.1)
+        );
+    }
+}

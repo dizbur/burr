@@ -856,8 +856,18 @@ def auto_entries():
                 old_attr = body[am.start():attr_end]
                 a, b = body_start + am.start(), body_start + attr_end
                 # A few are held by a sharper test than the general substitution one.
+                third = "t23_burr_pairs::a_third_coin_in_the_place_of_the_quote_coin_is_refused_everywhere"
+                swap = "t23_burr_pairs::a_burr_coin_s_accounts_cannot_be_swapped_for_zec_ones_or_the_other_way"
                 test_for = {
                     ("PayOut", "vault"): "t15_random_sequences::the_books_close_after_every_step_of_any_sequence",
+                    # The coin's quote mint: only it stops a third coin on the same token program.
+                    ("SplitOnly", "zec_mint"): third,
+                    ("PayOut", "zec_mint"): third,
+                    ("ReleaseHolderRewards", "zec_mint"): third,
+                    ("Recover", "zec_mint"): third,
+                    # The coin's quote token program: swapped for the other quote coin's.
+                    ("SplitOnly", "token_program"): swap,
+                    ("PayOut", "token_program"): swap,
                 }.get((struct, field), test)
                 out.append(dict(
                     id=f"X.{struct}.{field}", what=f"{struct}: `{field}` must be the right account",
