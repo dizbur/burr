@@ -55,7 +55,11 @@ pub fn pool_authority(mint: &Pubkey) -> Pubkey {
 }
 /// The one pool pump.fun makes for a coin when it graduates.
 pub fn pool(mint: &Pubkey) -> Pubkey {
-    pda(&[b"pool", &[0, 0], pool_authority(mint).as_ref(), mint.as_ref(), ZEC.as_ref()], &PUMP_AMM)
+    pool_with(mint, &ZEC)
+}
+/// A coin's pool, for a coin priced in `quote` (ZEC, or $BURR).
+pub fn pool_with(mint: &Pubkey, quote: &Pubkey) -> Pubkey {
+    pda(&[b"pool", &[0, 0], pool_authority(mint).as_ref(), mint.as_ref(), quote.as_ref()], &PUMP_AMM)
 }
 pub fn amm_global_config() -> Pubkey {
     pda(&[b"global_config"], &PUMP_AMM)
@@ -139,22 +143,26 @@ pub fn create_ata(payer: &Pubkey, owner: &Pubkey, mint: &Pubkey, token_program: 
 
 /// The 17 accounts of pump.fun's v3 curve trades.
 pub fn trade_v3_accounts(mint: &Pubkey, user: &Pubkey) -> Vec<AccountMeta> {
+    trade_v3_accounts_q(mint, user, (ZEC, TOKEN))
+}
+
+pub fn trade_v3_accounts_q(mint: &Pubkey, user: &Pubkey, q: (Pubkey, Pubkey)) -> Vec<AccountMeta> {
     let c = curve(mint);
     vec![
         ro(global()),
         ro(*mint),
-        ro(ZEC),
+        ro(q.0),
         ro(TOKEN_2022),
-        ro(TOKEN),
+        ro(q.1),
         rw(c),
         rw(ata(&c, mint, &TOKEN_2022)),
-        rw(ata(&c, &ZEC, &TOKEN)),
+        rw(ata(&c, &q.0, &q.1)),
         rws(*user),
         rw(ata(user, mint, &TOKEN_2022)),
-        rw(ata(user, &ZEC, &TOKEN)),
+        rw(ata(user, &q.0, &q.1)),
         rw(user_volume(user)),
         ro(fee_config()),
-        rw(ata(&BUYBACK, &ZEC, &TOKEN)),
+        rw(ata(&BUYBACK, &q.0, &q.1)),
         ro(SYSTEM),
         ro(event_authority()),
         ro(PUMP),
@@ -162,18 +170,32 @@ pub fn trade_v3_accounts(mint: &Pubkey, user: &Pubkey) -> Vec<AccountMeta> {
 }
 
 pub fn buy_exact_quote_in_v3(mint: &Pubkey, user: &Pubkey, quote_in: u64, min_out: u64) -> Instruction {
+    buy_exact_quote_in_v3_q(mint, user, quote_in, min_out, (ZEC, TOKEN))
+}
+
+pub fn buy_exact_quote_in_v3_q(
+    mint: &Pubkey,
+    user: &Pubkey,
+    quote_in: u64,
+    min_out: u64,
+    q: (Pubkey, Pubkey),
+) -> Instruction {
     let mut data = disc("buy_exact_quote_in_v3").to_vec();
     data.extend_from_slice(&quote_in.to_le_bytes());
     data.extend_from_slice(&min_out.to_le_bytes());
     data.push(0);
-    Instruction { program_id: PUMP, accounts: trade_v3_accounts(mint, user), data }
+    Instruction { program_id: PUMP, accounts: trade_v3_accounts_q(mint, user, q), data }
 }
 
 pub fn sell_v3(mint: &Pubkey, user: &Pubkey, amount: u64, min_out: u64) -> Instruction {
+    sell_v3_q(mint, user, amount, min_out, (ZEC, TOKEN))
+}
+
+pub fn sell_v3_q(mint: &Pubkey, user: &Pubkey, amount: u64, min_out: u64, q: (Pubkey, Pubkey)) -> Instruction {
     let mut data = disc("sell_v3").to_vec();
     data.extend_from_slice(&amount.to_le_bytes());
     data.extend_from_slice(&min_out.to_le_bytes());
-    Instruction { program_id: PUMP, accounts: trade_v3_accounts(mint, user), data }
+    Instruction { program_id: PUMP, accounts: trade_v3_accounts_q(mint, user, q), data }
 }
 
 pub fn sweep_creator_fee(mint: &Pubkey, payer: &Pubkey, creator: &Pubkey) -> Instruction {
@@ -264,9 +286,13 @@ pub const WITHDRAW_AUTHORITY: Pubkey = pubkey!("39azUYFWPz3VHgKCf3VChUwbpURdCHRx
 
 /// pump.fun's `migrate_v2`: moves a completed curve to its PumpSwap pool. Open to anyone.
 pub fn migrate_v2(mint: &Pubkey, user: &Pubkey) -> Instruction {
+    migrate_v2_q(mint, user, (ZEC, TOKEN))
+}
+
+pub fn migrate_v2_q(mint: &Pubkey, user: &Pubkey, q: (Pubkey, Pubkey)) -> Instruction {
     let c = curve(mint);
     let pa = pool_authority(mint);
-    let p = pool(mint);
+    let p = pool_with(mint, &q.0);
     let lp_mint = pda(&[b"pool_lp_mint", p.as_ref()], &PUMP_AMM);
     let boost_vault = pda(&[b"boost_vault", p.as_ref()], &PUMP_AMM);
     Instruction {
@@ -275,24 +301,24 @@ pub fn migrate_v2(mint: &Pubkey, user: &Pubkey) -> Instruction {
             ro(global()),
             rw(WITHDRAW_AUTHORITY),
             ro(*mint),
-            ro(ZEC),
+            ro(q.0),
             rw(c),
             rw(ata(&c, mint, &TOKEN_2022)),
-            rw(ata(&c, &ZEC, &TOKEN)),
+            rw(ata(&c, &q.0, &q.1)),
             rws(*user),
             ro(SYSTEM),
             ro(PUMP_AMM),
             rw(p),
             rw(pa),
             rw(ata(&pa, mint, &TOKEN_2022)),
-            rw(ata(&pa, &ZEC, &TOKEN)),
+            rw(ata(&pa, &q.0, &q.1)),
             ro(amm_global_config()),
             rw(lp_mint),
             rw(ata(&pa, &lp_mint, &TOKEN_2022)),
             rw(ata(&p, mint, &TOKEN_2022)),
-            rw(ata(&p, &ZEC, &TOKEN)),
+            rw(ata(&p, &q.0, &q.1)),
             ro(TOKEN_2022),
-            ro(TOKEN),
+            ro(q.1),
             ro(TOKEN_2022),
             ro(ATA_PROGRAM),
             ro(amm_event_authority()),
@@ -303,7 +329,7 @@ pub fn migrate_v2(mint: &Pubkey, user: &Pubkey) -> Instruction {
             // from a real graduation: PumpSwap's "boost vault" for the pool
             // and its ZEC account.
             rw(boost_vault),
-            rw(ata(&boost_vault, &ZEC, &TOKEN)),
+            rw(ata(&boost_vault, &q.0, &q.1)),
         ],
         data: disc("migrate_v2").to_vec(),
     }
@@ -311,40 +337,58 @@ pub fn migrate_v2(mint: &Pubkey, user: &Pubkey) -> Instruction {
 
 /// The 17 accounts of PumpSwap's v2 trades.
 pub fn pool_trade_accounts(mint: &Pubkey, user: &Pubkey) -> Vec<AccountMeta> {
-    let p = pool(mint);
+    pool_trade_accounts_q(mint, user, (ZEC, TOKEN))
+}
+
+pub fn pool_trade_accounts_q(mint: &Pubkey, user: &Pubkey, q: (Pubkey, Pubkey)) -> Vec<AccountMeta> {
+    let p = pool_with(mint, &q.0);
     vec![
         rw(p),
         rws(*user),
         ro(amm_global_config()),
         ro(*mint),
-        ro(ZEC),
+        ro(q.0),
         rw(ata(user, mint, &TOKEN_2022)),
-        rw(ata(user, &ZEC, &TOKEN)),
+        rw(ata(user, &q.0, &q.1)),
         rw(ata(&p, mint, &TOKEN_2022)),
-        rw(ata(&p, &ZEC, &TOKEN)),
+        rw(ata(&p, &q.0, &q.1)),
         ro(TOKEN_2022),
-        ro(TOKEN),
+        ro(q.1),
         ro(SYSTEM),
         rw(pda(&[b"user_volume_accumulator", user.as_ref()], &PUMP_AMM)),
         ro(pda(&[b"fee_config", PUMP_AMM.as_ref()], &PUMP_FEES)),
-        rw(ata(&BUYBACK, &ZEC, &TOKEN)),
+        rw(ata(&BUYBACK, &q.0, &q.1)),
         ro(amm_event_authority()),
         ro(PUMP_AMM),
     ]
 }
 
 pub fn pool_buy_exact_quote_in(mint: &Pubkey, user: &Pubkey, quote_in: u64, min_out: u64) -> Instruction {
+    pool_buy_exact_quote_in_q(mint, user, quote_in, min_out, (ZEC, TOKEN))
+}
+
+pub fn pool_buy_exact_quote_in_q(
+    mint: &Pubkey,
+    user: &Pubkey,
+    quote_in: u64,
+    min_out: u64,
+    q: (Pubkey, Pubkey),
+) -> Instruction {
     let mut data = disc("buy_exact_quote_in_v2").to_vec();
     data.extend_from_slice(&quote_in.to_le_bytes());
     data.extend_from_slice(&min_out.to_le_bytes());
-    Instruction { program_id: PUMP_AMM, accounts: pool_trade_accounts(mint, user), data }
+    Instruction { program_id: PUMP_AMM, accounts: pool_trade_accounts_q(mint, user, q), data }
 }
 
 pub fn pool_sell(mint: &Pubkey, user: &Pubkey, base_in: u64, min_out: u64) -> Instruction {
+    pool_sell_q(mint, user, base_in, min_out, (ZEC, TOKEN))
+}
+
+pub fn pool_sell_q(mint: &Pubkey, user: &Pubkey, base_in: u64, min_out: u64, q: (Pubkey, Pubkey)) -> Instruction {
     let mut data = disc("sell_v2").to_vec();
     data.extend_from_slice(&base_in.to_le_bytes());
     data.extend_from_slice(&min_out.to_le_bytes());
-    Instruction { program_id: PUMP_AMM, accounts: pool_trade_accounts(mint, user), data }
+    Instruction { program_id: PUMP_AMM, accounts: pool_trade_accounts_q(mint, user, q), data }
 }
 
 /// The fields of a PumpSwap pool that the tests read.

@@ -49,3 +49,5 @@ mod t20_edge_cases;
 mod t21_random_life;
 #[cfg(test)]
 mod t22_shadow_burn;
+#[cfg(test)]
+mod t23_burr_pairs;

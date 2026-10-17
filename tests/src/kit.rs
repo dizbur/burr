@@ -63,6 +63,8 @@ pub struct LaunchPlan {
     pub long_holder_step_bps: u16,
     pub long_holder_max_bps: u16,
     pub shadow_share: u16,
+    /// What the coin is priced in: `burrpad::QUOTE_ZEC` (0) or `burrpad::QUOTE_BURR`.
+    pub quote: u8,
 }
 
 impl Default for LaunchPlan {
@@ -82,6 +84,7 @@ impl Default for LaunchPlan {
             long_holder_step_bps: 0,
             long_holder_max_bps: 0,
             shadow_share: 0,
+            quote: 0,
         }
     }
 }
@@ -189,6 +192,11 @@ impl World {
     }
 
     pub fn launch_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burrpad::accounts::Launch {
+        self.launch_accounts_for(payer, mint, burrpad::QUOTE_ZEC)
+    }
+    /// A launch's accounts for a coin priced in `quote`.
+    pub fn launch_accounts_for(&self, payer: &Pubkey, mint: &Pubkey, quote: u8) -> burrpad::accounts::Launch {
+        let q = if quote == burrpad::QUOTE_BURR { (burrpad::BURR_MINT, TOKEN_2022) } else { (ZEC, TOKEN) };
         let curve = pump::curve(mint);
         let sol_vault = pda(&[b"sol-vault"], &pump::MAYHEM);
         burrpad::accounts::Launch {
@@ -198,8 +206,8 @@ impl World {
             coin: coin(mint),
             ledger: ledger(mint),
             authority: authority(mint),
-            vault: vault(mint),
-            zec_mint: ZEC,
+            vault: ata(&authority(mint), &q.0, &q.1),
+            zec_mint: q.0,
             pump_mint_authority: pda(&[b"mint-authority"], &PUMP),
             bonding_curve: curve,
             associated_bonding_curve: ata(&curve, mint, &TOKEN_2022),
@@ -210,10 +218,10 @@ impl World {
             mayhem_state: pda(&[b"mayhem-state", mint.as_ref()], &pump::MAYHEM),
             mayhem_token_vault: ata(&sol_vault, mint, &TOKEN_2022),
             pump_event_authority: pump::event_authority(),
-            associated_quote_bonding_curve: ata(&curve, &ZEC, &TOKEN),
+            associated_quote_bonding_curve: ata(&curve, &q.0, &q.1),
             quote_control: pump::quote_control(),
             pump_program: PUMP,
-            token_program: TOKEN,
+            token_program: q.1,
             token_2022_program: TOKEN_2022,
             associated_token_program: ATA_PROGRAM,
             system_program: SYSTEM,
@@ -223,7 +231,7 @@ impl World {
     pub fn launch_ix(&self, payer: &Pubkey, mint: &Pubkey, plan: &LaunchPlan) -> Instruction {
         // Unless a test says otherwise, the launcher agrees to the terms in force.
         let cfg = self.config();
-        raw_data(self.launch_accounts(payer, mint), {
+        let mut i = raw_data(self.launch_accounts_for(payer, mint, plan.quote), {
             let args = burrpad::LaunchArgs {
                 name: plan.name.clone(),
                 symbol: "TST".into(),
@@ -235,7 +243,9 @@ impl World {
                 max_platform_fraction_bps: plan.max_platform_fraction_bps.unwrap_or(cfg.platform_fraction_bps),
                 platform_receiver: plan.platform_receiver.unwrap_or(cfg.platform_receiver),
             };
-            if plan.shadow_share > 0 {
+            if plan.quote != 0 {
+                burrpad::instruction::LaunchV5 { args, burr_share: plan.burr_share, quote: plan.quote }.data()
+            } else if plan.shadow_share > 0 {
                 burrpad::instruction::LaunchV4 {
                     args,
                     burr_share: plan.burr_share,
@@ -265,7 +275,20 @@ impl World {
             } else {
                 burrpad::instruction::Launch { args }.data()
             }
-        })
+        });
+        if plan.quote == burrpad::QUOTE_BURR {
+            i.accounts.extend(Self::burr_quote_accounts());
+        }
+        i
+    }
+    /// The four accounts a launch priced in $BURR passes first after the listed
+    /// ones: $BURR's curve, its pool and the pool's two vaults.
+    pub fn burr_quote_accounts() -> Vec<AccountMeta> {
+        let pool = pump::pool(&burrpad::BURR_MINT);
+        [pump::curve(&burrpad::BURR_MINT), pool, ata(&pool, &burrpad::BURR_MINT, &TOKEN_2022), ata(&pool, &ZEC, &TOKEN)]
+            .into_iter()
+            .map(|k| AccountMeta::new_readonly(k, false))
+            .collect()
     }
 
     /// Launches with a mint key chosen beforehand.
@@ -277,8 +300,27 @@ impl World {
     pub fn try_launch(&mut self, plan: &LaunchPlan) -> (Pubkey, TxResult) {
         let mint = Keypair::new();
         let i = self.launch_ix(&self.b.payer.pubkey(), &mint.pubkey(), plan);
-        let r = self.b.send(&[i], &[&mint]);
+        let r = if plan.quote == burrpad::QUOTE_BURR {
+            self.send_launch_tabled(i, &mint)
+        } else {
+            self.b.send(&[i], &[&mint])
+        };
         (mint.pubkey(), r)
+    }
+    /// A launch sent with an address table, as the site sends one: a launch priced in
+    /// $BURR has four more accounts than fit a plain transaction.
+    pub fn send_launch_tabled(&mut self, i: Instruction, mint: &Keypair) -> TxResult {
+        let mut keys: Vec<Pubkey> = vec![i.program_id];
+        for a in &i.accounts {
+            if !a.is_signer && !keys.contains(&a.pubkey) {
+                keys.push(a.pubkey);
+            }
+        }
+        let table = self.b.address_table(&keys);
+        let payer = self.b.payer.insecure_clone();
+        let (size, r) = self.b.send_with_table(&payer, &[i], &[mint], &table);
+        assert!(size <= crate::bench::MAX_TRANSACTION, "a launch of {size} bytes would not fit on the network");
+        r
     }
 
     /// Launches a coin and returns its mint.
@@ -302,8 +344,22 @@ impl World {
         let a = self.b.account(&ledger(mint)).expect("ledger");
         Ledger::try_deserialize(&mut a.data.as_slice()).unwrap()
     }
+    /// The quote mint and its token program a coin is priced in: from its record, ZEC before launch.
+    pub fn quote(&self, mint: &Pubkey) -> (Pubkey, Pubkey) {
+        match self.b.account(&coin(mint)) {
+            Some(a) if Coin::try_deserialize(&mut a.data.as_slice()).unwrap().quote == burrpad::QUOTE_BURR => {
+                (burrpad::BURR_MINT, TOKEN_2022)
+            }
+            _ => (ZEC, TOKEN),
+        }
+    }
+    /// The coin's vault, in its own quote coin.
+    pub fn vault_of(&self, mint: &Pubkey) -> Pubkey {
+        let q = self.quote(mint);
+        ata(&authority(mint), &q.0, &q.1)
+    }
     pub fn vault_balance(&self, mint: &Pubkey) -> u64 {
-        self.b.token_balance(&vault(mint))
+        self.b.token_balance(&self.vault_of(mint))
     }
     pub fn zec_of(&self, owner: &Pubkey) -> u64 {
         self.b.token_balance(&ata(owner, &ZEC, &TOKEN))
@@ -340,13 +396,13 @@ impl World {
     pub fn buy(&mut self, trader: &Keypair, mint: &Pubkey, zec: u64) -> TxResult {
         let ixs = [
             pump::create_ata(&trader.pubkey(), &trader.pubkey(), mint, &TOKEN_2022),
-            pump::buy_exact_quote_in_v3(mint, &trader.pubkey(), zec, 1),
+            pump::buy_exact_quote_in_v3_q(mint, &trader.pubkey(), zec, 1, self.quote(mint)),
         ];
         self.b.send_as(Some(trader), &ixs, &[])
     }
 
     pub fn sell(&mut self, trader: &Keypair, mint: &Pubkey, coins: u64) -> TxResult {
-        let i = pump::sell_v3(mint, &trader.pubkey(), coins, 0);
+        let i = pump::sell_v3_q(mint, &trader.pubkey(), coins, 0, self.quote(mint));
         self.b.send_as(Some(trader), &[i], &[])
     }
 
@@ -355,53 +411,76 @@ impl World {
     /// Buys out the rest of the curve and moves the coin to its PumpSwap pool,
     /// with pump.fun's own instructions, as anyone can.
     pub fn graduate(&mut self, mint: &Pubkey) {
+        let q = self.quote(mint);
         let whale = self.trader(10_000 * 100_000_000);
-        let r = self.buy(&whale, mint, 20 * 100_000_000);
-        assert!(r.is_ok(), "{}", crate::bench::logs(&r));
+        if q.0 == burrpad::BURR_MINT {
+            // A coin priced in $BURR: the whale buys it out in $BURR, a little at a time.
+            self.give_burr(&whale.pubkey(), u64::MAX / 4);
+            for _ in 0..40 {
+                if self.b.curve(mint).complete {
+                    break;
+                }
+                let r = self.buy(&whale, mint, self.b.curve(mint).virtual_quote_reserves / 4);
+                assert!(r.is_ok(), "{}", crate::bench::logs(&r));
+            }
+        } else {
+            let r = self.buy(&whale, mint, 20 * 100_000_000);
+            assert!(r.is_ok(), "{}", crate::bench::logs(&r));
+        }
         assert!(self.b.curve(mint).complete, "the curve should be complete");
         self.b.svm.airdrop(&pump::WITHDRAW_AUTHORITY, 1_000_000_000).unwrap();
-        let i = pump::migrate_v2(mint, &whale.pubkey());
+        let i = pump::migrate_v2_q(mint, &whale.pubkey(), q);
         let r = self.b.send_as(Some(&whale), &[i], &[]);
         assert!(r.is_ok(), "{}", crate::bench::logs(&r));
-        assert!(self.b.account(&pump::pool(mint)).is_some(), "the pool should exist");
+        assert!(self.b.account(&pump::pool_with(mint, &q.0)).is_some(), "the pool should exist");
+    }
+
+    /// Gives `owner` test $BURR, written straight into its $BURR account.
+    pub fn give_burr(&mut self, owner: &Pubkey, amount: u64) {
+        let addr = ata(owner, &burrpad::BURR_MINT, &TOKEN_2022);
+        let prev = self.b.token_balance(&addr);
+        self.b.write_token_account(addr, &burrpad::BURR_MINT, owner, prev + amount, &TOKEN_2022);
     }
 
     pub fn pool(&self, mint: &Pubkey) -> pump::Pool {
-        pump::Pool::read(&self.b.account(&pump::pool(mint)).expect("pool").data)
+        let q = self.quote(mint);
+        pump::Pool::read(&self.b.account(&pump::pool_with(mint, &q.0)).expect("pool").data)
     }
 
-    /// The pool's price figures: (ZEC reserve prices are worked from, coins).
+    /// The pool's price figures: (quote reserve prices are worked from, coins).
     pub fn pool_reserves(&self, mint: &Pubkey) -> (u64, u64) {
-        let p = pump::pool(mint);
-        let q = self.b.token_balance(&ata(&p, &ZEC, &TOKEN)) as i128 + self.pool(mint).virtual_quote_reserves;
+        let qq = self.quote(mint);
+        let p = pump::pool_with(mint, &qq.0);
+        let q = self.b.token_balance(&ata(&p, &qq.0, &qq.1)) as i128 + self.pool(mint).virtual_quote_reserves;
         (q as u64, self.b.token_balance(&ata(&p, mint, &TOKEN_2022)))
     }
 
     pub fn pool_buy(&mut self, trader: &Keypair, mint: &Pubkey, zec: u64) -> TxResult {
         let ixs = [
             pump::create_ata(&trader.pubkey(), &trader.pubkey(), mint, &TOKEN_2022),
-            pump::pool_buy_exact_quote_in(mint, &trader.pubkey(), zec, 1),
+            pump::pool_buy_exact_quote_in_q(mint, &trader.pubkey(), zec, 1, self.quote(mint)),
         ];
         self.b.send_as(Some(trader), &ixs, &[])
     }
 
     pub fn pool_sell(&mut self, trader: &Keypair, mint: &Pubkey, coins: u64) -> TxResult {
-        let i = pump::pool_sell(mint, &trader.pubkey(), coins, 0);
+        let i = pump::pool_sell_q(mint, &trader.pubkey(), coins, 0, self.quote(mint));
         self.b.send_as(Some(trader), &[i], &[])
     }
 
     // ---- collect, split, pay ----
 
     pub fn split_ix(&self, mint: &Pubkey) -> Instruction {
+        let q = self.quote(mint);
         ix(
             burrpad::accounts::SplitOnly {
                 mint: *mint,
                 coin: coin(mint),
                 ledger: ledger(mint),
                 authority: authority(mint),
-                vault: vault(mint),
-                zec_mint: ZEC,
-                token_program: TOKEN,
+                vault: self.vault_of(mint),
+                zec_mint: q.0,
+                token_program: q.1,
             },
             burrpad::instruction::Split {},
         )
@@ -412,6 +491,7 @@ impl World {
     }
 
     pub fn collect_curve_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burrpad::accounts::CollectCurve {
+        let q = self.quote(mint);
         let curve = pump::curve(mint);
         let cv = pump::creator_vault(&authority(mint));
         burrpad::accounts::CollectCurve {
@@ -420,16 +500,16 @@ impl World {
             coin: coin(mint),
             ledger: ledger(mint),
             authority: authority(mint),
-            vault: vault(mint),
-            zec_mint: ZEC,
+            vault: self.vault_of(mint),
+            zec_mint: q.0,
             pump_global: pump::global(),
             bonding_curve: curve,
-            associated_quote_bonding_curve: ata(&curve, &ZEC, &TOKEN),
+            associated_quote_bonding_curve: ata(&curve, &q.0, &q.1),
             creator_vault: cv,
-            creator_vault_ata: ata(&cv, &ZEC, &TOKEN),
+            creator_vault_ata: ata(&cv, &q.0, &q.1),
             pump_event_authority: pump::event_authority(),
             pump_program: PUMP,
-            token_program: TOKEN,
+            token_program: q.1,
             associated_token_program: ATA_PROGRAM,
             system_program: SYSTEM,
         }
@@ -440,7 +520,8 @@ impl World {
     }
 
     pub fn collect_pool_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burrpad::accounts::CollectPool {
-        let pool = pump::pool(mint);
+        let q = self.quote(mint);
+        let pool = pump::pool_with(mint, &q.0);
         let va = pda(&[b"creator_vault", authority(mint).as_ref()], &PUMP_AMM);
         burrpad::accounts::CollectPool {
             payer: *payer,
@@ -448,17 +529,17 @@ impl World {
             coin: coin(mint),
             ledger: ledger(mint),
             authority: authority(mint),
-            vault: vault(mint),
-            zec_mint: ZEC,
+            vault: self.vault_of(mint),
+            zec_mint: q.0,
             amm_global_config: pump::amm_global_config(),
             pool_authority: pump::pool_authority(mint),
             pool,
-            pool_quote_token_account: ata(&pool, &ZEC, &TOKEN),
+            pool_quote_token_account: ata(&pool, &q.0, &q.1),
             amm_creator_vault_authority: va,
-            amm_creator_vault_ata: ata(&va, &ZEC, &TOKEN),
+            amm_creator_vault_ata: ata(&va, &q.0, &q.1),
             amm_event_authority: pump::amm_event_authority(),
             amm_program: PUMP_AMM,
-            token_program: TOKEN,
+            token_program: q.1,
             associated_token_program: ATA_PROGRAM,
             system_program: SYSTEM,
         }
@@ -469,15 +550,16 @@ impl World {
     }
 
     pub fn recover_accounts(&self, mint: &Pubkey, stray: &Pubkey) -> burrpad::accounts::Recover {
+        let q = self.quote(mint);
         burrpad::accounts::Recover {
             mint: *mint,
             coin: coin(mint),
             ledger: ledger(mint),
             authority: authority(mint),
-            vault: vault(mint),
-            zec_mint: ZEC,
+            vault: self.vault_of(mint),
+            zec_mint: q.0,
             stray: *stray,
-            token_program: TOKEN,
+            token_program: q.1,
         }
     }
     pub fn recover(&mut self, mint: &Pubkey, stray: &Pubkey) -> TxResult {
@@ -502,17 +584,18 @@ impl World {
     }
 
     pub fn pay_out_accounts(&self, payer: &Pubkey, mint: &Pubkey, receiver: &Pubkey) -> burrpad::accounts::PayOut {
+        let q = self.quote(mint);
         burrpad::accounts::PayOut {
             payer: *payer,
             mint: *mint,
             coin: coin(mint),
             ledger: ledger(mint),
             authority: authority(mint),
-            vault: vault(mint),
-            zec_mint: ZEC,
+            vault: self.vault_of(mint),
+            zec_mint: q.0,
             receiver: *receiver,
-            receiver_zec: ata(receiver, &ZEC, &TOKEN),
-            token_program: TOKEN,
+            receiver_zec: ata(receiver, &q.0, &q.1),
+            token_program: q.1,
             associated_token_program: ATA_PROGRAM,
             system_program: SYSTEM,
         }
@@ -527,6 +610,7 @@ impl World {
     // ---- buy back and burn ----
 
     pub fn burn_curve_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burrpad::accounts::BurnCurve {
+        let q = self.quote(mint);
         let curve = pump::curve(mint);
         let bn = burner(mint);
         burrpad::accounts::BurnCurve {
@@ -535,21 +619,21 @@ impl World {
             coin: coin(mint),
             ledger: ledger(mint),
             authority: authority(mint),
-            vault: vault(mint),
-            zec_mint: ZEC,
+            vault: self.vault_of(mint),
+            zec_mint: q.0,
             burner: bn,
-            burner_zec: ata(&bn, &ZEC, &TOKEN),
+            burner_zec: ata(&bn, &q.0, &q.1),
             burner_coin: ata(&bn, mint, &TOKEN_2022),
             pump_global: pump::global(),
             bonding_curve: curve,
             associated_base_bonding_curve: ata(&curve, mint, &TOKEN_2022),
-            associated_quote_bonding_curve: ata(&curve, &ZEC, &TOKEN),
+            associated_quote_bonding_curve: ata(&curve, &q.0, &q.1),
             user_volume: pump::user_volume(&bn),
             fee_config: pump::fee_config(),
-            buyback_fee_recipient: ata(&BUYBACK, &ZEC, &TOKEN),
+            buyback_fee_recipient: ata(&BUYBACK, &q.0, &q.1),
             pump_event_authority: pump::event_authority(),
             pump_program: PUMP,
-            token_program: TOKEN,
+            token_program: q.1,
             token_2022_program: TOKEN_2022,
             associated_token_program: ATA_PROGRAM,
             system_program: SYSTEM,
@@ -561,7 +645,8 @@ impl World {
     }
 
     pub fn burn_pool_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burrpad::accounts::BurnPool {
-        let pool = pump::pool(mint);
+        let q = self.quote(mint);
+        let pool = pump::pool_with(mint, &q.0);
         let bn = burner(mint);
         burrpad::accounts::BurnPool {
             payer: *payer,
@@ -569,22 +654,22 @@ impl World {
             coin: coin(mint),
             ledger: ledger(mint),
             authority: authority(mint),
-            vault: vault(mint),
-            zec_mint: ZEC,
+            vault: self.vault_of(mint),
+            zec_mint: q.0,
             burner: bn,
-            burner_zec: ata(&bn, &ZEC, &TOKEN),
+            burner_zec: ata(&bn, &q.0, &q.1),
             burner_coin: ata(&bn, mint, &TOKEN_2022),
             amm_global_config: pump::amm_global_config(),
             pool_authority: pump::pool_authority(mint),
             pool,
             pool_base_token_account: ata(&pool, mint, &TOKEN_2022),
-            pool_quote_token_account: ata(&pool, &ZEC, &TOKEN),
+            pool_quote_token_account: ata(&pool, &q.0, &q.1),
             user_volume: pda(&[b"user_volume_accumulator", bn.as_ref()], &PUMP_AMM),
             fee_config: pda(&[b"fee_config", PUMP_AMM.as_ref()], &PUMP_FEES),
-            buyback_fee_recipient: ata(&BUYBACK, &ZEC, &TOKEN),
+            buyback_fee_recipient: ata(&BUYBACK, &q.0, &q.1),
             amm_event_authority: pump::amm_event_authority(),
             amm_program: PUMP_AMM,
-            token_program: TOKEN,
+            token_program: q.1,
             token_2022_program: TOKEN_2022,
             associated_token_program: ATA_PROGRAM,
             system_program: SYSTEM,
@@ -733,6 +818,8 @@ impl World {
             (coin(&src), coin(&burr)),
             (ledger(&src), ledger(&burr)),
             (vault(&src), vault(&burr)),
+            // Its graduated curve: pump.fun prices a coin quoted in $BURR from it.
+            (pump::curve(&src), pump::curve(&burr)),
         ];
         let rewrite = |mut data: Vec<u8>| {
             for (old, new) in &map {
@@ -750,7 +837,7 @@ impl World {
             data
         };
         let bump = |seeds: &[&[u8]], program: &Pubkey| Pubkey::find_program_address(seeds, program).1;
-        for (old, new) in [map[0], map[2], map[4], map[5], map[6], map[7], map[8]] {
+        for (old, new) in [map[0], map[2], map[4], map[5], map[6], map[7], map[8], map[9]] {
             let mut acct = self.b.account(&old).expect("account to copy");
             acct.data = rewrite(acct.data);
             if new == new_pool {
@@ -772,6 +859,29 @@ impl World {
             self.b.svm.set_account(new, acct).unwrap();
         }
         src
+    }
+
+    pub fn burn_burr_pot_accounts(&self, mint: &Pubkey) -> burrpad::accounts::BurnBurrPot {
+        burrpad::accounts::BurnBurrPot {
+            mint: *mint,
+            coin: coin(mint),
+            ledger: ledger(mint),
+            authority: authority(mint),
+            vault: ata(&authority(mint), &burrpad::BURR_MINT, &TOKEN_2022),
+            burr_mint: burrpad::BURR_MINT,
+            token_2022_program: TOKEN_2022,
+        }
+    }
+    /// `burn_burr_pot`: a coin priced in $BURR burns its $BURR pot as it is.
+    pub fn burn_burr_pot(&mut self, mint: &Pubkey) -> TxResult {
+        let i = ix(self.burn_burr_pot_accounts(mint), burrpad::instruction::BurnBurrPot {});
+        self.b.send(&[i], &[])
+    }
+    /// A wallet with SOL and `burr` units of test $BURR.
+    pub fn burr_trader(&mut self, burr: u64) -> Keypair {
+        let k = self.b.wallet();
+        self.give_burr(&k.pubkey(), burr);
+        k
     }
 
     pub fn burn_burr_accounts(&self, payer: &Pubkey, mint: &Pubkey) -> burrpad::accounts::BurnBurr {
@@ -832,6 +942,7 @@ impl World {
     // ---- holders ----
 
     pub fn release_accounts(&self, wallet: &Pubkey, mint: &Pubkey) -> burrpad::accounts::ReleaseHolderRewards {
+        let q = self.quote(mint);
         burrpad::accounts::ReleaseHolderRewards {
             rewards_wallet: *wallet,
             config: config(),
@@ -839,10 +950,10 @@ impl World {
             coin: coin(mint),
             ledger: ledger(mint),
             authority: authority(mint),
-            vault: vault(mint),
-            zec_mint: ZEC,
-            rewards_zec: ata(wallet, &ZEC, &TOKEN),
-            token_program: TOKEN,
+            vault: self.vault_of(mint),
+            zec_mint: q.0,
+            rewards_zec: ata(wallet, &q.0, &q.1),
+            token_program: q.1,
             associated_token_program: ATA_PROGRAM,
             system_program: SYSTEM,
         }
