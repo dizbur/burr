@@ -791,7 +791,7 @@ STRUCT_TEST = {
     "SetShadowWatch": "t22_shadow_burn::only_the_launcher_sets_the_watch_and_only_sensible_lists",
     "FollowWallet": T_FOLLOW,
     "ShadowBurn": "t22_shadow_burn::shadow_burn_takes_only_this_coins_watch_pot_and_the_watched_accounts",
-    "BurnBurrPot": "t23_burr_pairs::a_burr_coin_s_burr_share_is_burned_as_it_is",
+    "BurnBurrPot": "t23_burr_pairs::burn_burr_pot_takes_only_this_coins_record_ledger_vault_and_burr",
     "ReleaseHolderRewards": "release_holder_rewards", "Recover": "recover",
 }
 CONSTRAINT_KEYS = ("seeds", "bump", "address", "associated_token::", "token::", "mint::", "has_one", "constraint")

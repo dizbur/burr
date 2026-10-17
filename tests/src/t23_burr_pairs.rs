@@ -360,3 +360,53 @@ fn the_buy_back_receivers_account_must_be_shaped_as_its_program_makes_it() {
     let r = w.burn_curve(&zec_coin);
     assert!(r.is_ok(), "{}", logs(&r));
 }
+
+#[test]
+fn burn_burr_pot_takes_only_this_coins_record_ledger_vault_and_burr() {
+    let (mut w, mint, _) = traded();
+    // Another $BURR coin, with a fuller $BURR pot.
+    let other = w.launch(&burr_plan());
+    w.give_burr(&kit::authority(&other), 5_000_000 * BURR);
+    assert!(w.split(&other).is_ok());
+    let auth = kit::authority(&mint);
+    type A = burrpad::accounts::BurnBurrPot;
+    let swaps: Vec<(&str, Box<dyn Fn(&mut A)>)> = vec![
+        ("another coin's ledger", Box::new(|x| x.ledger = kit::ledger(&other))),
+        ("another coin's record", Box::new(|x| x.coin = kit::coin(&other))),
+        ("another coin's vault", Box::new(|x| x.vault = ata(&kit::authority(&other), &BURR_MINT, &TOKEN_2022))),
+        ("another coin's authority", Box::new(|x| x.authority = kit::authority(&other))),
+        ("the mint of another coin", Box::new(|x| x.mint = other)),
+        ("ZEC for $BURR", Box::new(|x| x.burr_mint = ZEC)),
+        ("the coin's own mint for $BURR", Box::new(move |x| x.burr_mint = mint)),
+        ("a ZEC account for the vault", Box::new(move |x| x.vault = ata(&auth, &ZEC, &TOKEN))),
+        ("Token for Token-2022", Box::new(|x| x.token_2022_program = TOKEN)),
+    ];
+    let before = (
+        w.ledger(&mint),
+        w.ledger(&other),
+        w.vault_balance(&mint),
+        w.vault_balance(&other),
+        w.b.mint_supply(&BURR_MINT),
+    );
+    for (what, change) in swaps {
+        let mut acc = w.burn_burr_pot_accounts(&mint);
+        change(&mut acc);
+        let i = kit::raw(acc, burrpad::instruction::BurnBurrPot {});
+        assert!(w.b.send(&[i], &[]).is_err(), "{what} was accepted");
+    }
+    assert_eq!(
+        (
+            w.ledger(&mint).burr.pot,
+            w.ledger(&other).burr.pot,
+            w.vault_balance(&mint),
+            w.vault_balance(&other),
+            w.b.mint_supply(&BURR_MINT)
+        ),
+        (before.0.burr.pot, before.1.burr.pot, before.2, before.3, before.4),
+        "nothing moved"
+    );
+    let r = w.burn_burr_pot(&mint);
+    assert!(r.is_ok(), "with its own accounts it burns\n{}", logs(&r));
+    w.assert_sound(&mint);
+    w.assert_sound(&other);
+}
