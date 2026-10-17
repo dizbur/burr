@@ -364,11 +364,16 @@ fn the_buy_back_receivers_account_must_be_shaped_as_its_program_makes_it() {
 #[test]
 fn burn_burr_pot_takes_only_this_coins_record_ledger_vault_and_burr() {
     let (mut w, mint, _) = traded();
-    // Another $BURR coin, with a fuller $BURR pot.
+    // Another $BURR coin, with a smaller $BURR pot than this coin's vault holds, so that a swap
+    // stopped by nothing else would go through.
     let other = w.launch(&burr_plan());
-    w.give_burr(&kit::authority(&other), 5_000_000 * BURR);
+    w.give_burr(&kit::authority(&other), 1_000 * BURR);
     assert!(w.split(&other).is_ok());
+    assert!(w.ledger(&other).burr.pot > 0 && w.ledger(&other).burr.pot < w.vault_balance(&mint));
     let auth = kit::authority(&mint);
+    // An account of this coin's authority for the coin itself, filled (anyone can make and fill one).
+    let own = ata(&auth, &mint, &TOKEN_2022);
+    w.b.write_token_account(own, &mint, &auth, w.ledger(&mint).burr.pot * 10, &TOKEN_2022);
     type A = burrpad::accounts::BurnBurrPot;
     let swaps: Vec<(&str, Box<dyn Fn(&mut A)>)> = vec![
         ("another coin's ledger", Box::new(|x| x.ledger = kit::ledger(&other))),
@@ -378,6 +383,13 @@ fn burn_burr_pot_takes_only_this_coins_record_ledger_vault_and_burr() {
         ("the mint of another coin", Box::new(|x| x.mint = other)),
         ("ZEC for $BURR", Box::new(|x| x.burr_mint = ZEC)),
         ("the coin's own mint for $BURR", Box::new(move |x| x.burr_mint = mint)),
+        (
+            "the coin's own mint for $BURR, with the authority's account for it as the vault",
+            Box::new(move |x| {
+                x.burr_mint = mint;
+                x.vault = own;
+            }),
+        ),
         ("a ZEC account for the vault", Box::new(move |x| x.vault = ata(&auth, &ZEC, &TOKEN))),
         ("Token for Token-2022", Box::new(|x| x.token_2022_program = TOKEN)),
     ];
