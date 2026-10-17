@@ -110,7 +110,7 @@ impl Life {
         let table = w.b.address_table(&kit::fixed_accounts());
         let mut life = Life { w, coins: vec![], payout_wallet, trader, table, released: [0; 2], did: [0; 7] };
         // Coins priced in $BURR: the trader holds $BURR, and pump.fun's buy-back receiver a $BURR account.
-        life.w.give_burr(&life.trader.pubkey(), 1 << 60);
+        life.w.give_burr(&life.trader.pubkey(), 1 << 50);
         life.w.give_burr(&crate::pump::BUYBACK, 0);
         // $BURR's own coin, with its receivers as recorded.
         let c = life.w.coin(&BURR_MINT);

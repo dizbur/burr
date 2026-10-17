@@ -417,13 +417,15 @@ impl World {
         let q = self.quote(mint);
         let whale = self.trader(10_000 * 100_000_000);
         if q.0 == burrpad::BURR_MINT {
-            // A coin priced in $BURR: the whale buys it out in $BURR, a little at a time.
-            self.give_burr(&whale.pubkey(), 1 << 58);
+            // A coin priced in $BURR: the whale buys it out in $BURR, a little at a time, given
+            // each time what that buy takes (however low $BURR's price has gone on the bench).
             for _ in 0..40 {
                 if self.b.curve(mint).complete {
                     break;
                 }
-                let r = self.buy(&whale, mint, self.b.curve(mint).virtual_quote_reserves / 4);
+                let spend = self.b.curve(mint).virtual_quote_reserves / 4;
+                self.give_burr(&whale.pubkey(), spend);
+                let r = self.buy(&whale, mint, spend);
                 assert!(r.is_ok(), "{}", crate::bench::logs(&r));
             }
         } else {
