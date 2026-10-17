@@ -100,5 +100,12 @@ trader.toBuffer().copy(token, 32);
 token.writeBigUInt64LE(100_000n * 100_000_000n, 64);
 token[108] = 1;
 writeAccount("trader_zec", ata(trader, ZEC, TOKEN).toBase58(), TOKEN.toBase58(), 2039280, token);
+// 10 million test $BURR for the trader, for coins priced in $BURR: a Token-2022 account that exists only locally.
+const burrToken = Buffer.alloc(165);
+BURR.toBuffer().copy(burrToken, 0);
+trader.toBuffer().copy(burrToken, 32);
+burrToken.writeBigUInt64LE(10_000_000n * 1_000_000n, 64);
+burrToken[108] = 1;
+writeAccount("trader_burr", ata(trader, BURR, TOKEN_2022).toBase58(), TOKEN_2022.toBase58(), 2039280, burrToken);
 console.error(`copied ${copied} accounts and ${programs.length} programs; settings ${configAddress(idl).toBase58()}`);
 console.log(args.join("\n"));

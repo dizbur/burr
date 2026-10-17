@@ -113,6 +113,11 @@ echo "-- private creator payouts opened with admin.mjs: set by the administrator
 solana airdrop 1 "$(addr payout)" --url "$url" >/dev/null
 node "$kit/admin.mjs" set-creator-payout-wallet "$(addr payout)" --admin-key "$(key standin)" | grep -E "PASS|STOPPED|creator payout"
 node "$kit/admin.mjs" confirm-creator-payout-wallet --admin-key "$(key payout)" | grep -E "PASS|STOPPED|creator payout"
+if grep -q '"burn_burr_pot"' "$work/second/target/release-kit/burrpad.json"; then
+  echo "-- before the first coin priced in \$BURR, the owner's two steps: pump.fun's buy-back receivers' \$BURR accounts, and the second address table"
+  node "$kit/burr-buyback-accounts.mjs" --payer "$(key deployer)" --send yes | grep -E "PASS|FAIL|receivers|costs"
+  node "$kit/burr-table.mjs" --payer "$(key deployer)" | grep -E "PASS|FAIL|TABLE"
+fi
 node "$kit/rehearsal/dress.mjs" after --payer "$(key deployer)" --coins "$coins" --out "$work/after.json" --payout-wallet "$(addr payout)" | grep -v "^Network:"
 if grep -q "at least one burn was simulated all the way through the buy" <(grep "^FAIL" "$work/after-upgrade-1.txt"); then
   echo "-- the after-upgrade check again, adding the coins launched just now (their burn pots hold ZEC)"

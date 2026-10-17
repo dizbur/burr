@@ -7,8 +7,8 @@
 import { Keypair, PublicKey } from "@solana/web3.js";
 import { writeFileSync } from "node:fs";
 import {
-  addLiquidityIx, BURR, burnBurrIx, coinTransferIx, followWalletIx, poolBuyIx, poolSellIx, setShadowWatchIx, shadowBurnIx, supplyOf, burnCurveIx, burnPoolIx, buyIx, clock, coinAccount, collectCurveIx, collectPoolIx, curveOf, launchIx, migrateIx, poolOf,
-  makeTokenAccountIx, payOutIx, splitIx, tokenBalance, zecAccount, zecTransferIx,
+  addLiquidityIx, BURR, burnBurrIx, burnBurrPotIx, quoteParts, coinTransferIx, followWalletIx, poolBuyIx, poolSellIx, setShadowWatchIx, shadowBurnIx, supplyOf, burnCurveIx, burnPoolIx, buyIx, clock, coinAccount, collectCurveIx, collectPoolIx, curveOf, launchIx, migrateIx, poolOf,
+  makeTokenAccountIx, payOutIx, sellIx, splitIx, tokenBalance, zecAccount, zecTransferIx,
 } from "../coin.mjs";
 import { address, ata, coinAddresses, connect, fail, loadIdl, loadKey, loadTable, need, options, pda, PUMP_AMM, readAccount, readOut, send, TOKEN, TOKEN_2022, ZEC } from "../lib.mjs";
 
@@ -26,7 +26,11 @@ const text = (x) => JSON.parse(JSON.stringify(x, (_, v) => (typeof v === "bigint
 const books = async (mint) => {
   const a = coinAddresses(idl, mint);
   const l = await readAccount(conn, idl, "Ledger", a.ledger);
-  return { vault: String(await tokenBalance(conn, a.vault)), ledger: l ? text(l) : null };
+  // The vault is in the coin's own quote coin (ZEC for every coin before $BURR pairs).
+  const c = await readAccount(conn, idl, "Coin", a.coin);
+  const q = quoteParts(Number(c?.quote ?? 0));
+  const vault = await tokenBalance(conn, ata(a.authority, q.mint, q.program)).catch(() => 0n);
+  return { vault: String(vault), ledger: l ? text(l) : null };
 };
 const results = [];
 const step = async (name, mint, ixs, signers = [payer], sendOpts = {}) => {
@@ -65,13 +69,13 @@ for (const mint of mints) {
 // New coins: a plain launch with a first buy, as the site does it today.
 const plan = { name: "Dress rehearsal", symbol: "DRESS", uri: "https://example.invalid/" + "x".repeat(76), fee_bps: 200,
   shares: [2500, 2500, 2500, 2500], creator_receiver: me, give_receiver: me };
-const launchWithBuy = async (name, p, makeOwnAccount) => {
+const launchWithBuy = async (name, p, makeOwnAccount, tables = table, firstBuy = 1_000_000n) => {
   const mint = Keypair.generate();
   const ixs = makeOwnAccount
     ? [await launchIx(conn, idl, mint.publicKey, me, p, { makeOwnAccount: true })]
     : [await launchIx(conn, idl, mint.publicKey, me, p), makeTokenAccountIx(me, me, mint.publicKey, TOKEN_2022)];
-  ixs.push(buyIx(mint.publicKey, me, 1_000_000n, 1n));
-  await step(name, mint.publicKey, ixs, [payer, mint], { table });
+  ixs.push(buyIx(mint.publicKey, me, firstBuy, 1n, p.quote ?? 0));
+  await step(name, mint.publicKey, ixs, [payer, mint], { table: tables });
   const bought = await tokenBalance(conn, coinAccount(me, mint.publicKey)).catch(() => 0n);
   results.at(-1).bought = String(bought);
   return mint.publicKey;
@@ -151,6 +155,33 @@ if (phase === "after" && idl.instructions.some((i) => i.name === "shadow_burn"))
   await step("follow_wallet: the keeper follows where the watched wallet sent", m, [followWalletIx(idl, m, me, 0, me, fresh)]);
   const after = await readAccount(conn, idl, "ShadowWatch", pda(["shadow", m], idl.programId));
   console.log(`      watched wallets now ${after.count}; the new one recorded at ${after.held[1]} (sent ${sold / 4n})`);
+}
+
+// Coins priced in $BURR (when the build has them): launched with a first buy through the second address
+// table, traded in $BURR, and every first-cut hook run on them. The buy-back receivers' $BURR accounts and
+// the table were made beforehand by the owner's own scripts (burr-buyback-accounts.mjs, burr-table.mjs).
+if (phase === "after" && idl.instructions.some((i) => i.name === "burn_burr_pot")) {
+  const burrTable = await loadTable(conn, address(readOut(conn.outName).burr_table, "saved $BURR table"));
+  const both = [table, burrTable];
+  const B = (n) => BigInt(n) * 1_000_000n;
+  const m = await launchWithBuy("launch_v5 priced in $BURR, with a first buy in $BURR", { ...plan, shares: [2000, 2000, 2000, 2000], burr_share: 2000, quote: 1 }, true, both, B(10_000));
+  const coin = await readAccount(conn, idl, "Coin", coinAddresses(idl, m).coin);
+  console.log(`      recorded: priced in ${coin.quote === 1 ? "$BURR" : coin.quote}, $BURR share ${coin.burr_share}`);
+  await step("buy in $BURR", m, [buyIx(m, me, B(200_000), 1n, 1)], [payer], { table: both, units: 400_000 });
+  const half = (await tokenBalance(conn, coinAccount(me, m))) / 2n;
+  await step("sell half back for $BURR", m, [sellIx(m, me, half, 0n, 1)], [payer], { table: both, units: 400_000 });
+  await step("collect_curve ($BURR coin)", m, [collectCurveIx(idl, m, me, 1)], [payer], { table: both });
+  await step("split ($BURR coin)", m, [splitIx(idl, m, 1)]);
+  for (const payee of ["Platform", "Creator", "Give"]) {
+    const receiver = payee === "Platform" ? new PublicKey(coin.platform_receiver) : me;
+    await step(`pay_out ${payee} in $BURR`, m, [payOutIx(idl, m, me, payee, receiver, 1)], [payer], { table: both });
+  }
+  await waitForBurn(m);
+  await step("burn_curve with $BURR", m, [burnCurveIx(idl, m, me, 1)], [payer], { table: both, units: 900_000 });
+  const supply0 = await supplyOf(conn, BURR);
+  const pot = (await readAccount(conn, idl, "Ledger", coinAddresses(idl, m).ledger)).burr.pot;
+  await step("burn_burr_pot: the $BURR share burned as it is", m, [burnBurrPotIx(idl, m)]);
+  console.log(`      $BURR pot ${pot}; $BURR supply fell by ${supply0 - (await supplyOf(conn, BURR))}`);
 }
 
 writeFileSync(need(opts, "out"), JSON.stringify(results, null, 1));
