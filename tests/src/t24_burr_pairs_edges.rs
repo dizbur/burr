@@ -313,3 +313,62 @@ fn before_pump_s_buy_back_receiver_has_a_burr_account_a_burr_coin_s_burn_waits_a
     assert!(r.is_ok(), "{}", logs(&r));
     assert!(w.ledger(&mint).pots[3] < pot);
 }
+
+#[test]
+fn a_side_account_of_the_authority_with_the_same_mint_is_never_taken_for_the_vault() {
+    // Anyone can make the coin's authority another account for its quote coin and fill it. Passed in the
+    // vault's place it would pay for a buy, a release or a burn that the books take from the pots.
+    let mut w = burr_world();
+    let mint = w.launch(&LaunchPlan { liquidity_share: 0, ..burr_plan() });
+    let t = w.burr_trader(10_000_000 * BURR);
+    assert!(w.buy(&t, &mint, 500_000 * BURR).is_ok());
+    assert!(w.collect_curve(&mint).is_ok());
+    let auth = kit::authority(&mint);
+    let side = Keypair::new().pubkey();
+    w.b.write_token_account(side, &BURR_MINT, &auth, 1_000_000 * BURR, &TOKEN_2022);
+    let payer = w.b.payer.pubkey();
+    let wallet = w.rewards_wallet.insecure_clone();
+    w.b.wait(1_800);
+    let books =
+        |w: &World| (w.ledger(&mint), w.vault_balance(&mint), w.b.token_balance(&side), w.b.mint_supply(&BURR_MINT));
+    let before = books(&w);
+    // The burn on the curve.
+    let mut acc = w.burn_curve_accounts(&payer, &mint);
+    acc.vault = side;
+    assert!(w.b.send(&[kit::raw(acc, burrpad::instruction::BurnCurve {})], &[]).is_err(), "burn_curve");
+    // The holder release.
+    let mut acc = w.release_accounts(&wallet.pubkey(), &mint);
+    acc.vault = side;
+    let i = kit::raw(
+        acc,
+        burrpad::instruction::ReleaseHolderRewards { amount: 1, snapshot_slot: w.slot(), snapshot_hash: [7; 32] },
+    );
+    assert!(w.b.send_as(Some(&wallet), &[i], &[]).is_err(), "release");
+    // The $BURR pot burn.
+    let mut acc = w.burn_burr_pot_accounts(&mint);
+    acc.vault = side;
+    assert!(w.b.send(&[kit::raw(acc, burrpad::instruction::BurnBurrPot {})], &[]).is_err(), "burn_burr_pot");
+    let after = books(&w);
+    assert_eq!(
+        (after.0.accounted, after.0.pots, after.1, after.2, after.3),
+        (before.0.accounted, before.0.pots, before.1, before.2, before.3),
+        "nothing moved"
+    );
+    // With the vault itself, each of them goes through.
+    assert!(w.ledger(&mint).pots[4] > 0 && w.ledger(&mint).burr.pot > 0);
+    assert!(w.burn_curve(&mint).is_ok());
+    assert!(w.release_holders(&mint).is_ok());
+    assert!(w.burn_burr_pot(&mint).is_ok());
+    // The burn on the pool, once graduated.
+    w.graduate(&mint);
+    assert!(w.pool_buy(&t, &mint, 200_000 * BURR).is_ok());
+    assert!(w.collect_pool(&mint).is_ok());
+    w.b.wait(60);
+    let before = books(&w);
+    let mut acc = w.burn_pool_accounts(&payer, &mint);
+    acc.vault = side;
+    assert!(w.b.send(&[kit::raw(acc, burrpad::instruction::BurnPool {})], &[]).is_err(), "burn_pool");
+    let after = books(&w);
+    assert_eq!((after.0.accounted, after.1, after.2), (before.0.accounted, before.1, before.2));
+    assert!(w.burn_pool(&mint).is_ok());
+}

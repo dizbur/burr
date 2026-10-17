@@ -858,6 +858,7 @@ def auto_entries():
                 # A few are held by a sharper test than the general substitution one.
                 third = "t23_burr_pairs::a_third_coin_in_the_place_of_the_quote_coin_is_refused_everywhere"
                 swap = "t23_burr_pairs::a_burr_coin_s_accounts_cannot_be_swapped_for_zec_ones_or_the_other_way"
+                side = "t24_burr_pairs_edges::a_side_account_of_the_authority_with_the_same_mint_is_never_taken_for_the_vault"
                 test_for = {
                     ("PayOut", "vault"): "t15_random_sequences::the_books_close_after_every_step_of_any_sequence",
                     # The coin's quote mint: only it stops a third coin on the same token program.
@@ -868,6 +869,8 @@ def auto_entries():
                     # The coin's quote token program: swapped for the other quote coin's.
                     ("SplitOnly", "token_program"): swap,
                     ("PayOut", "token_program"): swap,
+                    # The vault: only it stops another account of the authority's, of the same coin.
+                    **{(st, "vault"): side for st in ("BurnCurve", "BurnPool", "BurnBurrPot", "ReleaseHolderRewards")},
                 }.get((struct, field), test)
                 out.append(dict(
                     id=f"X.{struct}.{field}", what=f"{struct}: `{field}` must be the right account",
@@ -1052,7 +1055,8 @@ def second_line(entry_id):
         return ("the token program refuses a transfer out of any account the coin's authority does not own, or of another "
                 "mint, and the framework refuses the vault passed twice")
     if field == "vault":
-        return "the token program refuses: the signer does not own that account"
+        return ("the token program refuses an account the coin's authority does not own, or of another mint; only the "
+                "vault check refuses another account the authority owns with the same mint, and its own test holds that")
     if field in ("pump_global", "amm_global_config"):
         return "the buy-back check reads this account and requires pump.fun's owner and its settings code"
     if struct in ("BurnPool", "BurnBurr", "AddLiquidity") and field in ("pool_base_token_account", "pool_quote_token_account"):
